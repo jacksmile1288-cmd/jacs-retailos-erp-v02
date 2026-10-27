@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Remix Remix JacS ERP Enterprise",
+  "description": "Enterprise Multi-User ERP \u0026 POS System with Google Sheets Database integration",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
