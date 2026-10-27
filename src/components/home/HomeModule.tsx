@@ -288,7 +288,21 @@ const ROLE_MODULES: RoleModuleData[] = [
 // Array 6 kartu divisi operasional Beranda (modulesList)
 export const modulesList = ROLE_MODULES;
 
-export const HomeModule: React.FC = () => {
+export 
+  const handleDivisionClick = (division: any) => {
+    // 1. Belum login -> Minta PIN
+      if (typeof openAuthModal === 'function') openAuthModal(division.tabKey || division.id);
+      return;
+    }
+    // 2. Owner & Superadmin -> Bebas akses
+    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
+    if (isSuper || currentUser.role === division.roleKey || currentUser.role === division.id) {
+      if (typeof setActiveTab === 'function') setActiveTab(division.tabKey || division.id);
+    } else {
+      alert('Akses Terkunci: Akun Anda tidak memiliki wewenang untuk membuka divisi ini.');
+    }
+  };
+const HomeModule: React.FC = () => {
   const {
     theme,
     language,
