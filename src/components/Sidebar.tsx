@@ -60,7 +60,50 @@ const PROTECTED_MODULE_NAMES: Record<string, { id: string; en: string }> = {
   'admin': { id: 'Super Admin', en: 'Super Admin' },
 };
 
-export const Sidebar: React.FC<{ isOpenMobile: boolean; onCloseMobile: () => void }> = ({
+export const Sidebar: React.FC<{
+  const handleProtectedNav = (targetTab: string) => {
+    if (targetTab === 'home') {
+      setActiveTab('home');
+      return;
+    }
+
+    const divisionRoleMap: Record<string, string> = {
+      'executive': 'manager',
+      'hr': 'hr_staff',
+      'finance': 'finance_staff',
+      'purchasing': 'purchasing_staff',
+      'inventory': 'warehouse_staff',
+      'pos': 'cashier',
+      'dashboard': 'manager',
+      'master': 'superadmin'
+    };
+
+    const targetRole = divisionRoleMap[targetTab];
+
+    // Jika belum login, paksa buka Auth Modal PIN
+    if (!currentUser) {
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      }
+      return;
+    }
+
+    // Role Owner & Superadmin bebas akses semua
+    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
+
+    // Jika user sedang login di divisinya sendiri, izinkan kembali
+    if (isSuper || (targetRole && currentUser.role === targetRole)) {
+      setActiveTab(targetTab);
+    } else {
+      // Tolak jika staf mencoba melintas ke divisi lain, minta PIN otorisasi
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      } else {
+        alert('Akses Privasi Terkunci: Masukkan PIN divisi yang bersangkutan.');
+      }
+    }
+  };
+ isOpenMobile: boolean; onCloseMobile: () => void }> = ({
   isOpenMobile,
   onCloseMobile,
 }) => {
