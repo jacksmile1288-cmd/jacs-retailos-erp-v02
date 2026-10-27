@@ -367,6 +367,86 @@ const HomeModule: React.FC = () => {
     setIsDetailModalOpen(true);
   };
 
+  
+  const handleOpenDivisionModule = (division: any) => {
+    const tabMap: Record<string, string> = {
+      'executive': 'executive',
+      'hr': 'hr',
+      'finance': 'finance',
+      'purchasing': 'purchasing',
+      'warehouse': 'inventory',
+      'pos': 'pos'
+    };
+    const targetTab = tabMap[division.id] || division.id;
+
+    // Jika belum login, paksa buka modal PIN
+    if (!currentUser) {
+      if (typeof openAuthModal === 'function') openAuthModal(targetTab);
+      return;
+    }
+
+    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
+    const roleMap: Record<string, string> = {
+      'executive': 'manager',
+      'hr': 'hr_staff',
+      'finance': 'finance_staff',
+      'purchasing': 'purchasing_staff',
+      'warehouse': 'warehouse_staff',
+      'pos': 'cashier'
+    };
+    const allowed = roleMap[division.id];
+
+    // Hanya izinkan masuk jika role sesuai divisinya atau Superadmin/Owner
+    if (isSuper || currentUser.role === allowed) {
+      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
+    } else {
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      } else {
+        alert('Akses Dibatasi: Masukkan PIN otorisasi untuk divisi ini.');
+      }
+    }
+  };
+
+  
+  const handleEnterDivision = (division: any) => {
+    const tabMap: Record<string, string> = {
+      'executive': 'executive',
+      'hr': 'hr',
+      'finance': 'finance',
+      'purchasing': 'purchasing',
+      'warehouse': 'inventory',
+      'pos': 'pos'
+    };
+    const targetTab = tabMap[division.id] || division.id;
+
+    if (!currentUser) {
+      if (typeof openAuthModal === 'function') openAuthModal(targetTab);
+      return;
+    }
+
+    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
+    const roleMap: Record<string, string> = {
+      'executive': 'manager',
+      'hr': 'hr_staff',
+      'finance': 'finance_staff',
+      'purchasing': 'purchasing_staff',
+      'warehouse': 'warehouse_staff',
+      'pos': 'cashier'
+    };
+    const allowed = roleMap[division.id];
+
+    if (isSuper || currentUser.role === allowed) {
+      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
+    } else {
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      } else {
+        alert('Akses Dibatasi: Modul ini memerlukan PIN otorisasi divisi terkait.');
+      }
+    }
+  };
+
   return (
     <div id="home-module-container" className="w-full max-w-[1360px] mx-auto flex flex-col space-y-4 xl:space-y-5">
       {/* 1. DYNAMIC STORE BRANDING & OPERATIONAL HEADER */}
