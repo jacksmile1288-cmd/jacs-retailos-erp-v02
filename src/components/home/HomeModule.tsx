@@ -533,7 +533,7 @@ const HomeModule: React.FC = () => {
                   className="text-cyan-600 hover:text-cyan-700 font-bold dark:text-cyan-400 dark:hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer py-0.5"
                   title={isEn ? 'View Juklak & SOP Guidelines' : 'Lihat Juklak & SOP Operasional'}
                 >
-                  <span className="hover:underline">{isEn ? 'View Juklak & SOP' : 'Baca Juklak & SOP'}</span>
+                  <span className="hover:underline">{isEn ? 'Open Module' : 'Buka Modul'}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
