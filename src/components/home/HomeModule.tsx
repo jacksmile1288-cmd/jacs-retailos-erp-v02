@@ -447,6 +447,49 @@ const HomeModule: React.FC = () => {
     }
   };
 
+  
+  const handleDivisionAuthAccess = (division: any) => {
+    const tabMap: Record<string, string> = {
+      'executive': 'executive',
+      'hr': 'hr',
+      'finance': 'finance',
+      'purchasing': 'purchasing',
+      'warehouse': 'inventory',
+      'pos': 'pos'
+    };
+    const targetTab = tabMap[division.id] || division.id;
+
+    if (!currentUser) {
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      } else if (typeof setActiveTab === 'function') {
+        setActiveTab(targetTab);
+      }
+      return;
+    }
+
+    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
+    const roleMap: Record<string, string> = {
+      'executive': 'manager',
+      'hr': 'hr_staff',
+      'finance': 'finance_staff',
+      'purchasing': 'purchasing_staff',
+      'warehouse': 'warehouse_staff',
+      'pos': 'cashier'
+    };
+    const allowed = roleMap[division.id];
+
+    if (isSuper || currentUser.role === allowed) {
+      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
+    } else {
+      if (typeof openAuthModal === 'function') {
+        openAuthModal(targetTab);
+      } else {
+        alert('Akses Terkunci: Modul ini memerlukan PIN otorisasi divisi terkait.');
+      }
+    }
+  };
+
   return (
     <div id="home-module-container" className="w-full max-w-[1360px] mx-auto flex flex-col space-y-4 xl:space-y-5">
       {/* 1. DYNAMIC STORE BRANDING & OPERATIONAL HEADER */}
@@ -611,7 +654,7 @@ const HomeModule: React.FC = () => {
                     handleCardClick(role);
                   }}
                   className="text-cyan-600 hover:text-cyan-700 font-bold dark:text-cyan-400 dark:hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer py-0.5"
-                  title={isEn ? 'View Juklak & SOP Guidelines' : 'Lihat Juklak & SOP Operasional'}
+                  title={isEn ? 'Buka Modul Guidelines' : 'Lihat Juklak & SOP Operasional'}
                 >
                   <span className="hover:underline">{isEn ? 'Open Module' : 'Buka Modul'}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
