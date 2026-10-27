@@ -1,3 +1,15 @@
+
+const STORAGE_KEY_BUSINESS_PROFILE = 'jacs_business_profile_v1';
+
+export const loadStoredBusinessProfile = (fallback: any) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BUSINESS_PROFILE);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load stored business profile', e);
+  }
+  return fallback;
+};
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { calculateMemberTierLevel } from '../utils/loyaltyUtils';
 import {
@@ -2348,7 +2360,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     exitSuperAdminSession();
   };
 
-  const updateBusinessProfile = (profile: Partial<BusinessEntityProfile>) => {
+  const updateBusinessProfile = (newProfile: any) => {
+    setBusinessProfile((prev: any) => {
+      const updated = { ...prev, ...newProfile };
+      try {
+        localStorage.setItem(STORAGE_KEY_BUSINESS_PROFILE, JSON.stringify(updated));
+      } catch (err) {
+        console.error('Storage save error', err);
+      }
+      return updated;
+    });
     setBusinessProfile((prev) => {
       const merged = { ...prev, ...profile, isConfigured: true };
       const isHybrid = isHybridArchitecture(merged.cashierArchitecture);

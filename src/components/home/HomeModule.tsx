@@ -507,7 +507,7 @@ const HomeModule: React.FC = () => {
             'KHANSA SWALAYAN';
           const companyAddress =
             businessProfile?.address?.trim() ||
-            '{businessProfile?.address || "{businessProfile?.address || "Jl. Berua Raya"}"} No. 1, Paccerakkang, Makassar';
+            '{businessProfile?.address || "{businessProfile?.address || "{businessProfile?.address || "Alamat Belum Dikonfigurasi"}"}"} No. 1, Paccerakkang, Makassar';
 
           return (
             <div className="flex items-start sm:items-center gap-3.5 min-w-0">
@@ -536,7 +536,7 @@ const HomeModule: React.FC = () => {
                     </span>
                   </div>
                   <span className="bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs px-2.5 py-1 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    {businessProfile?.category || (isEn ? 'Modern Retail & Multi-Industry' : 'Ritel Modern & Multi-Industry')}
+                    {businessProfile?.category || (isEn ? 'Modern Retail & Multi-Industry' : '{businessProfile?.industryCategory || "Ritel Modern"}')}
                   </span>
                 </div>
                 <h1
@@ -547,7 +547,7 @@ const HomeModule: React.FC = () => {
                 >
                   {companyName}
                 </h1>
-                <p className="text-slate-900 font-extrabold text-xs mt-0.5 dark:text-white">{businessProfile?.address || "{businessProfile?.address || "Jl. Berua Raya"}"}</p>
+                <p className="text-slate-900 font-extrabold text-xs mt-0.5 dark:text-white">{businessProfile?.address || "{businessProfile?.address || "{businessProfile?.address || "Alamat Belum Dikonfigurasi"}"}"}</p>
               </div>
             </div>
           );
