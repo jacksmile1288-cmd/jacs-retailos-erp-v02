@@ -2419,7 +2419,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 1. Reset Total ke 8 Kasir Bawaan ERP
     const defaultProfile: BusinessEntityProfile = {
-      name: 'KHANSA SWALAYAN',
+      name: 'Bumi Daya Indah Mart',
       category: 'Ritel Modern & Multi-Industry',
       address: 'Jl. BERUA RAYA No. 1, Paccerakkang, Biringkanaya, Makassar 90245',
       phone: '(021) 515-8888 / 0812-8888-9999',

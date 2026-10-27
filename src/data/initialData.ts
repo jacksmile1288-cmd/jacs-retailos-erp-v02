@@ -2356,7 +2356,7 @@ export const INITIAL_INVOICES_DUE: import('../types').InvoiceDue[] = [
 import { generateTerminalConfigs } from '../utils/terminalConfigUtils';
 
 export const DEFAULT_BUSINESS_PROFILE: import('../types').BusinessEntityProfile = {
-  name: 'KHANSA SWALAYAN',
+  name: 'Bumi Daya Indah Mart',
   category: 'Ritel Modern & Multi-Industry',
   address: 'Jl. BERUA RAYA No. 1, Paccerakkang, Biringkanaya, Makassar 90245',
   phone: '(021) 515-8888 / 0812-8888-9999',
