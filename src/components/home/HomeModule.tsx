@@ -507,7 +507,7 @@ const HomeModule: React.FC = () => {
             'KHANSA SWALAYAN';
           const companyAddress =
             businessProfile?.address?.trim() ||
-            'Jl. BERUA RAYA No. 1, Paccerakkang, Makassar';
+            '{businessProfile?.address || "{businessProfile?.address || "Jl. Berua Raya"}"} No. 1, Paccerakkang, Makassar';
 
           return (
             <div className="flex items-start sm:items-center gap-3.5 min-w-0">
@@ -547,7 +547,7 @@ const HomeModule: React.FC = () => {
                 >
                   {companyName}
                 </h1>
-                <p className="text-slate-900 font-extrabold text-xs mt-0.5 dark:text-white">Jl. BERUA RAYA</p>
+                <p className="text-slate-900 font-extrabold text-xs mt-0.5 dark:text-white">{businessProfile?.address || "{businessProfile?.address || "Jl. Berua Raya"}"}</p>
               </div>
             </div>
           );
