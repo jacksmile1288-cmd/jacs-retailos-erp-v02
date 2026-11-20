@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Receipt,
   Layers,
+  QrCode,
 } from 'lucide-react';
 
 interface AccountsPayableTabProps {
@@ -45,9 +46,21 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
 
   // Modal State for Payment
   const [activeInvoiceToPay, setActiveInvoiceToPay] = useState<InvoiceDue | null>(null);
-  const [modalPaymentSource, setModalPaymentSource] = useState<'Kas Utama' | 'Bank Operasional'>('Bank Operasional');
+  const [payAmountInput, setPayAmountInput] = useState<string>('');
+  const [modalPaymentSource, setModalPaymentSource] = useState<'Bank Operasional' | 'Kas Kasir' | 'Bank QRIS'>('Bank Operasional');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const currentPayAmount = useMemo(() => {
+    if (!activeInvoiceToPay) return 0;
+    const num = Number(payAmountInput.replace(/\D/g, '')) || 0;
+    return Math.max(0, Math.min(activeInvoiceToPay.amount, num));
+  }, [activeInvoiceToPay, payAmountInput]);
+
+  const remainingAfterPayment = useMemo(() => {
+    if (!activeInvoiceToPay) return 0;
+    return Math.max(0, activeInvoiceToPay.amount - currentPayAmount);
+  }, [activeInvoiceToPay, currentPayAmount]);
 
   // Calculate Cash & Bank Balances
   const cashDrawerBalance = useMemo(() => {
@@ -130,17 +143,20 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
 
   const handleOpenPayModal = (inv: InvoiceDue) => {
     const defaultSource = (selectedPaymentSourceMap[inv.id] as any) || 'Bank Operasional';
-    setModalPaymentSource(defaultSource);
+    setModalPaymentSource(
+      defaultSource === 'Kas Kasir' || defaultSource === 'Bank QRIS' ? defaultSource : 'Bank Operasional'
+    );
+    setPayAmountInput(String(inv.amount || 0));
     setPaymentNotes('');
     setActiveInvoiceToPay(inv);
   };
 
   const handleExecutePayment = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!activeInvoiceToPay || isProcessing) return;
+    if (!activeInvoiceToPay || isProcessing || currentPayAmount <= 0) return;
 
     setIsProcessing(true);
-    const res = payVendorInvoice(activeInvoiceToPay.id, modalPaymentSource, paymentNotes);
+    const res = payVendorInvoice(activeInvoiceToPay.id, currentPayAmount, modalPaymentSource, paymentNotes);
     setIsProcessing(false);
 
     if (res.success) {
@@ -148,8 +164,8 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
     }
   };
 
-  const handleDirectPay = (inv: InvoiceDue, source: 'Kas Utama' | 'Bank Operasional') => {
-    payVendorInvoice(inv.id, source);
+  const handleDirectPay = (inv: InvoiceDue, source: 'Kas Kasir' | 'Bank Operasional' | 'Bank QRIS') => {
+    payVendorInvoice(inv.id, inv.amount, source);
   };
 
   const getMatchingClaimableRebates = useCallback(
@@ -550,7 +566,7 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
                         )}
                       </td>
 
-                      {/* Tombol Bayar Tagihan Vendor */}
+                      {/* Tombol Bayar Hutang Vendor */}
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         {!isPaid ? (
                           <div className="flex items-center justify-center gap-1.5">
@@ -559,10 +575,10 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
                               id={`btn-pay-vendor-invoice-${inv.id}`}
                               onClick={() => handleOpenPayModal(inv)}
                               className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs leading-5 font-medium flex items-center gap-1.5 transition shadow-[0_0_12px_rgba(16,185,129,0.35)] cursor-pointer active:scale-[0.99]"
-                              title="Bayar tagihan vendor & catat jurnal pelunasan AP"
+                              title="Bayar hutang / cicilan ke vendor & catat jurnal pelunasan AP"
                             >
                               <CreditCard className="w-3.5 h-3.5" />
-                              <span>Bayar Tagihan Vendor</span>
+                              <span>Bayar Hutang / Cicilan</span>
                             </button>
                           </div>
                         ) : (
@@ -655,8 +671,8 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
                   </span>
                 </div>
                 <div className="pt-2 border-t border-[#30363d]/40 flex justify-between items-center">
-                  <span className="font-normal text-gray-300">Total Nominal Pelunasan:</span>
-                  <span className="font-mono font-semibold text-lg leading-7 text-emerald-400 tabular-nums">
+                  <span className="font-normal text-slate-600 dark:text-gray-300">Total Hutang Berjalan:</span>
+                  <span className="font-mono font-semibold text-lg leading-7 text-emerald-500 dark:text-emerald-400 tabular-nums">
                     Rp {activeInvoiceToPay.amount.toLocaleString('id-ID')}
                   </span>
                 </div>
@@ -676,75 +692,135 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
                 )}
               </div>
 
-              {/* Pilihan Sumber Dana */}
-              <div>
-                <label className="text-sm leading-5 font-normal text-slate-700 dark:text-gray-300 block mb-1.5">
+              {/* Input Nominal Bayar / Cicilan */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <label className="font-medium text-slate-700 dark:text-gray-300">
+                    Nominal Dibayar (Cicilan / Pelunasan):
+                  </label>
+                  <span className="font-mono text-emerald-500 dark:text-emerald-400 font-semibold">
+                    Rp {currentPayAmount.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-gray-400">
+                    Rp
+                  </span>
+                  <input
+                    type="text"
+                    value={payAmountInput}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, '');
+                      setPayAmountInput(raw);
+                    }}
+                    placeholder="0"
+                    className={`w-full pl-9 pr-3 py-2 rounded-xl text-sm font-mono font-semibold border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      isLight
+                        ? 'bg-slate-50 border-slate-300 text-slate-900'
+                        : 'bg-[#0d1117] border-[#30363d] text-white'
+                    }`}
+                  />
+                </div>
+
+                {/* Quick Presets (25%, 50%, 100%) */}
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPayAmountInput(String(Math.round(activeInvoiceToPay.amount * 0.25)))}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-300 dark:border-gray-700 hover:bg-emerald-500/10 hover:border-emerald-500/40 text-slate-700 dark:text-gray-300 transition cursor-pointer"
+                  >
+                    25% (Cicilan)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayAmountInput(String(Math.round(activeInvoiceToPay.amount * 0.5)))}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium border border-slate-300 dark:border-gray-700 hover:bg-emerald-500/10 hover:border-emerald-500/40 text-slate-700 dark:text-gray-300 transition cursor-pointer"
+                  >
+                    50% (Separuh)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayAmountInput(String(activeInvoiceToPay.amount))}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-600/15 border border-emerald-500/40 text-emerald-600 dark:text-emerald-300 hover:bg-emerald-600/25 transition cursor-pointer"
+                  >
+                    100% (Pelunasan)
+                  </button>
+                </div>
+
+                {/* Sisa Tagihan Setelah Bayar */}
+                <div
+                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                    remainingAfterPayment === 0
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                  }`}
+                >
+                  <span>Sisa Hutang Setelah Bayar:</span>
+                  <span className="font-mono font-semibold">
+                    Rp {remainingAfterPayment.toLocaleString('id-ID')}{' '}
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ml-1 bg-white/20 dark:bg-black/20">
+                      {remainingAfterPayment === 0 ? '✓ Lunas' : 'Cicilan'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Pilihan Sumber Rekening Pembayaran */}
+              <div className="space-y-1.5">
+                <label className="text-xs leading-5 font-medium text-slate-700 dark:text-gray-300 block">
                   Pilih Sumber Rekening Pembayaran <span className="text-rose-400">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Option 1: Bank Operasional */}
-                  <label
-                    className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition ${
+                <div className="grid grid-cols-3 gap-2">
+                  {/* Option 1: Transfer Bank (1-10002) */}
+                  <button
+                    type="button"
+                    onClick={() => setModalPaymentSource('Bank Operasional')}
+                    className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
                       modalPaymentSource === 'Bank Operasional'
-                        ? 'bg-sky-500/15 border-sky-500 shadow-[0_0_12px_rgba(56,189,248,0.25)]'
+                        ? 'border-sky-500 bg-sky-500/15 text-sky-400 font-semibold shadow-sm'
                         : isLight
-                        ? 'bg-slate-50 border-slate-200'
-                        : 'bg-[#0d1117] border-[#30363d]'
+                        ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                        : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d]'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-medium text-sky-400">
-                        <Building2 className="w-3.5 h-3.5" />
-                        <span>Bank Operasional</span>
-                      </div>
-                      <input
-                        type="radio"
-                        name="paymentSource"
-                        value="Bank Operasional"
-                        checked={modalPaymentSource === 'Bank Operasional'}
-                        onChange={() => setModalPaymentSource('Bank Operasional')}
-                        className="text-sky-500"
-                      />
-                    </div>
-                    <div className="font-mono text-[11px] leading-4 text-gray-400 mt-1 font-normal">
-                      Akun: 1-10002
-                    </div>
-                    <div className="text-xs font-mono text-emerald-400 font-normal mt-0.5">
-                      Saldo: Rp {qrisBankBalance.toLocaleString('id-ID')}
-                    </div>
-                  </label>
+                    <Building2 className="w-4 h-4 text-sky-400" />
+                    <span className="text-xs font-medium">Transfer Bank</span>
+                    <span className="text-[10px] text-gray-400 font-mono">1-10002</span>
+                  </button>
 
-                  {/* Option 2: Kas Utama */}
-                  <label
-                    className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition ${
-                      modalPaymentSource === 'Kas Utama'
-                        ? 'bg-emerald-500/15 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+                  {/* Option 2: Tunai Kas (1-10001) */}
+                  <button
+                    type="button"
+                    onClick={() => setModalPaymentSource('Kas Kasir')}
+                    className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
+                      modalPaymentSource === 'Kas Kasir'
+                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400 font-semibold shadow-sm'
                         : isLight
-                        ? 'bg-slate-50 border-slate-200'
-                        : 'bg-[#0d1117] border-[#30363d]'
+                        ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                        : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d]'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-medium text-emerald-400">
-                        <Wallet className="w-3.5 h-3.5" />
-                        <span>Kas Utama</span>
-                      </div>
-                      <input
-                        type="radio"
-                        name="paymentSource"
-                        value="Kas Utama"
-                        checked={modalPaymentSource === 'Kas Utama'}
-                        onChange={() => setModalPaymentSource('Kas Utama')}
-                        className="text-emerald-500"
-                      />
-                    </div>
-                    <div className="font-mono text-[11px] leading-4 text-gray-400 mt-1 font-normal">
-                      Akun: 1-10000
-                    </div>
-                    <div className="text-xs font-mono text-emerald-400 font-normal mt-0.5">
-                      Saldo: Rp {cashDrawerBalance.toLocaleString('id-ID')}
-                    </div>
-                  </label>
+                    <Wallet className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-medium">Tunai Kas</span>
+                    <span className="text-[10px] text-gray-400 font-mono">1-10001</span>
+                  </button>
+
+                  {/* Option 3: Bank QRIS (1-10003) */}
+                  <button
+                    type="button"
+                    onClick={() => setModalPaymentSource('Bank QRIS')}
+                    className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
+                      modalPaymentSource === 'Bank QRIS'
+                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-400 font-semibold shadow-sm'
+                        : isLight
+                        ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                        : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d]'
+                    }`}
+                  >
+                    <QrCode className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-medium">Bank QRIS</span>
+                    <span className="text-[10px] text-gray-400 font-mono">1-10003</span>
+                  </button>
                 </div>
               </div>
 
@@ -756,23 +832,25 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
               >
                 <div className="font-medium flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-amber-400" />
-                  <span>Otomatisasi Jurnal Akuntansi Pelunasan (FIN-AP-PAY):</span>
+                  <span>Otomatisasi Jurnal Akuntansi Pelunasan AP:</span>
                 </div>
                 <div className="font-mono text-[11px] leading-4 space-y-0.5 pl-5 font-normal">
-                  <div>• Debit: Hutang Dagang (2-10101): Rp {activeInvoiceToPay.amount.toLocaleString('id-ID')}</div>
+                  <div>• [DEBIT] 2-10101 Hutang Usaha: Rp {currentPayAmount.toLocaleString('id-ID')}</div>
                   <div>
-                    • Kredit:{' '}
-                    {modalPaymentSource === 'Kas Utama'
-                      ? 'Kas Utama (1-10000)'
-                      : 'Bank Operasional (1-10002)'}
-                    : Rp {activeInvoiceToPay.amount.toLocaleString('id-ID')}
+                    • [KREDIT]{' '}
+                    {modalPaymentSource === 'Bank Operasional'
+                      ? '1-10002 Bank Operasional'
+                      : modalPaymentSource === 'Bank QRIS'
+                      ? '1-10003 Bank QRIS'
+                      : '1-10001 Kas Kasir'}
+                    : Rp {currentPayAmount.toLocaleString('id-ID')}
                   </div>
                 </div>
               </div>
 
               {/* Catatan Pelunasan */}
               <div>
-                <label className="text-slate-700 dark:text-gray-300 font-normal text-sm leading-5 block mb-1">
+                <label className="text-slate-700 dark:text-gray-300 font-normal text-xs leading-5 block mb-1">
                   Catatan Transaksi Pelunasan (Opsional)
                 </label>
                 <input
@@ -800,15 +878,19 @@ export const AccountsPayableTab: React.FC<AccountsPayableTabProps> = ({ isLight 
                 <button
                   type="submit"
                   id="btn-confirm-pay-vendor-invoice"
-                  disabled={isProcessing}
+                  disabled={isProcessing || currentPayAmount <= 0}
                   className={`px-5 py-2 rounded-xl font-medium text-xs leading-5 transition flex items-center gap-1.5 active:scale-[0.99] ${
-                    isProcessing
+                    isProcessing || currentPayAmount <= 0
                       ? 'bg-slate-700/60 text-slate-400 border border-slate-600 cursor-not-allowed shadow-none'
                       : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] cursor-pointer'
                   }`}
                 >
                   <CreditCard className="w-4 h-4" />
-                  <span>{isProcessing ? 'Memproses Pelunasan...' : 'Bayar Tagihan Vendor'}</span>
+                  <span>
+                    {isProcessing
+                      ? 'Memproses Pelunasan...'
+                      : `Bayar Hutang [Rp ${currentPayAmount.toLocaleString('id-ID')}]`}
+                  </span>
                 </button>
               </div>
             </form>

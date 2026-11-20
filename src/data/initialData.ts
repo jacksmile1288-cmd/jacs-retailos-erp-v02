@@ -1617,8 +1617,8 @@ export const DEFAULT_BUSINESS_PROFILE: import('../types').BusinessEntityProfile 
   phone: '(021) 515-8888 / 0812-8888-9999',
   email: 'official@jacs-retailos.id',
   logoUrl: '/logo-jacs-enterprise.png',
-  headerNote: 'Unified Retail Operating System & Enterprise Management',
-  footerNote: 'Terima kasih atas kunjungan & kepercayaan Anda berbelanja bersama kami.',
+  headerNote: 'KHANSA RETAIL • Minimarket & Kebutuhan Harian Terlengkap',
+  footerNote: 'Terima kasih atas kunjungan & kepercayaan Anda berbelanja di KHANSA RETAIL.',
   isConfigured: true,
   domainConfig: createBusinessDomainConfig('MINIMARKET', {
     isHybridMultiUnit: false,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAudit } from '../../audit';
 import { CloverEnvironment, dualBackendSync, RemoteCommandType } from '../../services/dualBackendSync';
@@ -320,7 +320,6 @@ export const SuperAdminModule: React.FC = () => {
   };
 
   // Full JSON Snapshot Backup & Restore States
-  const snapshotFileInputRef = useRef<HTMLInputElement>(null);
   const [showRestoreConfirmModal, setShowRestoreConfirmModal] = useState(false);
   const [pendingSnapshot, setPendingSnapshot] = useState<{
     fileName: string;
@@ -4587,13 +4586,6 @@ export const SuperAdminModule: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                <input
-                  ref={snapshotFileInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={handleSnapshotFileSelect}
-                  className="hidden"
-                />
                 <button
                   type="button"
                   onClick={handleExportFullSnapshot}
@@ -4602,18 +4594,22 @@ export const SuperAdminModule: React.FC = () => {
                   <Download className="w-4 h-4 shrink-0" />
                   <span>Ekspor Signed Backup (SHA-256 .json)</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => snapshotFileInputRef.current?.click()}
-                  className={`px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 border transition cursor-pointer active:scale-95 ${
+                <label
+                  className={`px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 border transition cursor-pointer active:scale-95 select-none ${
                     isLight
                       ? 'bg-white hover:bg-slate-50 border-cyan-500/60 text-slate-800 shadow-xs'
                       : 'bg-slate-800 hover:bg-slate-700 border-cyan-500/35 text-slate-100'
                   }`}
                 >
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleSnapshotFileSelect}
+                    className="hidden"
+                  />
                   <Upload className="w-4 h-4 shrink-0 text-amber-500" />
                   <span>Verifikasi &amp; Restore Backup</span>
-                </button>
+                </label>
               </div>
             </div>
 
@@ -5888,18 +5884,22 @@ export const SuperAdminModule: React.FC = () => {
                   <Download className="w-3.5 h-3.5" />
                   <span>Export Signed Backup (.json)</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => snapshotFileInputRef.current?.click()}
-                  className={`px-3.5 py-2 rounded-xl font-black text-xs border flex items-center gap-1.5 transition cursor-pointer ${
+                <label
+                  className={`px-3.5 py-2 rounded-xl font-black text-xs border flex items-center gap-1.5 transition cursor-pointer select-none ${
                     isLight
                       ? 'bg-white hover:bg-slate-100 border-emerald-400 text-emerald-800'
                       : 'bg-[#161b22] hover:bg-gray-800 border-emerald-500/40 text-emerald-300'
                   }`}
                 >
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleSnapshotFileSelect}
+                    className="hidden"
+                  />
                   <Upload className="w-3.5 h-3.5" />
                   <span>Restore Signed Backup</span>
-                </button>
+                </label>
               </div>
             </div>
 

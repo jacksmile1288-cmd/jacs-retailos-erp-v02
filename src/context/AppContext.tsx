@@ -503,8 +503,18 @@ export interface AppContextType {
   openJournalVoucher: (initialData?: any) => void;
   invoicesDue: InvoiceDue[];
   invoicesReceivable: InvoiceDue[];
-  receiveCustomerPayment: (invoiceId: string, amountOrSource: number | string, methodOrNotes?: string) => { success: boolean; message?: string };
-  payVendorInvoice: (invoiceId: string, amountOrSource: number | string, methodOrNotes?: string) => { success: boolean; message?: string };
+  receiveCustomerPayment: (
+    invoiceId: string,
+    amountOrSource: number | string,
+    methodOrNotes?: string,
+    notesArg?: string
+  ) => { success: boolean; message?: string; remaining?: number; isFullyPaid?: boolean };
+  payVendorInvoice: (
+    invoiceId: string,
+    amountOrSource: number | string,
+    methodOrNotes?: string,
+    notesArg?: string
+  ) => { success: boolean; message?: string; remaining?: number; isFullyPaid?: boolean };
   supplierRebateClaims: SupplierRebateClaim[];
   applySupplierRebateToAP: (claimIds: string[], targetInvoiceId: string) => { success: boolean; message: string; deductedTotal: number };
   settleRebateClaimCash: (claimId: string) => { success: boolean; message: string };
@@ -1365,9 +1375,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   >(() =>
     loadActiveBusinessProfileFromStorage({
       ...DEFAULT_BUSINESS_PROFILE,
-      companyName: DEFAULT_BUSINESS_PROFILE.name || 'JacS Enterprise',
+      name: 'KHANSA RETAIL',
+      category: 'Minimarket',
+      address: 'Jl. BERUA RAYA No. 1, Paccerakkang, Biringkanaya, Makassar 90245',
+      phone: '(021) 515-8888 / 0812-8888-9999',
+      email: 'official@jacs-retailos.id',
+      companyName: 'KHANSA RETAIL',
       brandTitle: 'RetailOS ERP V2',
-      tagline: 'Integrated Multi-Industry Retail & Wholesale ERP',
+      tagline: 'Minimarket & Kebutuhan Harian Terlengkap',
       currency: 'IDR',
     })
   );
@@ -1408,15 +1423,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       {
         id: 'BR-001',
         branchCode: 'HO-MKS',
-        name: 'JacS Enterprise Flagship Makassar',
+        name: 'KHANSA RETAIL Makassar',
         industryCategory: 'RETAIL',
         isHeadquarters: true,
-        address: 'Jl. Ahmad Yani No. 88, Makassar',
-        phone: '0411-889900',
-        whatsapp: '081241009988',
+        address: 'Jl. BERUA RAYA No. 1, Paccerakkang, Biringkanaya, Makassar 90245',
+        phone: '(021) 515-8888 / 0812-8888-9999',
+        whatsapp: '081288889999',
         activeCashierCount: 3,
-        slogan: 'Pusat Distribusi & Ritel Terpadu',
-        footerNote: 'Terima kasih telah berbelanja di JacS Enterprise',
+        slogan: 'Minimarket & Kebutuhan Harian Terlengkap',
+        footerNote: 'Terima kasih telah berbelanja di KHANSA RETAIL',
         status: 'ACTIVE'
       }
     ];
@@ -3820,10 +3835,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setPurchaseOrders(snapshot.purchaseOrders || snapshot.purchasing);
           restoredKeys.push('purchaseOrders');
         }
+        if (Array.isArray(snapshot.invoicesDue || snapshot.invoices)) {
+          const invList = snapshot.invoicesDue || snapshot.invoices;
+          setInvoicesDue(invList);
+          restoredKeys.push(`invoicesDue (${invList.length})`);
+        }
+        if (Array.isArray(snapshot.stockMutations)) {
+          setStockMutations(snapshot.stockMutations);
+          restoredKeys.push(`stockMutations (${snapshot.stockMutations.length})`);
+        }
         if (Array.isArray(snapshot.auditLogs)) {
           setAuditLogs(snapshot.auditLogs);
           restoredKeys.push(`auditLogs (${snapshot.auditLogs.length})`);
         }
+
+        // Hapus flag pembersihan demo agar data yang baru dipulihkan langsung tampil penuh
+        setIsLedgerReset(false);
+        setIsMasterCatalogWiped(false);
+        isMasterCatalogWipedRef.current = false;
+        try {
+          localStorage.removeItem(LEDGER_RESET_ACTIVE_ENTITY_KEY);
+          localStorage.removeItem(MASTER_CATALOG_WIPED_KEY);
+        } catch {}
 
         const settings = snapshot.systemSettings || {};
         const profile = settings.businessProfile || snapshot.businessProfile;
@@ -7990,28 +8023,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const invoicesReceivable = useMemo(() => invoicesDue.filter((inv) => inv.type === 'RECEIVABLE'), [invoicesDue]);
 
   const receiveCustomerPayment = useCallback(
-    (invoiceId: string, amountOrSource: number | string, methodOrNotes?: string): { success: boolean; message?: string } => {
+    (
+      invoiceId: string,
+      amountOrSource: number | string,
+      methodOrNotes?: string,
+      notesArg?: string
+    ): { success: boolean; message?: string; remaining?: number; isFullyPaid?: boolean } => {
       const nowIso = new Date().toISOString();
       const targetInv = invoicesDue.find((inv) => inv.id === invoiceId);
-      const amount = typeof amountOrSource === 'number' ? amountOrSource : Number(targetInv?.amount || 0);
-      const method = typeof amountOrSource === 'string' ? amountOrSource : (methodOrNotes || 'CASH');
-      const isBank = String(method).toUpperCase().includes('BANK');
-      const accCode = isBank ? '1-10002' : '1-10001';
-      const accName = isBank ? 'Bank Operasional' : 'Kas Kasir';
+      const prevAmount = Number(targetInv?.amount || 0);
+
+      const isAmountNumeric = typeof amountOrSource === 'number' && amountOrSource > 0;
+      const actualPay = isAmountNumeric ? Math.min(prevAmount, Math.round(amountOrSource)) : prevAmount;
+      const remaining = Math.max(0, prevAmount - actualPay);
+      const isFullyPaid = remaining <= 0;
+
+      const rawMethod = typeof amountOrSource === 'string'
+        ? amountOrSource
+        : (methodOrNotes || 'Tunai Kas');
+      const notes = typeof amountOrSource === 'string' ? (methodOrNotes || '') : (notesArg || '');
+
+      // Resolve Rekening Penerima: Kas Kasir (1-10001), Kas Utama (1-10000), Bank (1-10002), QRIS (1-10003)
+      const methodUpper = String(rawMethod).toUpperCase();
+      const isQris = methodUpper.includes('QRIS');
+      const isBank = methodUpper.includes('BANK') || methodUpper.includes('TRANSFER');
+      const isKasUtama = methodUpper.includes('UTAMA') || methodUpper.includes('BRANKAS');
+      const accCode = isQris ? '1-10003' : isBank ? '1-10002' : isKasUtama ? '1-10000' : '1-10001';
+      const accName = isQris ? 'Bank QRIS' : isBank ? 'Bank Operasional' : isKasUtama ? 'Kas Utama' : 'Kas Kasir';
 
       setInvoicesDue((prev) =>
-        prev.map((inv) =>
-          inv.id === invoiceId
-            ? {
-                ...inv,
-                status: 'PAID',
-                paidAt: nowIso,
-                paid_date: nowIso.slice(0, 10),
-                paymentMethod: method,
-                paymentSource: String(method),
-              }
-            : inv
-        )
+        prev.map((inv) => {
+          if (inv.id !== invoiceId) return inv;
+          const orig = (inv as any).originalAmount || prevAmount;
+          return {
+            ...inv,
+            amount: remaining,
+            originalAmount: orig,
+            status: isFullyPaid ? 'PAID' : 'PARTIAL',
+            paidAt: isFullyPaid ? nowIso : (inv as any).paidAt,
+            paid_date: nowIso.slice(0, 10),
+            paymentMethod: rawMethod,
+            paymentSource: `${accName} (${accCode})`,
+            terms: isFullyPaid
+              ? (inv.terms ? `${inv.terms} • LUNAS` : 'Lunas')
+              : `${inv.terms || ''} • Cicilan Masuk Rp ${actualPay.toLocaleString('id-ID')} (Sisa Rp ${remaining.toLocaleString('id-ID')})`,
+          };
+        })
       );
 
       // Sinkronisasi balik ke order & tracking Laundry bila piutang ini berasal dari Laundry
@@ -8023,14 +8080,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           o.id.replace('LND-ORD-', 'AR-LND-') === invoiceId
       );
       if (matchedLaundryOrder) {
+        const nextLaundryPaid = Math.min(matchedLaundryOrder.totalAmount, (matchedLaundryOrder.paidAmount || 0) + actualPay);
+        const nextLaundryRem = Math.max(0, matchedLaundryOrder.totalAmount - nextLaundryPaid);
         setLaundryOrders((prev) =>
           prev.map((o) =>
             o.id === matchedLaundryOrder.id
               ? {
                   ...o,
-                  paidAmount: o.totalAmount,
-                  remainingAmount: 0,
-                  paymentStatus: 'LUNAS_AWAL',
+                  paidAmount: nextLaundryPaid,
+                  remainingAmount: nextLaundryRem,
+                  paymentStatus: nextLaundryRem <= 0 ? 'LUNAS_AWAL' : 'DP',
                   updatedAt: nowIso,
                 }
               : o
@@ -8042,9 +8101,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             s.receipt_number === matchedLaundryOrder.orderNumber
               ? {
                   ...s,
-                  amount_paid: matchedLaundryOrder.totalAmount,
-                  remainingBalance: 0,
-                  laundryPaymentStatus: 'LUNAS_AWAL',
+                  amount_paid: nextLaundryPaid,
+                  remainingBalance: nextLaundryRem,
+                  laundryPaymentStatus: nextLaundryRem <= 0 ? 'LUNAS_AWAL' : 'DP',
                 }
               : s
           )
@@ -8056,41 +8115,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'INCOME',
         category: matchedLaundryOrder ? 'Pelunasan Piutang Laundry' : 'Pelunasan Piutang (AR)',
         account_target: `${accCode} · ${accName}`,
-        description: `Pelunasan piutang invoice #${targetInv?.invoice_number || invoiceId}${typeof amountOrSource === 'string' && methodOrNotes ? ` (${methodOrNotes})` : ''}`,
-        amount,
-        payment_method: method,
+        description: `Pelunasan piutang invoice #${targetInv?.invoice_number || invoiceId} (${targetInv?.party_name || 'Pelanggan'})${notes ? ` - ${notes}` : ''} [${isFullyPaid ? 'LUNAS 100%' : `Cicilan Rp ${actualPay.toLocaleString('id-ID')}`}]`,
+        amount: actualPay,
+        payment_method: rawMethod,
         reference: targetInv?.invoice_number || invoiceId,
-        ...( { cashDelta: amount } as any ),
+        ...( { cashDelta: actualPay } as any ),
       });
 
-      if (amount > 0) {
+      if (actualPay > 0) {
         setJournalEntries((prev) => [
           {
             id: `JV-AR-RCV-${Date.now()}`,
             date: nowIso.slice(0, 10),
             created_at: nowIso,
             reference: targetInv?.invoice_number || invoiceId,
-            description: `Pelunasan Piutang Usaha #${targetInv?.invoice_number || invoiceId} (${targetInv?.party_name || 'Pelanggan'})`,
+            description: `Pelunasan Piutang Usaha #${targetInv?.invoice_number || invoiceId} (${targetInv?.party_name || 'Pelanggan'}) - ${rawMethod} (${isFullyPaid ? 'LUNAS' : 'CICILAN'})`,
             type: matchedLaundryOrder ? 'LAUNDRY_AR_SETTLEMENT' : 'AR_SETTLEMENT',
-            amount,
+            amount: actualPay,
             lines: [
-              { accountCode: accCode, accountName: accName, debit: amount, credit: 0 },
-              { accountCode: '1-10301', accountName: 'Piutang Usaha', debit: 0, credit: amount },
+              { accountCode: accCode, accountName: accName, debit: actualPay, credit: 0 },
+              { accountCode: '1-10105', accountName: 'Piutang Usaha', debit: 0, credit: actualPay },
             ],
           },
           ...prev,
         ]);
       }
 
-      const msg = `Pembayaran piutang Rp ${amount.toLocaleString()} berhasil diterima`;
+      const msg = isFullyPaid
+        ? `Pelunasan piutang #${targetInv?.invoice_number || invoiceId} sebesar Rp ${actualPay.toLocaleString('id-ID')} berhasil (STATUS: LUNAS)`
+        : `Pembayaran cicilan piutang #${targetInv?.invoice_number || invoiceId} sebesar Rp ${actualPay.toLocaleString('id-ID')} diterima (Sisa: Rp ${remaining.toLocaleString('id-ID')})`;
       showToast(msg, 'success');
-      return { success: true, message: msg };
+      return { success: true, message: msg, remaining, isFullyPaid };
     },
     [invoicesDue, laundryOrders, addFinanceEntry, showToast]
   );
 
   const payVendorInvoice = useCallback(
-    (invoiceId: string, amountOrSource: number | string, methodOrNotes?: string): { success: boolean; message?: string } => {
+    (
+      invoiceId: string,
+      amountOrSource: number | string,
+      methodOrNotes?: string,
+      notesArg?: string
+    ): { success: boolean; message?: string; remaining?: number; isFullyPaid?: boolean } => {
+      const nowIso = new Date().toISOString();
       const targetInv = invoicesDue.find((inv) => inv.id === invoiceId);
       const targetPo = purchaseOrders.find(
         (po) =>
@@ -8099,13 +8166,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           `INV-AP-${po.po_number}` === invoiceId ||
           (targetInv?.po_number && po.po_number === targetInv.po_number)
       );
-      const amount = typeof amountOrSource === 'number' ? amountOrSource : Number(targetInv?.amount ?? targetPo?.total_amount ?? 0);
-      const method = typeof amountOrSource === 'string' ? amountOrSource : (methodOrNotes || 'BANK_TRANSFER');
-      const nowIso = new Date().toISOString();
+
+      const prevAmount = Number(targetInv?.amount ?? targetPo?.total_amount ?? 0);
+      const isAmountNumeric = typeof amountOrSource === 'number' && amountOrSource > 0;
+      const actualPay = isAmountNumeric ? Math.min(prevAmount, Math.round(amountOrSource)) : prevAmount;
+      const remaining = Math.max(0, prevAmount - actualPay);
+      const isFullyPaid = remaining <= 0;
+
+      const rawMethod = typeof amountOrSource === 'string'
+        ? amountOrSource
+        : (methodOrNotes || 'Transfer Bank');
+      const notes = typeof amountOrSource === 'string' ? (methodOrNotes || '') : (notesArg || '');
+
+      // Resolve Rekening Pembayar: Bank Operasional (1-10002), Kas Kasir (1-10001), Kas Utama (1-10000), QRIS (1-10003)
+      const methodUpper = String(rawMethod).toUpperCase();
+      const isQris = methodUpper.includes('QRIS');
+      const isKas = methodUpper.includes('KAS KASIR') || methodUpper.includes('TUNAI');
+      const isKasUtama = methodUpper.includes('UTAMA') || methodUpper.includes('BRANKAS');
+      const accCode = isQris ? '1-10003' : isKas ? '1-10001' : isKasUtama ? '1-10000' : '1-10002';
+      const accName = isQris ? 'Bank QRIS' : isKas ? 'Kas Kasir' : isKasUtama ? 'Kas Utama' : 'Bank Operasional';
+
       setInvoicesDue((prev) => {
         const exists = prev.some((inv) => inv.id === invoiceId);
         if (exists) {
-          return prev.map((inv) => (inv.id === invoiceId ? { ...inv, status: 'PAID', paidAt: nowIso } : inv));
+          return prev.map((inv) => {
+            if (inv.id !== invoiceId) return inv;
+            const orig = (inv as any).originalAmount || prevAmount;
+            return {
+              ...inv,
+              amount: remaining,
+              originalAmount: orig,
+              status: isFullyPaid ? 'PAID' : 'PARTIAL',
+              paidAt: isFullyPaid ? nowIso : (inv as any).paidAt,
+              paid_date: nowIso.slice(0, 10),
+              paymentMethod: rawMethod,
+              paymentSource: `${accName} (${accCode})`,
+              terms: isFullyPaid
+                ? (inv.terms ? `${inv.terms} • LUNAS` : 'Lunas')
+                : `${inv.terms || ''} • Cicilan Bayar Rp ${actualPay.toLocaleString('id-ID')} (Sisa Rp ${remaining.toLocaleString('id-ID')})`,
+            };
+          });
         }
         if (targetPo) {
           return [
@@ -8117,9 +8217,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               invoice_number: `INV-AP/${targetPo.po_number}`,
               po_number: targetPo.po_number,
               due_date: targetPo.due_date || nowIso.slice(0, 10),
-              amount,
-              status: 'PAID',
-              paidAt: nowIso,
+              amount: remaining,
+              status: isFullyPaid ? 'PAID' : 'PARTIAL',
+              paidAt: isFullyPaid ? nowIso : undefined,
+              paid_date: nowIso.slice(0, 10),
+              paymentMethod: rawMethod,
+              paymentSource: `${accName} (${accCode})`,
               terms: targetPo.payment_term,
             },
             ...prev,
@@ -8127,41 +8230,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return prev;
       });
+
       if (targetPo) {
         setPurchaseOrders((prev) =>
           prev.map((po) =>
             po.po_number === targetPo.po_number
-              ? { ...po, payment_status: 'Lunas', paid_date: nowIso.slice(0, 10) }
+              ? {
+                  ...po,
+                  payment_status: isFullyPaid ? 'Lunas' : 'Sebagian',
+                  paid_date: nowIso.slice(0, 10),
+                }
               : po
           )
         );
       }
+
       addFinanceEntry({
         type: 'EXPENSE',
         category: 'Pelunasan Hutang (AP)',
-        description: `Pembayaran hutang vendor invoice #${invoiceId}${typeof amountOrSource === 'string' && methodOrNotes ? ` (${methodOrNotes})` : ''}`,
-        amount,
-        payment_method: method,
-        reference: invoiceId
+        account_target: `${accCode} · ${accName}`,
+        description: `Pembayaran hutang vendor invoice #${invoiceId} (${targetInv?.vendor || targetInv?.party_name || targetPo?.supplier_name || 'Vendor'})${notes ? ` - ${notes}` : ''} [${isFullyPaid ? 'LUNAS 100%' : `Cicilan Rp ${actualPay.toLocaleString('id-ID')}`}]`,
+        amount: actualPay,
+        payment_method: rawMethod,
+        reference: invoiceId,
+        ...( { cashDelta: -actualPay } as any ),
       });
+
+      // Double-Entry Journal Voucher: Debit 2-10101 Hutang Usaha & Kredit Kas/Bank
+      if (actualPay > 0) {
+        setJournalEntries((prev) => [
+          {
+            id: `JV-AP-PAY-${Date.now()}`,
+            date: nowIso.slice(0, 10),
+            created_at: nowIso,
+            reference: invoiceId,
+            description: `Pelunasan Hutang Dagang #${invoiceId} (${targetInv?.vendor || targetInv?.party_name || targetPo?.supplier_name || 'Vendor'}) - ${rawMethod} (${isFullyPaid ? 'LUNAS' : 'CICILAN'})`,
+            type: 'AP_SETTLEMENT',
+            amount: actualPay,
+            lines: [
+              { accountCode: '2-10101', accountName: 'Hutang Usaha', debit: actualPay, credit: 0 },
+              { accountCode: accCode, accountName: accName, debit: 0, credit: actualPay },
+            ],
+          },
+          ...prev,
+        ]);
+      }
 
       const vendorLabel = targetInv?.vendor || targetInv?.party_name || targetPo?.supplier_name || 'Vendor';
       const invLabel = targetInv?.invoice_number || invoiceId;
       appendAudit(
         'AP_INVOICE_PAYMENT',
         'Finance / AP',
-        `Pelunasan Faktur AP #${invLabel} (${vendorLabel}) • Sumber/Metode: ${method} • Nominal: Rp ${amount.toLocaleString('id-ID')}`,
+        `Pembayaran Faktur AP #${invLabel} (${vendorLabel}) • Nominal: Rp ${actualPay.toLocaleString('id-ID')} • Metode: ${rawMethod} • Status: ${isFullyPaid ? 'LUNAS' : `Sisa Rp ${remaining.toLocaleString('id-ID')}`}`,
         {
           division: currentUser?.division || 'Finance & Accounting',
-          amount,
+          amount: actualPay,
           category: 'AP_PAYMENT',
           level: 'INFO',
         }
       );
 
-      const msg = `Pembayaran hutang Rp ${amount.toLocaleString()} berhasil diproses`;
+      const msg = isFullyPaid
+        ? `Pembayaran hutang vendor #${invLabel} sebesar Rp ${actualPay.toLocaleString('id-ID')} berhasil (STATUS: LUNAS)`
+        : `Pembayaran cicilan hutang vendor #${invLabel} sebesar Rp ${actualPay.toLocaleString('id-ID')} berhasil (Sisa: Rp ${remaining.toLocaleString('id-ID')})`;
       showToast(msg, 'success');
-      return { success: true, message: msg };
+      return { success: true, message: msg, remaining, isFullyPaid };
     },
     [invoicesDue, purchaseOrders, currentUser, addFinanceEntry, appendAudit, showToast]
   );
@@ -9057,14 +9190,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const resetBusinessProfileToDefault = useCallback(() => {
     const defaultNorm = saveActiveBusinessProfileToStorage({
       ...DEFAULT_BUSINESS_PROFILE,
-      companyName: DEFAULT_BUSINESS_PROFILE.name || 'JacS Enterprise',
+      name: 'KHANSA RETAIL',
+      category: 'Minimarket',
+      address: 'Jl. BERUA RAYA No. 1, Paccerakkang, Biringkanaya, Makassar 90245',
+      phone: '(021) 515-8888 / 0812-8888-9999',
+      email: 'official@jacs-retailos.id',
+      companyName: 'KHANSA RETAIL',
       brandTitle: 'RetailOS ERP V2',
-      tagline: 'Integrated Multi-Industry Retail & Wholesale ERP',
+      tagline: 'Minimarket & Kebutuhan Harian Terlengkap',
       currency: 'IDR',
     });
     businessProfileRef.current = defaultNorm;
     setBusinessProfile(defaultNorm);
-    showToast('Profil usaha direset ke pengaturan awal', 'info');
+    showToast('Profil usaha direset ke pengaturan awal (KHANSA RETAIL)', 'info');
   }, [showToast]);
 
   const updateSheetConfig = useCallback((cfg: Partial<SheetConfig>) => setSheetConfig((prev) => ({ ...prev, ...cfg })), []);
