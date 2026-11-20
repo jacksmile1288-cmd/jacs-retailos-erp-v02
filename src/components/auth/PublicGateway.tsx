@@ -20,7 +20,6 @@ import {
   Sparkles,
   ChevronDown,
   MonitorPlay,
-  DatabaseBackup,
 } from 'lucide-react';
 import { User } from '../../types';
 import { signSessionPayload } from '../../utils/securityUtils';
@@ -36,16 +35,7 @@ interface ModuleCardConfig {
   colorHex: string;
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   defaultUsername: string;
-  demoPin: string;
 }
-
-// ============================================================================
-// KONFIGURASI MODE DEMO / SHARE KE CALON USER
-// - true  : Auto-fill PIN 6 divisi, blokir akses SuperAdmin & kunci Database Cloud
-// - false : Mode Produksi Penuh (PIN manual & akses SuperAdmin aktif)
-// ============================================================================
-const IS_DEMO_SANDBOX_MODE = true;
-const DEFAULT_DEMO_PIN = '123456';
 
 const GATEWAY_MODULES: ModuleCardConfig[] = [
   {
@@ -55,7 +45,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#3B82F6',
     icon: Briefcase,
     defaultUsername: 'Executive',
-    demoPin: DEFAULT_DEMO_PIN,
   },
   {
     id: 'finance',
@@ -64,7 +53,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#22C55E',
     icon: CreditCard,
     defaultUsername: 'Finance',
-    demoPin: DEFAULT_DEMO_PIN,
   },
   {
     id: 'purchasing',
@@ -73,7 +61,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#F97316',
     icon: ShoppingBag,
     defaultUsername: 'Purchasing',
-    demoPin: DEFAULT_DEMO_PIN,
   },
   {
     id: 'pos',
@@ -82,7 +69,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#F43F5E',
     icon: Store,
     defaultUsername: 'Kasir',
-    demoPin: DEFAULT_DEMO_PIN,
   },
   {
     id: 'warehouse',
@@ -91,7 +77,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#06B6D4',
     icon: Boxes,
     defaultUsername: 'Gudang',
-    demoPin: DEFAULT_DEMO_PIN,
   },
   {
     id: 'hr',
@@ -100,7 +85,6 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
     colorHex: '#A855F7',
     icon: Users,
     defaultUsername: 'HR',
-    demoPin: DEFAULT_DEMO_PIN,
   },
 ];
 
@@ -133,9 +117,8 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
   const [selectedModuleId, setSelectedModuleId] = useState<string>('pos');
   const [hoveredModuleId, setHoveredModuleId] = useState<string | null>(null);
   const [username, setUsername] = useState<string>('Kasir');
-  const [pin, setPin] = useState<string>(IS_DEMO_SANDBOX_MODE ? DEFAULT_DEMO_PIN : '');
-  const [showPin, setShowPin] = useState<boolean>(IS_DEMO_SANDBOX_MODE);
-  const [showSuperAdminCode, setShowSuperAdminCode] = useState<boolean>(false);
+  const [pin, setPin] = useState<string>('');
+  const [showPin, setShowPin] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [shakePhase, setShakePhase] = useState<'none' | 'left' | 'right'>('none');
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
@@ -199,13 +182,8 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
   const handleCardClick = (mod: ModuleCardConfig) => {
     setSelectedModuleId(mod.id);
     setUsername(mod.defaultUsername);
-    if (IS_DEMO_SANDBOX_MODE) {
-      setPin(mod.demoPin);
-      setShowPin(true);
-    } else {
-      setPin('');
-      setShowPin(false);
-    }
+    setPin('');
+    setShowPin(false);
     setErrorMsg(null);
     setTimeout(() => {
       pinInputRef.current?.focus();
@@ -260,14 +238,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     }
 
     setIsVerifying(true);
-
-    // Validasi PIN: di Demo Sandbox mengizinkan PIN demo atau PIN SHA-256 tersimpan
-    const isDemoPinMatch =
-      IS_DEMO_SANDBOX_MODE && pin.trim() === selectedModule.demoPin;
-    const isValidPin = isDemoPinMatch
-      ? true
-      : await verifyDivisionPin(selectedModuleId, pin.trim());
-
+    const isValidPin = await verifyDivisionPin(selectedModuleId, pin.trim());
     if (!isValidPin) {
       const nextAttempts = failedPinAttempts + 1;
       setFailedPinAttempts(nextAttempts);
@@ -313,13 +284,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
 
       try {
         localStorage.setItem('jacs_active_user', signedToken);
-        if (IS_DEMO_SANDBOX_MODE) {
-          // Kunci koneksi database cloud eksternal saat mode demo calon klien aktif
-          localStorage.setItem('jacs_demo_sandbox_isolated', 'true');
-          localStorage.removeItem('jacs_gas_webhook_url');
-          localStorage.removeItem('jacs_supabase_url');
-          localStorage.removeItem('jacs_supabase_anon_key');
-        }
         const parsed = JSON.parse(atob(signedToken));
         if (parsed?.sig) {
           localStorage.setItem('jacs_session_sig', parsed.sig);
@@ -328,28 +292,16 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
 
       addAuditLog(
         'GATEWAY_LOGIN_SUCCESS',
-        `Login terverifikasi ke divisi ${selectedModuleId.toUpperCase()} oleh ${userObj.name}${
-          IS_DEMO_SANDBOX_MODE ? ' [DEMO SANDBOX - DB ISOLATED]' : ''
-        }.`,
+        `Login terverifikasi SHA-256 ke divisi ${selectedModuleId.toUpperCase()} oleh ${userObj.name}.`,
         'INFO'
       );
       setIsVerifying(false);
-      showToast(
-        IS_DEMO_SANDBOX_MODE
-          ? `Mode Demo: Masuk sebagai ${userObj.name} (Database Pusat Terisolasi)`
-          : `Berhasil masuk sebagai ${userObj.name} (${userObj.division})`,
-        'success'
-      );
+      showToast(`Berhasil masuk sebagai ${userObj.name} (${userObj.division})`, 'success');
       onLoginSuccess(userObj);
     }, 260);
   };
 
   const handleSuperAdminVerify = async () => {
-    if (IS_DEMO_SANDBOX_MODE) {
-      setSuperAdminError('Akses SuperAdmin & Database dikunci pada versi Demo Publik.');
-      return;
-    }
-
     if (isVerifyingSuperAdmin) return;
     setSuperAdminError(null);
 
@@ -377,7 +329,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
       setTimeout(() => {
         setShowSuperAdminModal(false);
         setSuperAdminCode('');
-        setShowSuperAdminCode(false);
         setIsVerifyingSuperAdmin(false);
         setIsSuperAdminAuthenticated(true);
         setActiveNav('admin');
@@ -484,7 +435,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
 
           <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-emerald-300 text-[11px] font-mono backdrop-blur-md">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-            <span>{IS_DEMO_SANDBOX_MODE ? 'DEMO POS READY' : 'POS READY'}</span>
+            <span>POS READY</span>
           </div>
         </div>
 
@@ -541,16 +492,22 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
                       <stop offset="100%" stopColor="#cbd5e1" />
                     </linearGradient>
                   </defs>
+                  {/* Roti Baguette */}
                   <ellipse cx="62" cy="68" rx="16" ry="36" transform="rotate(-24 62 68)" fill="url(#breadGrad)" stroke="#fde68a" strokeWidth="1.5" />
+                  {/* Sayuran Hijau */}
                   <circle cx="95" cy="64" r="22" fill="#22c55e" />
                   <circle cx="84" cy="58" r="14" fill="#4ade80" />
                   <circle cx="106" cy="60" r="15" fill="#16a34a" />
+                  {/* Botol Susu */}
                   <rect x="116" y="42" width="26" height="52" rx="8" fill="url(#milkGrad)" />
                   <rect x="121" y="34" width="16" height="10" rx="3" fill="#2563eb" />
+                  {/* Tomat Merah */}
                   <circle cx="96" cy="84" r="15" fill="#ef4444" />
                   <circle cx="91" cy="79" r="4" fill="#fca5a5" opacity="0.7" />
+                  {/* Badan Keranjang Belanja 3D */}
                   <polygon points="32,84 168,84 152,148 48,148" fill="url(#basketBlue)" stroke="#7dd3fc" strokeWidth="2.5" strokeLinejoin="round" />
                   <rect x="26" y="78" width="148" height="10" rx="5" fill="#0ea5e9" stroke="#bae6fd" strokeWidth="1.5" />
+                  {/* Kisi-kisi Keranjang */}
                   <line x1="60" y1="96" x2="66" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
                   <line x1="82" y1="96" x2="85" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
                   <line x1="104" y1="96" x2="104" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
@@ -569,14 +526,17 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
                       <stop offset="100%" stopColor="#38bdf8" />
                     </linearGradient>
                   </defs>
+                  {/* Gagang Dorong Troli */}
                   <path d="M148 42 L172 34 L160 72" fill="none" stroke="url(#chromeMetal)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
                   <rect x="166" y="30" width="16" height="8" rx="4" fill="#0284c7" />
+                  {/* Keranjang Troli */}
                   <polygon points="36,64 156,56 142,114 52,114" fill="rgba(56,189,248,0.14)" stroke="url(#chromeMetal)" strokeWidth="4.5" strokeLinejoin="round" />
                   <line x1="42" y1="82" x2="151" y2="76" stroke="url(#chromeMetal)" strokeWidth="2.5" />
                   <line x1="47" y1="98" x2="146" y2="94" stroke="url(#chromeMetal)" strokeWidth="2.5" />
                   <line x1="68" y1="62" x2="74" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
                   <line x1="98" y1="60" x2="100" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
                   <line x1="128" y1="58" x2="124" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  {/* Rangka Bawah & Roda */}
                   <path d="M56 114 L48 134 L144 134" fill="none" stroke="url(#chromeMetal)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
                   <circle cx="62" cy="146" r="10" fill="#0f172a" stroke="#7dd3fc" strokeWidth="3.5" />
                   <circle cx="132" cy="146" r="10" fill="#0f172a" stroke="#7dd3fc" strokeWidth="3.5" />
@@ -696,16 +656,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
         </div>
 
         <div className="flex items-center gap-2">
-          {IS_DEMO_SANDBOX_MODE && (
-            <div
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-300 text-[10px] font-['JetBrains_Mono'] font-semibold"
-              title="Database Pusat & SuperAdmin terkunci untuk keamanan uji coba calon klien"
-            >
-              <DatabaseBackup className="w-3.5 h-3.5" />
-              <span>DEMO SANDBOX • DB TERISOLASI</span>
-            </div>
-          )}
-
           <button
             type="button"
             id="btn-gateway-show-cover"
@@ -753,9 +703,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             Selamat datang di RetailOS ERP
           </h1>
           <p className="text-slate-600 dark:text-slate-400 text-xs mt-0.5">
-            {IS_DEMO_SANDBOX_MODE
-              ? `${displayStoreLabel} • Klik Divisi untuk Auto-PIN Demo (Database Terisolasi)`
-              : `${displayStoreLabel} • Pilih Divisi Operasional & Masukkan Kredensial Sesi`}
+            {displayStoreLabel} • Pilih Divisi Operasional &amp; Masukkan Kredensial Sesi
           </p>
         </div>
 
@@ -942,16 +890,10 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
               placeholder="Masukkan PIN Divisi..."
               className="flex-1 h-full !bg-transparent !border-0 focus:!shadow-none text-slate-900 dark:text-white placeholder:text-slate-400 text-xs font-mono tracking-widest pr-2 rounded-none outline-none"
             />
-            {IS_DEMO_SANDBOX_MODE && (
-              <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 mr-1 shrink-0">
-                AUTO
-              </span>
-            )}
             <button
               type="button"
               onClick={() => setShowPin(!showPin)}
               className="pr-4 pl-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
-              title={showPin ? 'Sembunyikan PIN' : 'Lihat PIN'}
             >
               {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
@@ -987,67 +929,48 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             )}
           </button>
 
-          {IS_DEMO_SANDBOX_MODE ? (
-            <div className="mx-auto text-[10px] text-slate-600 dark:text-slate-400 bg-[#F6F8FB]/70 dark:bg-slate-900/45 border border-slate-300/70 dark:border-slate-800 rounded-full py-1 px-4 font-['JetBrains_Mono'] flex items-center justify-center gap-1.5">
-              <Lock className="w-3 h-3 text-amber-500" />
-              <span>SuperAdmin &amp; Database Terkunci (Mode Demo)</span>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setSuperAdminError(null);
-                setShowSuperAdminCode(false);
-                setShowSuperAdminModal(true);
-              }}
-              className="mx-auto text-[11px] text-slate-700 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-300 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md border border-slate-300/80 dark:border-slate-700/70 hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:shadow-[0_0_16px_rgba(6,182,212,0.25)] rounded-full py-1.5 px-5 transition-all duration-300 active:scale-95 cursor-pointer text-center font-['JetBrains_Mono'] flex items-center justify-center gap-1.5"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>SuperAdmin Access</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              setSuperAdminError(null);
+              setShowSuperAdminModal(true);
+            }}
+            className="mx-auto text-[11px] text-slate-700 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-300 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md border border-slate-300/80 dark:border-slate-700/70 hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:shadow-[0_0_16px_rgba(6,182,212,0.25)] rounded-full py-1.5 px-5 transition-all duration-300 active:scale-95 cursor-pointer text-center font-['JetBrains_Mono'] flex items-center justify-center gap-1.5"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>SuperAdmin Access</span>
+          </button>
         </div>
 
         {/* Super Admin Auth Modal */}
-        {showSuperAdminModal && !IS_DEMO_SANDBOX_MODE && (
+        {showSuperAdminModal && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-200">
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 p-5 rounded-2xl w-full max-w-xs shadow-[0_0_35px_rgba(6,182,212,0.25)] space-y-3 transition-all duration-300">
               <h3 className="text-white font-bold text-sm flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-cyan-400" />
                 <span>Masukkan Kode Otoritas</span>
               </h3>
-              <div className="relative flex items-center">
-                <input
-                  type="text"
-                  autoFocus
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  style={!showSuperAdminCode ? ({ WebkitTextSecurity: 'disc' } as React.CSSProperties) : undefined}
-                  value={superAdminCode}
-                  onChange={(e) => {
-                    setSuperAdminCode(e.target.value);
-                    setSuperAdminError(null);
-                  }}
-                  placeholder="Kode Otoritas..."
-                  className={`w-full h-10 bg-slate-950/80 border text-white pl-3 pr-10 rounded-xl text-sm outline-none transition-all duration-200 ${
-                    superAdminError
-                      ? 'border-rose-500 ring-2 ring-rose-500/30'
-                      : 'border-slate-700 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25'
-                  }`}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSuperAdminVerify();
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSuperAdminCode((prev) => !prev)}
-                  className="absolute right-3 text-slate-400 hover:text-cyan-300 transition cursor-pointer"
-                  title={showSuperAdminCode ? 'Sembunyikan Kode' : 'Lihat Kode'}
-                >
-                  {showSuperAdminCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                style={{ WebkitTextSecurity: 'disc' } as React.CSSProperties}
+                value={superAdminCode}
+                onChange={(e) => {
+                  setSuperAdminCode(e.target.value);
+                  setSuperAdminError(null);
+                }}
+                placeholder="Kode Otoritas..."
+                className={`w-full h-10 bg-slate-950/80 border text-white px-3 rounded-xl text-sm outline-none transition-all duration-200 ${
+                  superAdminError
+                    ? 'border-rose-500 ring-2 ring-rose-500/30'
+                    : 'border-slate-700 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25'
+                }`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSuperAdminVerify();
+                }}
+              />
               {superAdminError && (
                 <p className="text-[11px] text-rose-400 font-semibold flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -1060,7 +983,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
                   onClick={() => {
                     setShowSuperAdminModal(false);
                     setSuperAdminCode('');
-                    setShowSuperAdminCode(false);
                     setSuperAdminError(null);
                   }}
                   className="flex-1 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all duration-200 active:scale-95 cursor-pointer"
