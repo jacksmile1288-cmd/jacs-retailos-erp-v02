@@ -145,8 +145,18 @@ import {
   RemoteCommandPayload,
   RemoteCommandExecutionLog,
   BranchTelemetryReport,
-  CloverConfig
+  CloverConfig,
+  DualBackendConfig,
 } from '../services/dualBackendSync';
+import {
+  pushSyncData,
+  pullSyncData,
+  testCloudConnections,
+  CloudSyncResult,
+  CloudPullResult,
+  CloudConnectionPingResult,
+  CloudSyncSnapshot,
+} from '../services/cloudSyncService';
 import { syncWithCloverPos, CloverSyncResult } from '../services/cloverSyncService';
 import { verifyAndDecodeSession, hashSha256 } from '../utils/securityUtils';
 import {
@@ -429,9 +439,16 @@ export interface AppContextType {
   unbindPosStation: () => void;
   isCashierWorkspaceActive: boolean;
   setIsCashierWorkspaceActive: (active: boolean) => void;
+  isAiAssistantOpen: boolean;
+  setIsAiAssistantOpen: (open: boolean) => void;
+  openAiAssistant: () => void;
+  closeAiAssistant: () => void;
   isOnline: boolean;
   offlineQueue: any[];
   syncOfflineTransactions: () => Promise<{ success: boolean; syncedCount: number; message: string }>;
+  executeCloudSync: (customConfig?: DualBackendConfig) => Promise<CloudSyncResult>;
+  pullCloudSyncData: (customConfig?: DualBackendConfig) => Promise<CloudPullResult>;
+  testCloudEndpoints: (customConfig?: DualBackendConfig) => Promise<CloudConnectionPingResult>;
 
   suppliers: SupplierMaster[];
   setSuppliers: React.Dispatch<React.SetStateAction<SupplierMaster[]>>;
@@ -1553,6 +1570,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTerminalId, setActiveTerminalId] = useState<string>(() => getBoundPosStation()?.stationCode || 'POS-01');
   const [activeTerminalOverride, setActiveTerminalOverride] = useState<Terminal | null>(null);
   const [isCashierWorkspaceActive, setIsCashierWorkspaceActive] = useState(false);
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+  const openAiAssistant = useCallback(() => setIsAiAssistantOpen(true), []);
+  const closeAiAssistant = useCallback(() => setIsAiAssistantOpen(false), []);
 
   const activeTerminal = useMemo(() => {
     const baseTerm =
@@ -3774,6 +3794,100 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [auditLogs, showToast]
   );
 
+  // Synchronized refs for fast background auto-sync and snapshot building
+  const salesRef = useRef<Sale[]>(sales);
+  useEffect(() => {
+    salesRef.current = sales;
+  }, [sales]);
+
+  const financeEntriesRef = useRef<FinanceEntry[]>(financeEntries);
+  useEffect(() => {
+    financeEntriesRef.current = financeEntries;
+  }, [financeEntries]);
+
+  const journalEntriesRef = useRef<JournalEntry[]>(journalEntries);
+  useEffect(() => {
+    journalEntriesRef.current = journalEntries;
+  }, [journalEntries]);
+
+  // =========================================================================
+  // BACKGROUND AUTO-SYNC SERVICE (NON-BLOCKING)
+  // =========================================================================
+  const autoSyncDebounceTimerRef = useRef<any>(null);
+  const isAutoSyncRunningRef = useRef<boolean>(false);
+
+  const triggerAutoCloudSync = useCallback((reason: string = 'DATA_CHANGE') => {
+    const config = dualBackendSync.getConfig();
+    // Non-blocking auto-sync: hanya berjalan jika supabaseUrl atau gasWebhookUrl sudah terisi
+    if (!config.supabaseUrl?.trim() && !config.gasWebhookUrl?.trim()) {
+      return;
+    }
+
+    if (autoSyncDebounceTimerRef.current) {
+      clearTimeout(autoSyncDebounceTimerRef.current);
+    }
+
+    autoSyncDebounceTimerRef.current = setTimeout(async () => {
+      if (isAutoSyncRunningRef.current) {
+        setTimeout(() => triggerAutoCloudSync(reason), 1500);
+        return;
+      }
+
+      isAutoSyncRunningRef.current = true;
+      try {
+        const nowIso = new Date().toISOString();
+        const txUuid = generateTxUuid();
+
+        const snapshot: CloudSyncSnapshot = {
+          products: productsRef.current || [],
+          transactions: salesRef.current || [],
+          financeEntries: financeEntriesRef.current || [],
+          journalEntries: journalEntriesRef.current || [],
+          businessProfile: businessProfileRef.current || DEFAULT_BUSINESS_PROFILE,
+          timestamp: nowIso,
+          txUuid,
+          appVersion: '2.5.0-ENTERPRISE',
+        };
+
+        const result = await pushSyncData(snapshot, config);
+        if (result.success) {
+          setSales((prev) =>
+            prev.map((s) => (s.syncStatus === 'PENDING_SYNC' || !s.syncStatus ? { ...s, syncStatus: 'SYNCED' } : s))
+          );
+          await dualBackendSync.processQueue();
+          (dualBackendSync as any).lastSyncTime = nowIso;
+          (dualBackendSync as any).notify?.();
+
+          appendAudit('CLOUD_SYNC_SUCCESS', 'INTEGRATION', `Auto-Sync Latar Belakang (${reason}): Berhasil disinkronkan ke Cloud`, {
+            division: 'AutoSync Engine',
+            category: 'BACKGROUND_AUTO_SYNC',
+            level: 'INFO',
+          });
+        }
+      } catch (err: any) {
+        // Non-blocking: Kasir tetap bekerja tanpa interupsi
+        console.warn('[Auto-Sync Cloud Background]', err?.message);
+      } finally {
+        isAutoSyncRunningRef.current = false;
+      }
+    }, 1200);
+  }, [appendAudit]);
+
+  // Deteksi perubahan stok produk secara otomatis untuk memicu Auto-Sync ke cloud
+  const prevStockFingerprintRef = useRef<string>('');
+  useEffect(() => {
+    if (!products || products.length === 0) return;
+    const currentFingerprint = products.map((p) => `${p.id}:${p.stock}`).join(';');
+    if (!prevStockFingerprintRef.current) {
+      prevStockFingerprintRef.current = currentFingerprint;
+      return;
+    }
+    if (prevStockFingerprintRef.current !== currentFingerprint) {
+      prevStockFingerprintRef.current = currentFingerprint;
+      triggerAutoCloudSync('STOCK_CHANGE');
+    }
+  }, [products, triggerAutoCloudSync]);
+
   const restoreSystemSnapshot = useCallback(
     (snapshot: any): { success: boolean; restoredKeys: string[]; message: string } => {
       try {
@@ -5631,8 +5745,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           tx_uuid: generateTxUuid()
         });
       }
+      // Pemicu Auto-Sync latar belakang (non-blocking) untuk transaksi POS baru
+      triggerAutoCloudSync('POS_TRANSACTION');
     },
-    [appendAudit, customers]
+    [appendAudit, customers, triggerAutoCloudSync]
   );
 
   const showReceipt = useCallback((sale: Sale) => {
@@ -9208,22 +9324,276 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateSheetConfig = useCallback((cfg: Partial<SheetConfig>) => setSheetConfig((prev) => ({ ...prev, ...cfg })), []);
   const testSheetConnection = useCallback(async () => true, []);
   const clearVoidItemLogs = useCallback(() => setVoidLogs([]), []);
+  const executeCloudSync = useCallback(
+    async (customConfig?: DualBackendConfig): Promise<CloudSyncResult> => {
+      const nowIso = new Date().toISOString();
+      const txUuid = generateTxUuid();
+
+      const snapshot: CloudSyncSnapshot = {
+        products: products || [],
+        transactions: sales || [],
+        financeEntries: financeEntries || [],
+        journalEntries: journalEntries || [],
+        businessProfile: businessProfile || DEFAULT_BUSINESS_PROFILE,
+        timestamp: nowIso,
+        txUuid,
+        appVersion: '2.5.0-ENTERPRISE',
+      };
+
+      try {
+        (dualBackendSync as any).isSyncing = true;
+        (dualBackendSync as any).notify?.();
+
+        const result = await pushSyncData(snapshot, customConfig);
+
+        if (result.success) {
+          setSales((prev) =>
+            prev.map((s) => (s.syncStatus === 'PENDING_SYNC' || !s.syncStatus ? { ...s, syncStatus: 'SYNCED' } : s))
+          );
+          await dualBackendSync.processQueue();
+          showToast(result.message, 'success');
+          appendAudit('CLOUD_SYNC_SUCCESS', 'INTEGRATION', result.message, {
+            division: currentUser?.division || 'IT & Systems',
+            category: 'CLOUD_SYNC_SUCCESS',
+            level: 'INFO',
+          });
+        } else {
+          showToast(result.message, 'error');
+          appendAudit('CLOUD_SYNC_FAILED', 'INTEGRATION', result.message, {
+            division: currentUser?.division || 'IT & Systems',
+            category: 'CLOUD_SYNC_FAILED',
+            level: 'WARN',
+          });
+        }
+
+        return result;
+      } catch (err: any) {
+        const errorResult: CloudSyncResult = {
+          success: false,
+          message: `Gagal sinkronisasi cloud: ${err.message || 'Error tidak diketahui'}`,
+          timestamp: nowIso,
+          endpoints: {
+            supabase: { endpoint: 'SUPABASE', configured: false, success: false, message: err.message },
+            gas: { endpoint: 'GAS', configured: false, success: false, message: err.message },
+          },
+          syncedCounts: {
+            products: products?.length || 0,
+            transactions: sales?.length || 0,
+            financeEntries: financeEntries?.length || 0,
+            journalEntries: journalEntries?.length || 0,
+          },
+          errors: [err.message || 'Unknown sync error'],
+        };
+        showToast(errorResult.message, 'error');
+        return errorResult;
+      } finally {
+        (dualBackendSync as any).isSyncing = false;
+        (dualBackendSync as any).notify?.();
+      }
+    },
+    [products, sales, financeEntries, journalEntries, businessProfile, currentUser, showToast, appendAudit]
+  );
+
+  const pullCloudSyncDataHandler = useCallback(
+    async (customConfig?: DualBackendConfig): Promise<CloudPullResult> => {
+      try {
+        (dualBackendSync as any).isSyncing = true;
+        (dualBackendSync as any).notify?.();
+
+        const result = await pullSyncData(customConfig);
+        if (!result.success || !result.data) {
+          showToast(result.message, result.error === 'NO_CONFIG' ? 'info' : 'error');
+          return result;
+        }
+
+        const pulled = result.data;
+        let productsAdded = 0;
+        let productsUpdated = 0;
+        let transactionsAdded = 0;
+        let financeEntriesAdded = 0;
+        let journalEntriesAdded = 0;
+
+        // 1. Penggabungan / Pembaruan Data Produk (Katalog SKU)
+        if (Array.isArray(pulled.products) && pulled.products.length > 0) {
+          setProducts((prev) => {
+            const next = [...prev];
+            const mapById = new Map<string, number>();
+            const mapByBarcode = new Map<string, number>();
+            next.forEach((p, idx) => {
+              if (p.id) mapById.set(p.id, idx);
+              if (p.barcode) mapByBarcode.set(p.barcode, idx);
+            });
+
+            for (const item of pulled.products!) {
+              const matchedIdx =
+                (item.id && mapById.has(item.id) ? mapById.get(item.id) : undefined) ??
+                (item.barcode && mapByBarcode.has(item.barcode) ? mapByBarcode.get(item.barcode) : undefined);
+
+              if (matchedIdx !== undefined) {
+                // Perbarui data produk dengan informasi terbaru dari server cloud
+                next[matchedIdx] = {
+                  ...next[matchedIdx],
+                  ...item,
+                  id: next[matchedIdx].id || item.id,
+                };
+                productsUpdated++;
+              } else {
+                // Tambahkan SKU baru yang dibuat di terminal lain
+                next.push(item);
+                const newIdx = next.length - 1;
+                if (item.id) mapById.set(item.id, newIdx);
+                if (item.barcode) mapByBarcode.set(item.barcode, newIdx);
+                productsAdded++;
+              }
+            }
+            productsRef.current = next;
+            return next;
+          });
+        }
+
+        // 2. Penggabungan Transaksi Penjualan Kasir (POS)
+        if (Array.isArray(pulled.transactions) && pulled.transactions.length > 0) {
+          setSales((prev) => {
+            const existingKeys = new Set<string>();
+            prev.forEach((s) => {
+              if (s.transaction_id) existingKeys.add(String(s.transaction_id));
+              if (s.receipt_number) existingKeys.add(String(s.receipt_number));
+              if ((s as any).id) existingKeys.add(String((s as any).id));
+              if ((s as any).tx_uuid) existingKeys.add(String((s as any).tx_uuid));
+            });
+
+            const newSales: Sale[] = [];
+            for (const s of pulled.transactions!) {
+              const key = String(
+                s.transaction_id ||
+                s.receipt_number ||
+                (s as any).id ||
+                (s as any).tx_uuid ||
+                ''
+              );
+              if (key && !existingKeys.has(key)) {
+                newSales.push({ ...s, syncStatus: 'SYNCED' });
+                existingKeys.add(key);
+                transactionsAdded++;
+              }
+            }
+
+            if (newSales.length === 0) return prev;
+            const merged = [...newSales, ...prev];
+            salesRef.current = merged;
+            return merged;
+          });
+        }
+
+        // 3. Penggabungan Entri Arus Keuangan
+        if (Array.isArray(pulled.financeEntries) && pulled.financeEntries.length > 0) {
+          setFinanceEntries((prev) => {
+            const existingIds = new Set(prev.map((f) => String(f.id)));
+            const newEntries: FinanceEntry[] = [];
+            for (const f of pulled.financeEntries!) {
+              if (f.id && !existingIds.has(String(f.id))) {
+                newEntries.push(f);
+                existingIds.add(String(f.id));
+                financeEntriesAdded++;
+              }
+            }
+            if (newEntries.length === 0) return prev;
+            const merged = [...newEntries, ...prev];
+            financeEntriesRef.current = merged;
+            return merged;
+          });
+        }
+
+        // 4. Penggabungan Jurnal Buku Besar
+        if (Array.isArray(pulled.journalEntries) && pulled.journalEntries.length > 0) {
+          setJournalEntries((prev) => {
+            const existingKeys = new Set(prev.map((j) => `${j.id || ''}:${j.reference || ''}`));
+            const newJournals: JournalEntry[] = [];
+            for (const j of pulled.journalEntries!) {
+              const k = `${j.id || ''}:${j.reference || ''}`;
+              if (!existingKeys.has(k)) {
+                newJournals.push(j);
+                existingKeys.add(k);
+                journalEntriesAdded++;
+              }
+            }
+            if (newJournals.length === 0) return prev;
+            const merged = [...newJournals, ...prev];
+            journalEntriesRef.current = merged;
+            return merged;
+          });
+        }
+
+        // 5. Update profil usaha jika cloud memiliki data nama usaha valid
+        if (pulled.businessProfile?.name && (!businessProfile?.name || businessProfile.name === 'NAMA USAHA ANDA')) {
+          updateBusinessProfile(pulled.businessProfile);
+        }
+
+        const transportLabel = result.transport === 'SUPABASE' ? 'Supabase REST API' : result.transport === 'GAS' ? 'Google Apps Script' : 'Cloud Server';
+        const summaryMsg = `Tarik Data dari Cloud berhasil (${transportLabel}): +${productsAdded} SKU baru, ${productsUpdated} SKU diperbarui, +${transactionsAdded} Transaksi POS, +${journalEntriesAdded} Jurnal akuntansi.`;
+        showToast(summaryMsg, 'success');
+
+        appendAudit('CLOUD_PULL_SUCCESS', 'INTEGRATION', summaryMsg, {
+          division: currentUser?.division || 'IT & Systems',
+          category: 'CLOUD_PULL_SYNC',
+          level: 'INFO',
+        });
+
+        const mergedResult: CloudPullResult = {
+          ...result,
+          message: summaryMsg,
+          mergedStats: {
+            productsAdded,
+            productsUpdated,
+            transactionsAdded,
+            journalEntriesAdded,
+            financeEntriesAdded,
+          },
+        };
+
+        return mergedResult;
+      } catch (err: any) {
+        const errorMsg = `Gagal menarik data dari cloud: ${err.message || 'Error tidak diketahui'}`;
+        showToast(errorMsg, 'error');
+        return {
+          success: false,
+          message: errorMsg,
+          timestamp: new Date().toISOString(),
+          error: err.message,
+        };
+      } finally {
+        (dualBackendSync as any).isSyncing = false;
+        (dualBackendSync as any).notify?.();
+      }
+    },
+    [showToast, appendAudit, currentUser, businessProfile, updateBusinessProfile]
+  );
+
+  const testCloudEndpointsHandler = useCallback(
+    async (customConfig?: DualBackendConfig): Promise<CloudConnectionPingResult> => {
+      return await testCloudConnections(customConfig);
+    },
+    []
+  );
+
   const syncOfflineTransactions = useCallback(async () => {
     try {
+      const cloudRes = await executeCloudSync();
       await dualBackendSync.processQueue();
       setSales((prev) =>
         prev.map((s) => (s.syncStatus === 'PENDING_SYNC' || !s.syncStatus ? { ...s, syncStatus: 'SYNCED' } : s))
       );
       const pendingCount = (sales || []).filter((s) => s.syncStatus === 'PENDING_SYNC').length;
-      const msg = `Sinkronisasi offline berhasil: ${pendingCount} transaksi disinkronkan via Idempotensi tx_uuid`;
-      showToast(msg, 'success');
-      return { success: true, syncedCount: pendingCount, message: msg };
+      const msg = cloudRes.success
+        ? cloudRes.message
+        : `Sinkronisasi antrean lokal: ${pendingCount} transaksi`;
+      return { success: cloudRes.success, syncedCount: pendingCount, message: msg };
     } catch (e: any) {
       const msg = `Gagal sinkronisasi: ${e.message || 'Error koneksi'}`;
       showToast(msg, 'error');
       return { success: false, syncedCount: 0, message: msg };
     }
-  }, [sales, showToast]);
+  }, [executeCloudSync, sales, showToast]);
 
   // =========================================================================
   // REMOTE MAINTENANCE & TELEMETRY HUB
@@ -9261,7 +9631,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [lastHeartbeatAt, setLastHeartbeatAt] = useState<string | null>(null);
 
   const processedRemoteCmdIdsRef = useRef<Set<string>>(new Set());
-  const salesRef = useRef(sales);
   const recordSystemError = useCallback(
     (payload: {
       message: string;
@@ -10001,9 +10370,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     unbindPosStation,
     isCashierWorkspaceActive,
     setIsCashierWorkspaceActive,
+    isAiAssistantOpen,
+    setIsAiAssistantOpen,
+    openAiAssistant,
+    closeAiAssistant,
     isOnline: true,
     offlineQueue: [],
     syncOfflineTransactions,
+    executeCloudSync,
+    pullCloudSyncData: pullCloudSyncDataHandler,
+    testCloudEndpoints: testCloudEndpointsHandler,
 
     suppliers: domainSuppliers,
     setSuppliers,

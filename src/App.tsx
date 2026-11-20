@@ -27,7 +27,8 @@ import {
   Clock,
   Eye,
   EyeOff,
-  KeyRound
+  KeyRound,
+  Sparkles,
 } from 'lucide-react';
 import { AuditProvider } from './AuditProvider';
 import { AppProvider, useApp } from './context/AppContext';
@@ -37,6 +38,7 @@ import { MasterDataModule } from './components/master/MasterDataModule';
 import SuperAdminModule from './components/admin/SuperAdminModule';
 import POSModule from './components/pos/PosModule';
 import { ModuleErrorBoundary } from './components/common/ModuleErrorBoundary';
+import { JacsAiAssistantDrawer } from './components/ai/JacsAiAssistantDrawer';
 import { ActiveNavModule, User } from './types';
 import {
   generatePosStations,
@@ -75,7 +77,6 @@ function getAllowedModulesForUser(
     return ['admin', 'executive', 'finance', 'purchasing', 'pos', 'warehouse', 'hr', 'master-data', 'security'];
   }
 
-  // Unified Non-Blocking ERP: akses penuh ke seluruh 6 pilar manajemen + POS + Master Data
   return ['pos', 'executive', 'finance', 'purchasing', 'warehouse', 'hr', 'master-data'];
 }
 
@@ -143,9 +144,7 @@ const MainLayout: React.FC = () => {
     toggleTheme,
     language,
     toggleLanguage,
-    resetDemoData,
     showToast,
-    isProductionMode,
     remoteMaintenanceLock,
     activeBranchId,
     triggerManualHeartbeatPoll,
@@ -163,6 +162,7 @@ const MainLayout: React.FC = () => {
     idleLockReason,
     idleAutoLockMinutes,
     unlockIdleScreen,
+    openAiAssistant,
   } = useApp();
 
   const [moduleResetCounter, setModuleResetCounter] = useState(0);
@@ -170,7 +170,6 @@ const MainLayout: React.FC = () => {
   const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
   const [isCashierStatusMenuOpen, setIsCashierStatusMenuOpen] = useState(false);
 
-  // Proteksi PIN Otorisasi Manajemen saat berpindah dari layar Kasir POS ke 6 Pilar Manajemen
   const [pendingAuthTarget, setPendingAuthTarget] = useState<{
     moduleId: ActiveNavModule;
     label: string;
@@ -179,7 +178,6 @@ const MainLayout: React.FC = () => {
   const [mgmtPinError, setMgmtPinError] = useState<string | null>(null);
   const [showMgmtPin, setShowMgmtPin] = useState(false);
 
-  // State Terminal Idle Auto-Lock
   const [idleUnlockPin, setIdleUnlockPin] = useState('');
   const [idleUnlockError, setIdleUnlockError] = useState<string | null>(null);
   const [isUnlockingIdle, setIsUnlockingIdle] = useState(false);
@@ -291,12 +289,13 @@ const MainLayout: React.FC = () => {
   const activeDeviceStatus =
     stationStatusList.find((s) => s.stationCode === activeDeviceStationCode)?.status || 'BELUM_BUKA';
 
-  // Jika belum login, tampilkan PublicGateway (halaman Login bawaan proyek dengan pembatasan RBAC)
+  // Jika belum login, tampilkan PublicGateway + Laci JacS AI Assistant
   if (!currentUser) {
     return (
       <>
         <ToastOverlay />
         <PublicGateway onLoginSuccess={() => {}} />
+        <JacsAiAssistantDrawer />
       </>
     );
   }
@@ -314,7 +313,6 @@ const MainLayout: React.FC = () => {
     setIsWorkspaceMenuOpen(false);
     setIsCashierStatusMenuOpen(false);
 
-    // Kembali ke Kasir POS selalu instan tanpa PIN & tanpa terblokir
     if (targetMod === 'pos') {
       setPendingAuthTarget(null);
       setIsCashierWorkspaceActive(false);
@@ -323,7 +321,6 @@ const MainLayout: React.FC = () => {
       return;
     }
 
-    // Jika sedang di layar Kasir POS dan menuju 6 Pilar Manajemen / SuperAdmin, wajib verifikasi PIN Otorisasi Manajemen
     if (currentModule === 'pos') {
       const targetMeta = HYBRID_MANAGEMENT_PILLARS.find((p) => p.id === targetMod);
       const targetLabel =
@@ -375,6 +372,7 @@ const MainLayout: React.FC = () => {
       }`}
     >
       <ToastOverlay />
+      <JacsAiAssistantDrawer />
 
       {/* Slim Top Status Bar — Tata Letak Presisi Anti-Tumpuk */}
       <header
@@ -398,7 +396,7 @@ const MainLayout: React.FC = () => {
                   const parent = e.currentTarget.parentElement;
                   if (parent && !parent.querySelector('.fallback-text')) {
                     const span = document.createElement('span');
-                    span.className = 'font-black text-xs text-cyan-400 fallback-text';
+                    span.className = 'font-normal text-xs text-cyan-400 fallback-text';
                     span.innerText = 'JE';
                     parent.appendChild(span);
                   }
@@ -406,12 +404,12 @@ const MainLayout: React.FC = () => {
               />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="font-black text-xs sm:text-sm tracking-wider uppercase whitespace-nowrap">
+              <span className="font-['Plus_Jakarta_Sans'] font-normal text-xs sm:text-sm tracking-wider whitespace-nowrap">
                 JacS Enterprise
               </span>
               <span className="text-slate-500 hidden 2xl:inline">—</span>
               <span
-                className={`hidden 2xl:inline-block px-1.5 py-0.5 font-mono text-[10px] font-bold rounded whitespace-nowrap ${
+                className={`hidden 2xl:inline-block px-1.5 py-0.5 font-mono text-[10px] font-medium rounded whitespace-nowrap ${
                   isLight
                     ? 'bg-cyan-50 text-cyan-700 border border-cyan-200'
                     : 'bg-slate-800 text-cyan-400'
@@ -497,69 +495,69 @@ const MainLayout: React.FC = () => {
                     : 'bg-slate-900 border-slate-700 text-slate-100'
                 }`}
               >
-                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
-                    <div>
-                      <div className="text-xs font-bold">Status Live Loket Kasir</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                        {onlineCashierCount} Online · {pausedCashierCount} Istirahat · {unopenedCashierCount} Belum Buka
-                      </div>
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <div>
+                    <div className="text-xs font-bold">Status Live Loket Kasir</div>
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                      {onlineCashierCount} Online · {pausedCashierCount} Istirahat · {unopenedCashierCount} Belum Buka
                     </div>
-                    <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30">
-                      {totalStationCount} LOKET
-                    </span>
                   </div>
-
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
-                    {stationStatusList.map((st) => {
-                      const isCurrentDevice = st.stationCode === activeDeviceStationCode;
-                      return (
-                        <div
-                          key={st.stationCode}
-                          className={`px-2.5 py-2 rounded-lg border flex items-center justify-between gap-2 ${
-                            isCurrentDevice
-                              ? isLight
-                                ? 'bg-cyan-50/70 border-cyan-300'
-                                : 'bg-cyan-500/10 border-cyan-500/35'
-                              : isLight
-                              ? 'bg-slate-50 border-slate-200'
-                              : 'bg-slate-950/70 border-slate-800'
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs font-bold">{st.stationCode}</span>
-                              {isCurrentDevice && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
-                                  PC INI
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              {st.cashierName ? `Kasir: ${st.cashierName}` : st.posTypeLabel}
-                            </div>
-                          </div>
-
-                          {st.status === 'ONLINE' ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              Online
-                            </span>
-                          ) : st.status === 'ISTIRAHAT' ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0">
-                              <Coffee className="w-3 h-3" />
-                              Istirahat
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30 shrink-0">
-                              <Clock className="w-3 h-3" />
-                              Belum Buka Shift
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30">
+                    {totalStationCount} LOKET
+                  </span>
                 </div>
+
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                  {stationStatusList.map((st) => {
+                    const isCurrentDevice = st.stationCode === activeDeviceStationCode;
+                    return (
+                      <div
+                        key={st.stationCode}
+                        className={`px-2.5 py-2 rounded-lg border flex items-center justify-between gap-2 ${
+                          isCurrentDevice
+                            ? isLight
+                              ? 'bg-cyan-50/70 border-cyan-300'
+                              : 'bg-cyan-500/10 border-cyan-500/35'
+                            : isLight
+                            ? 'bg-slate-50 border-slate-200'
+                            : 'bg-slate-950/70 border-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs font-bold">{st.stationCode}</span>
+                            {isCurrentDevice && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
+                                PC INI
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {st.cashierName ? `Kasir: ${st.cashierName}` : st.posTypeLabel}
+                          </div>
+                        </div>
+
+                        {st.status === 'ONLINE' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            Online
+                          </span>
+                        ) : st.status === 'ISTIRAHAT' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0">
+                            <Coffee className="w-3 h-3" />
+                            Istirahat
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30 shrink-0">
+                            <Clock className="w-3 h-3" />
+                            Belum Buka Shift
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
 
@@ -576,7 +574,7 @@ const MainLayout: React.FC = () => {
           </span>
         </div>
 
-        {/* KANAN: Workspace Switcher + Status Widget + Kontrol Bahasa, Tema, & Logout dalam 1 Baris Rapi */}
+        {/* KANAN: Workspace Switcher + Status Widget + Tanya AI + Bahasa, Tema, & Logout */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
           {isHybridWorkspaceSwitcherVisible && (
             <div className="relative flex items-center gap-1.5 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
@@ -689,53 +687,68 @@ const MainLayout: React.FC = () => {
             </div>
           )}
 
-          {/* Status Widget + Kontrol Bahasa, Tema, & Logout */}
+          {/* Status Widget + Tanya AI + Kontrol Bahasa, Tema, & Logout */}
           <div className="flex items-center gap-1.5 shrink-0">
             <DualBackendStatusWidget />
 
-          <button
-            type="button"
-            onClick={toggleLanguage}
-            className={`px-2 py-1 rounded-lg border text-[11px] font-mono font-bold uppercase transition cursor-pointer ${
-              isLight
-                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
-                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
-            }`}
-            title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
-          >
-            {language.toUpperCase()}
-          </button>
+            <button
+              type="button"
+              id="btn-app-topbar-ask-ai"
+              onClick={openAiAssistant}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium font-['Plus_Jakarta_Sans'] flex items-center gap-1.5 transition cursor-pointer ${
+                isLight
+                  ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                  : 'bg-cyan-950/50 hover:bg-cyan-900/70 border-cyan-700/60 text-cyan-300'
+              }`}
+              title="Tanya JacS AI Assistant"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+              <span className="hidden sm:inline">Tanya AI</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className={`p-1.5 rounded-lg border transition cursor-pointer ${
-              isLight
-                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
-            }`}
-            title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-3.5 h-3.5 text-amber-400" />
-            ) : (
-              <Moon className="w-3.5 h-3.5 text-blue-600" />
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              className={`px-2 py-1 rounded-lg border text-[11px] font-mono font-bold uppercase transition cursor-pointer ${
+                isLight
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+              }`}
+              title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
+            >
+              {language.toUpperCase()}
+            </button>
 
-          <button
-            type="button"
-            onClick={logout}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
-              isLight
-                ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
-                : 'bg-rose-950/60 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
-            }`}
-            title="Keluar & kembali ke halaman Login"
-          >
-            <LogOut className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden sm:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>
-          </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                isLight
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
+              }`}
+              title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Moon className="w-3.5 h-3.5 text-blue-600" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={logout}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+                isLight
+                  ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                  : 'bg-rose-950/60 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
+              }`}
+              title="Keluar & kembali ke halaman Login"
+            >
+              <LogOut className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>
+            </button>
           </div>
         </div>
       </header>

@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { dualBackendSync, SyncStatusSnapshot } from '../services/dualBackendSync';
 import { useApp } from '../context/AppContext';
+import { CloudSyncResult, testCloudConnections } from '../services/cloudSyncService';
+import { Cloud, CheckCircle2, AlertTriangle, RefreshCw, X, Download, Server } from 'lucide-react';
 
 export const DualBackendStatusWidget: React.FC = () => {
-  const { products, transactions } = useApp();
+  const { products, transactions, executeCloudSync, language } = useApp();
+  const isEn = language === 'en';
   const [status, setStatus] = useState<SyncStatusSnapshot>(() => dualBackendSync.getSnapshot());
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [lastSyncResult, setLastSyncResult] = useState<CloudSyncResult | null>(null);
 
   // Form Konfigurasi Dual-Backend
   const [supabaseUrl, setSupabaseUrl] = useState('');
@@ -23,32 +28,49 @@ export const DualBackendStatusWidget: React.FC = () => {
 
   const handleOpenSettings = () => {
     const cfg = dualBackendSync.getConfig();
-    setSupabaseUrl(cfg.supabaseUrl);
-    setSupabaseAnonKey(cfg.supabaseAnonKey);
-    setGasWebhookUrl(cfg.gasWebhookUrl);
+    setSupabaseUrl(cfg.supabaseUrl || '');
+    setSupabaseAnonKey(cfg.supabaseAnonKey || '');
+    setGasWebhookUrl(cfg.gasWebhookUrl || '');
     setPingResult(null);
     setIsModalOpen(true);
   };
 
-  const handleSaveConfig = () => {
-    dualBackendSync.saveConfig({
+  const handleSyncNow = async () => {
+    if (isSyncingNow || status.isSyncing) return;
+    setIsSyncingNow(true);
+    try {
+      const res = await executeCloudSync();
+      setLastSyncResult(res);
+      setStatus(dualBackendSync.getSnapshot());
+    } finally {
+      setIsSyncingNow(false);
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    const cfg = {
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim(),
-      gasWebhookUrl: gasWebhookUrl.trim()
-    });
-    dualBackendSync.processQueue();
+      gasWebhookUrl: gasWebhookUrl.trim(),
+    };
+    dualBackendSync.saveConfig(cfg);
     setIsModalOpen(false);
+    await handleSyncNow();
   };
 
   const handleTestPing = async () => {
     setIsTesting(true);
-    dualBackendSync.saveConfig({
+    const cfg = {
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim(),
-      gasWebhookUrl: gasWebhookUrl.trim()
+      gasWebhookUrl: gasWebhookUrl.trim(),
+    };
+    dualBackendSync.saveConfig(cfg);
+    const res = await testCloudConnections(cfg);
+    setPingResult({
+      supabase: res.supabase.statusText,
+      gas: res.gas.statusText,
     });
-    const res = await dualBackendSync.testConnections();
-    setPingResult(res);
     setIsTesting(false);
   };
 
@@ -57,7 +79,7 @@ export const DualBackendStatusWidget: React.FC = () => {
       productsCount: products?.length || 0,
       transactionsCount: transactions?.length || 0,
       products,
-      transactions
+      transactions,
     });
   };
 
@@ -70,14 +92,22 @@ export const DualBackendStatusWidget: React.FC = () => {
     badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
     dotColor = 'bg-amber-400';
     statusLabel = `OFFLINE — QUEUED [${status.queuedCount}]`;
-  } else if (status.isSyncing) {
+  } else if (status.isSyncing || isSyncingNow) {
     badgeColor = 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300';
     dotColor = 'bg-cyan-400 animate-ping';
     statusLabel = 'SYNCING...';
+  } else if (lastSyncResult && !lastSyncResult.success) {
+    badgeColor = 'bg-rose-500/15 border-rose-500/40 text-rose-300';
+    dotColor = 'bg-rose-400';
+    statusLabel = 'SYNC FAILED';
   } else if (status.queuedCount > 0) {
     badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
     dotColor = 'bg-amber-400';
     statusLabel = `ONLINE — QUEUED [${status.queuedCount}]`;
+  } else {
+    badgeColor = 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300';
+    dotColor = 'bg-emerald-400';
+    statusLabel = 'ONLINE — SYNCED';
   }
 
   return (
@@ -87,7 +117,11 @@ export const DualBackendStatusWidget: React.FC = () => {
         <button
           type="button"
           onClick={handleOpenSettings}
-          title="Konfigurasi Dual-Backend (Supabase & Google Apps Script)"
+          title={
+            lastSyncResult && !lastSyncResult.success
+              ? `Klik untuk detail error: ${lastSyncResult.message}`
+              : 'Konfigurasi Dual-Backend Cloud Sync (Supabase & Google Apps Script)'
+          }
           className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold whitespace-nowrap transition-all hover:opacity-90 cursor-pointer shrink-0 ${badgeColor}`}
         >
           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
@@ -96,62 +130,78 @@ export const DualBackendStatusWidget: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => dualBackendSync.processQueue()}
-          disabled={!status.isOnline || status.isSyncing}
-          title="Paksa Sinkronisasi Antrean Sekarang"
-          className="px-2 py-1 bg-slate-800 hover:bg-cyan-600 disabled:opacity-40 text-slate-200 hover:text-slate-950 text-[10px] font-bold rounded-lg border border-slate-700 whitespace-nowrap transition-all cursor-pointer shrink-0"
+          onClick={handleSyncNow}
+          disabled={!status.isOnline || status.isSyncing || isSyncingNow}
+          title="Kirim snapshot data riil ke cloud sekarang (Supabase & GAS)"
+          className="px-2.5 py-1 bg-slate-800 hover:bg-cyan-600 disabled:opacity-40 text-slate-200 hover:text-slate-950 text-[10px] font-bold rounded-lg border border-slate-700 whitespace-nowrap transition-all cursor-pointer shrink-0 flex items-center gap-1"
         >
-          Sync Now
+          <RefreshCw className={`w-3 h-3 ${isSyncingNow || status.isSyncing ? 'animate-spin text-cyan-400' : ''}`} />
+          <span>{isSyncingNow || status.isSyncing ? 'Syncing...' : 'Sync Now'}</span>
         </button>
       </div>
 
       {/* Modal Konfigurasi Dual-Backend & Backup */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-5 text-slate-100 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
-              <div>
-                <h2 className="text-sm font-black text-cyan-400 uppercase tracking-wider">
-                  JacS Enterprise — Dual-Backend Sync Engine
-                </h2>
-                <p className="text-[11px] text-slate-400">
-                  Sinkronisasi Paralel Supabase REST + Google Apps Script & Antrean Offline FIFO
-                </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-5 text-slate-100 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center shrink-0">
+                  <Cloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black text-cyan-400 uppercase tracking-wider">
+                    {isEn ? 'Dual-Backend Cloud Sync Engine' : 'Layanan Sinkronisasi Cloud Nyata'}
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Supabase REST API (Realtime Database) &amp; Google Apps Script Webhook
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Ringkasan Antrean Offline */}
-            <div className="grid grid-cols-3 gap-2 mb-4 text-center">
-              <div className="bg-slate-950 border border-slate-800 p-2 rounded-lg">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl">
                 <p className="text-[10px] text-slate-400">Jaringan</p>
                 <p className={`text-xs font-black ${status.isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {status.isOnline ? 'ONLINE' : 'OFFLINE'}
                 </p>
               </div>
-              <div className="bg-slate-950 border border-slate-800 p-2 rounded-lg">
-                <p className="text-[10px] text-slate-400">Antrean FIFO</p>
+              <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl">
+                <p className="text-[10px] text-slate-400">Antrean Sync</p>
                 <p className="text-xs font-black text-cyan-400">{status.queuedCount} Item</p>
               </div>
-              <div className="bg-slate-950 border border-slate-800 p-2 rounded-lg">
+              <div className="bg-slate-950 border border-slate-800 p-2 rounded-xl">
                 <p className="text-[10px] text-slate-400">Sync Terakhir</p>
-                <p className="text-[10px] font-mono text-slate-300 mt-0.5">
+                <p className="text-[10px] font-mono text-slate-300 mt-0.5 truncate">
                   {status.lastSyncTime ? new Date(status.lastSyncTime).toLocaleTimeString('id-ID') : 'Belum Pernah'}
                 </p>
               </div>
             </div>
 
             {/* Form Jalur 1: Supabase */}
-            <div className="space-y-3 mb-4">
+            <div className="space-y-3">
               <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-emerald-400">Jalur 1: Supabase REST API (Realtime POS & Stok)</span>
-                  <span className="text-[10px] font-mono text-slate-400">{status.supabaseStatus}</span>
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                    <Server className="w-3.5 h-3.5" />
+                    <span>Jalur 1: Supabase REST API</span>
+                  </span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                    status.supabaseStatus === 'CONNECTED'
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                    {status.supabaseStatus}
+                  </span>
                 </div>
                 <input
                   type="text"
@@ -172,8 +222,17 @@ export const DualBackendStatusWidget: React.FC = () => {
               {/* Form Jalur 2: Google Apps Script */}
               <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-amber-400">Jalur 2: Google Apps Script Webhook (Google Sheets)</span>
-                  <span className="text-[10px] font-mono text-slate-400">{status.gasStatus}</span>
+                  <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>Jalur 2: Google Apps Script Webhook</span>
+                  </span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                    status.gasStatus === 'CONNECTED'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                    {status.gasStatus}
+                  </span>
                 </div>
                 <input
                   type="text"
@@ -187,9 +246,29 @@ export const DualBackendStatusWidget: React.FC = () => {
 
             {/* Hasil Test Ping */}
             {pingResult && (
-              <div className="mb-4 p-2.5 bg-slate-950 border border-cyan-800/50 rounded-lg text-[11px] font-mono space-y-1">
+              <div className="p-2.5 bg-slate-950 border border-cyan-800/50 rounded-xl text-[11px] font-mono space-y-1">
                 <p className="text-emerald-300">• Supabase: {pingResult.supabase}</p>
                 <p className="text-amber-300">• Google Apps Script: {pingResult.gas}</p>
+              </div>
+            )}
+
+            {/* Hasil Terakhir Sinkronisasi */}
+            {lastSyncResult && (
+              <div
+                className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                  lastSyncResult.success
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  {lastSyncResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{lastSyncResult.message}</span>
+                </div>
               </div>
             )}
 
@@ -197,25 +276,29 @@ export const DualBackendStatusWidget: React.FC = () => {
             <div className="flex flex-wrap justify-between items-center gap-2 pt-2 border-t border-slate-800">
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={handleTestPing}
                   disabled={isTesting}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold rounded-lg border border-slate-700"
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-bold rounded-lg border border-slate-700 cursor-pointer disabled:opacity-50"
                 >
                   {isTesting ? 'Testing...' : 'Test Ping'}
                 </button>
                 <button
+                  type="button"
                   onClick={handleExportBackup}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-lg border border-slate-700"
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold rounded-lg border border-slate-700 cursor-pointer flex items-center gap-1.5"
                 >
-                  Export Backup JSON
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Backup JSON</span>
                 </button>
               </div>
 
               <button
+                type="button"
                 onClick={handleSaveConfig}
-                className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-black rounded-lg uppercase tracking-wider"
+                className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-black rounded-lg uppercase tracking-wider cursor-pointer"
               >
-                Simpan & Sinkronkan
+                Simpan &amp; Sync Sekarang
               </button>
             </div>
           </div>

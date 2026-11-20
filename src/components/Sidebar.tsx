@@ -102,8 +102,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-4 border-b border-slate-800/80 flex items-center justify-between">
         {!isSidebarCollapsed && (
           <div className="overflow-hidden">
-            <h1 className="text-sm font-bold text-cyan-400 tracking-wider truncate">
-              JacS RetailOS ERP
+            <h1 className="font-['Plus_Jakarta_Sans'] text-sm font-normal text-cyan-400 tracking-wider truncate">
+              JacS Enterprise
             </h1>
             <p className="text-[11px] text-slate-400 truncate mt-0.5">
               {contextualProfile.position}

@@ -11,13 +11,13 @@ import {
   LogIn,
   User as UserIcon,
   AlertCircle,
-  AppWindow,
   Eye,
   EyeOff,
   Sun,
   Moon,
   Loader2,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 import { User } from '../../types';
 import { signSessionPayload } from '../../utils/securityUtils';
@@ -98,7 +98,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     addAuditLog,
     theme,
     toggleTheme,
-    businessDomainConfig,
+    openAiAssistant,
   } = useApp();
 
   const [showSuperAdminModal, setShowSuperAdminModal] = useState(false);
@@ -371,7 +371,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             }}
           />
           <div>
-            <span className="font-extrabold text-sm tracking-wide block leading-tight text-slate-900 dark:text-white">
+            <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm tracking-wider block leading-tight text-slate-900 dark:text-white">
               JacS Enterprise
             </span>
             <p className="text-[10px] text-cyan-600 dark:text-cyan-400 font-['JetBrains_Mono'] leading-tight">
@@ -381,6 +381,18 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Tombol Tanya AI */}
+          <button
+            type="button"
+            id="btn-gateway-ask-ai"
+            onClick={openAiAssistant}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/10 via-teal-500/10 to-emerald-500/10 hover:from-cyan-500/20 hover:via-teal-500/20 hover:to-emerald-500/20 border border-cyan-500/35 text-cyan-600 dark:text-cyan-400 hover:border-cyan-400 transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs font-medium font-['Plus_Jakarta_Sans'] shadow-sm"
+            title="Tanya JacS AI Assistant"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+            <span>Tanya AI</span>
+          </button>
+
           <button
             type="button"
             onClick={toggleTheme}
@@ -717,7 +729,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 py-2 px-6 border-t border-slate-300/80 dark:border-slate-800/60 text-center text-[10px] text-slate-600 dark:text-slate-500 font-['JetBrains_Mono'] shrink-0 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md">
+      <footer className="relative z-10 py-2 px-6 border-t border-slate-300/80 dark:border-slate-800/60 text-center text-[10px] text-slate-600 dark:text-slate-500 font-['Plus_Jakarta_Sans'] font-normal tracking-wider shrink-0 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md">
         JacS Enterprise • RetailOS ERP Ecosystem
       </footer>
     </div>

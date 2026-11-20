@@ -10,6 +10,7 @@ import {
   Terminal,
   X,
   Home,
+  Sparkles,
 } from 'lucide-react';
 
 export interface TopbarProps {
@@ -32,6 +33,7 @@ export const Topbar: React.FC<TopbarProps> = ({
     activeUser,
     contextualProfile,
     logout,
+    openAiAssistant,
   } = useApp();
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -78,7 +80,7 @@ export const Topbar: React.FC<TopbarProps> = ({
             title="JacS Enterprise • RetailOS ERP"
           >
             <div
-              className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-black text-xs transition-transform group-hover:scale-105 ${
+              className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-normal text-xs transition-transform group-hover:scale-105 ${
                 isLight
                   ? 'bg-transparent text-cyan-600'
                   : 'bg-black text-cyan-400 border border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.35)]'
@@ -89,11 +91,24 @@ export const Topbar: React.FC<TopbarProps> = ({
 
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="font-mono font-black text-xs md:text-sm tracking-tight bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 bg-clip-text text-transparent">
+                <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm md:text-[15px] tracking-wider bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 bg-clip-text text-transparent">
                   JacS Enterprise
                 </span>
                 <span
-                  className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider border hidden sm:inline-block ${ isLight ? 'bg-cyan-50 border-cyan-200 text-cyan-800' : 'bg-cyan-950/60 border-cyan-800/80 text-cyan-400' }`} > {contextualProfile?.moduleTitle || 'RETAILOS ERP'} </span> </div> </div> </div>  {/* Pemisah Vertikal & Tombol Beranda Langsung di Navbar */} <div className={`h-6 w-[1px] mx-0.5 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
+                  className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-medium uppercase tracking-wider border hidden sm:inline-block ${
+                    isLight
+                      ? 'bg-cyan-50 border-cyan-200 text-cyan-800'
+                      : 'bg-cyan-950/60 border-cyan-800/80 text-cyan-400'
+                  }`}
+                >
+                  {contextualProfile?.moduleTitle || 'RETAILOS ERP'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Pemisah Vertikal & Tombol Beranda Langsung di Navbar */}
+          <div className={`h-6 w-[1px] mx-0.5 ${isLight ? 'bg-slate-200' : 'bg-slate-800'}`} />
 
           <button
             type="button"
@@ -115,6 +130,22 @@ export const Topbar: React.FC<TopbarProps> = ({
 
         {/* Kanan: Bahasa, Tema, Profil & Logout */}
         <div className="flex items-center gap-2 sm:gap-2.5">
+          {/* Tombol Tanya AI */}
+          <button
+            type="button"
+            id="btn-topbar-ask-ai"
+            onClick={openAiAssistant}
+            className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 text-xs font-medium font-['Plus_Jakarta_Sans'] transition cursor-pointer active:scale-95 ${
+              isLight
+                ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                : 'bg-cyan-950/40 hover:bg-cyan-900/60 border-cyan-700/50 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
+            }`}
+            title="Tanya JacS AI Assistant"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+            <span className="hidden sm:inline">Tanya AI</span>
+          </button>
+
           <button
             type="button"
             id="btn-topbar-language-toggle"

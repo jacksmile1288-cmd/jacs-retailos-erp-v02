@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { useAudit } from '../../audit';
 import { CloverEnvironment, dualBackendSync, RemoteCommandType } from '../../services/dualBackendSync';
 import { CloverSyncResult } from '../../services/cloverSyncService';
+import { CloudSyncResult, CloudConnectionPingResult, CloudPullResult } from '../../services/cloudSyncService';
 import { OperationalTopologyMode, Terminal, UserRole } from '../../types';
 import {
   clearBoundPosStation,
@@ -27,6 +28,7 @@ import {
   Terminal as TerminalIcon,
   Activity,
   Cpu,
+  Cloud,
   HardDrive,
   RefreshCw,
   CheckCircle2,
@@ -124,7 +126,193 @@ import { JacsSOPManualTab } from './JacsSOPManualTab';
 import { JacsBranchManagementTab } from './JacsBranchManagementTab';
 import { MasterDataModule } from '../master/MasterDataModule';
 import { MigrationEntityType } from '../../types';
-import { getTerminalIndustry } from '../../data/industryTerminalProducts';
+const SUPABASE_BACKEND_SQL_SNIPPET = `-- =========================================================================
+-- JAC-S RETAILOS ERP: SUPABASE BACKEND SETUP SCRIPT
+-- =========================================================================
+-- 1. Masuk ke: https://supabase.com -> Buka Project Anda -> Menu SQL Editor
+-- 2. Buat "New Query", tempelkan skrip SQL ini, lalu klik "Run" (F5)
+
+-- A. Buat Tabel Utama 'jacs_erp_snapshots' untuk Menyimpan Snapshot POS & ERP
+CREATE TABLE IF NOT EXISTS jacs_erp_snapshots (
+    id TEXT PRIMARY KEY,
+    business_name TEXT DEFAULT 'JACS ENTERPRISE',
+    products_count INTEGER DEFAULT 0,
+    transactions_count INTEGER DEFAULT 0,
+    finance_count INTEGER DEFAULT 0,
+    journal_count INTEGER DEFAULT 0,
+    snapshot_payload JSONB NOT NULL,
+    synced_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- B. Indeks Performa untuk Mempercepat Query Pull Sync (Order by synced_at)
+CREATE INDEX IF NOT EXISTS idx_jacs_snapshots_synced_at 
+ON jacs_erp_snapshots (synced_at DESC);
+
+-- C. View Kompatibilitas 'cloud_sync' (Mendukung Endpoint Alternatif)
+CREATE OR REPLACE VIEW cloud_sync AS 
+SELECT * FROM jacs_erp_snapshots;
+
+-- D. Aktifkan Row Level Security (RLS)
+ALTER TABLE jacs_erp_snapshots ENABLE ROW LEVEL SECURITY;
+
+-- E. Kebijakan Keamanan RLS untuk Peran Anon / Publik & Authenticated
+DROP POLICY IF EXISTS "Izinkan Anon Membaca Snapshot Cloud" ON jacs_erp_snapshots;
+CREATE POLICY "Izinkan Anon Membaca Snapshot Cloud"
+ON jacs_erp_snapshots FOR SELECT
+TO anon, authenticated
+USING (true);
+
+DROP POLICY IF EXISTS "Izinkan Anon Menyimpan Snapshot Cloud" ON jacs_erp_snapshots;
+CREATE POLICY "Izinkan Anon Menyimpan Snapshot Cloud"
+ON jacs_erp_snapshots FOR INSERT
+TO anon, authenticated
+WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Izinkan Anon Memperbarui Snapshot Cloud" ON jacs_erp_snapshots;
+CREATE POLICY "Izinkan Anon Memperbarui Snapshot Cloud"
+ON jacs_erp_snapshots FOR UPDATE
+TO anon, authenticated
+USING (true)
+WITH CHECK (true);
+
+-- F. Berikan Hak Akses ke Role Anon dan Authenticated
+GRANT ALL ON TABLE jacs_erp_snapshots TO anon, authenticated;
+GRANT ALL ON TABLE cloud_sync TO anon, authenticated;`;
+
+const GOOGLE_APPS_SCRIPT_SNIPPET = `/**
+ * =========================================================================
+ * JACS RETAILOS ERP: GOOGLE APPS SCRIPT CLOUD BACKEND BRIDGE
+ * =========================================================================
+ * 1. Buka https://script.google.com atau Google Sheets: Extensions -> Apps Script
+ * 2. Tempelkan seluruh kode ini ke file 'Code.gs'
+ * 3. Klik tombol 'Deploy' -> 'New deployment'
+ * 4. Pilih tipe: 'Web app'
+ *    - Execute as: 'Me' (email Anda)
+ *    - Who has access: 'Anyone' (siapapun)
+ * 5. Salin Web App URL (akhiran /exec) dan tempel ke Form Integrasi Cloud di JacS ERP
+ */
+
+// 1. Tangani PUSH SNAPSHOT dari JacS RetailOS POS (HTTP POST)
+function doPost(e) {
+  try {
+    var raw = e && e.postData && e.postData.contents ? e.postData.contents : "";
+    if (!raw) {
+      return jsonResponse({ success: false, status: "error", message: "Payload kosong" });
+    }
+
+    var data = JSON.parse(raw);
+    var snapshot = data.payload || data;
+    var txUuid = data.tx_uuid || data.txUuid || Utilities.getUuid();
+    var timestamp = data.timestamp || new Date().toISOString();
+    var businessName = data.business_name || (snapshot.businessProfile ? snapshot.businessProfile.name : "JACS ERP");
+
+    // Simpan snapshot JSON lengkap ke Script Properties
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty("LATEST_SNAPSHOT", JSON.stringify(snapshot));
+    props.setProperty("LATEST_SYNC_INFO", JSON.stringify({
+      txUuid: txUuid,
+      timestamp: timestamp,
+      businessName: businessName,
+      counts: data.counts || {}
+    }));
+
+    // Simpan ringkasan log ke Tab Spreadsheet Aktif (Opsional / Auto-Create)
+    logToSpreadsheet(txUuid, timestamp, businessName, data.counts, snapshot);
+
+    return jsonResponse({
+      success: true,
+      status: "success",
+      message: "Snapshot berhasil disimpan ke Google Cloud (" + (data.counts ? data.counts.products + " SKU, " + data.counts.transactions + " Transaksi" : "OK") + ")",
+      timestamp: timestamp,
+      tx_uuid: txUuid
+    });
+  } catch (err) {
+    return jsonResponse({
+      success: false,
+      status: "error",
+      message: "Gagal memproses snapshot: " + err.toString()
+    });
+  }
+}
+
+// 2. Tangani PULL SNAPSHOT & Ping Status (HTTP GET)
+function doGet(e) {
+  try {
+    var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : "PULL_SNAPSHOT";
+
+    if (action === "PING") {
+      return jsonResponse({
+        success: true,
+        status: "OK",
+        message: "Google Apps Script Webhook Aktif & Siap Menerima Data"
+      });
+    }
+
+    // Default: Tarik Snapshot Terbaru
+    var props = PropertiesService.getScriptProperties();
+    var rawSnapshot = props.getProperty("LATEST_SNAPSHOT");
+    var rawInfo = props.getProperty("LATEST_SYNC_INFO");
+
+    if (!rawSnapshot) {
+      return jsonResponse({
+        success: false,
+        status: "empty",
+        message: "Belum ada snapshot yang tersimpan di Google Apps Script."
+      });
+    }
+
+    var snapshotObj = JSON.parse(rawSnapshot);
+    var infoObj = rawInfo ? JSON.parse(rawInfo) : {};
+
+    return jsonResponse({
+      success: true,
+      status: "success",
+      message: "Snapshot cloud berhasil diambil",
+      syncInfo: infoObj,
+      snapshot: snapshotObj
+    });
+  } catch (err) {
+    return jsonResponse({
+      success: false,
+      status: "error",
+      message: "Gagal mengambil snapshot: " + err.toString()
+    });
+  }
+}
+
+// Helper: Catat riwayat sinkronisasi ke Sheet "Cloud_Sync_Logs"
+function logToSpreadsheet(txUuid, timestamp, businessName, counts, snapshot) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return;
+
+    var sheetName = "Cloud_Sync_Logs";
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.appendRow(["Timestamp", "Tx UUID", "Nama Usaha", "Jumlah SKU", "Jumlah Transaksi", "Jumlah Keuangan", "Jumlah Jurnal"]);
+      sheet.getRange(1, 1, 1, 7).setFontWeight("bold").setBackground("#e0f2fe");
+    }
+
+    var c = counts || {};
+    var skuCount = c.products !== undefined ? c.products : (snapshot.products ? snapshot.products.length : 0);
+    var txCount = c.transactions !== undefined ? c.transactions : (snapshot.transactions ? snapshot.transactions.length : 0);
+    var finCount = c.financeEntries !== undefined ? c.financeEntries : (snapshot.financeEntries ? snapshot.financeEntries.length : 0);
+    var jvCount = c.journalEntries !== undefined ? c.journalEntries : (snapshot.journalEntries ? snapshot.journalEntries.length : 0);
+
+    sheet.appendRow([timestamp, txUuid, businessName, skuCount, txCount, finCount, jvCount]);
+  } catch (e) {
+    // Abaikan jika bukan bound-script Spreadsheet
+  }
+}
+
+// Helper: Response JSON Standard dengan Header MimeType
+function jsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+`;
 
 export const SuperAdminModule: React.FC = () => {
   const {
@@ -233,6 +421,9 @@ export const SuperAdminModule: React.FC = () => {
     triggerIdleLockNow,
     securityShieldStats,
     recordSecurityShieldEvent,
+    executeCloudSync,
+    testCloudEndpoints,
+    pullCloudSyncData,
   } = useApp();
 
   const { recordAudit } = useAudit();
@@ -394,6 +585,118 @@ export const SuperAdminModule: React.FC = () => {
     showToast('Kredensial Clover POS berhasil disimpan ke konfigurasi sistem.', 'success');
   };
 
+  // Dual-Backend Cloud Integration States (Supabase REST & Google Apps Script Webhook)
+  const [cloudSupabaseUrl, setCloudSupabaseUrl] = useState(() => dualBackendSync.getConfig().supabaseUrl || '');
+  const [cloudSupabaseAnonKey, setCloudSupabaseAnonKey] = useState(() => dualBackendSync.getConfig().supabaseAnonKey || '');
+  const [cloudGasWebhookUrl, setCloudGasWebhookUrl] = useState(() => dualBackendSync.getConfig().gasWebhookUrl || '');
+  const [showCloudAnonKey, setShowCloudAnonKey] = useState(false);
+  const [isCloudTestingAndSyncing, setIsCloudTestingAndSyncing] = useState(false);
+  const [lastCloudSyncResult, setLastCloudSyncResult] = useState<CloudSyncResult | null>(null);
+  const [cloudPingResult, setCloudPingResult] = useState<CloudConnectionPingResult | null>(null);
+
+  const handleSaveCloudConfig = (notify = true) => {
+    const newCfg = {
+      supabaseUrl: cloudSupabaseUrl.trim(),
+      supabaseAnonKey: cloudSupabaseAnonKey.trim(),
+      gasWebhookUrl: cloudGasWebhookUrl.trim(),
+    };
+    dualBackendSync.saveConfig(newCfg);
+    if (notify) {
+      showToast('Konfigurasi Dual-Backend Cloud (Supabase & GAS) berhasil disimpan.', 'success');
+      recordAudit({
+        traceId: `CLOUD-CFG-${Date.now()}`,
+        userId: currentUser?.id || 'super-admin',
+        userName: currentUser?.name || 'Super Admin',
+        userRole: currentUser?.role || 'Super Admin',
+        module: 'SUPER_ADMIN',
+        action: 'CONFIG_CHANGE',
+        severity: 'INFO',
+        payloadAfter: {
+          action: 'UPDATE_CLOUD_CONFIG',
+          details: 'Memperbarui konfigurasi endpoint Supabase REST API & Google Apps Script',
+        },
+      });
+    }
+    return newCfg;
+  };
+
+  const handleTestAndSyncNow = async () => {
+    setIsCloudTestingAndSyncing(true);
+    setLastCloudSyncResult(null);
+    try {
+      const cfg = handleSaveCloudConfig(false);
+      const ping = await testCloudEndpoints(cfg);
+      setCloudPingResult(ping);
+
+      const res = await executeCloudSync(cfg);
+      setLastCloudSyncResult(res);
+      addSyncLog(`☁️ Cloud Sync: ${res.message}`);
+    } finally {
+      setIsCloudTestingAndSyncing(false);
+    }
+  };
+
+  const handleTestPingOnly = async () => {
+    setIsCloudTestingAndSyncing(true);
+    try {
+      const cfg = handleSaveCloudConfig(false);
+      const ping = await testCloudEndpoints(cfg);
+      setCloudPingResult(ping);
+      showToast('Pengujian konektivitas endpoint cloud selesai.', 'info');
+      addSyncLog(`🌐 Ping Supabase: ${ping.supabase.statusText} • GAS: ${ping.gas.statusText}`);
+    } finally {
+      setIsCloudTestingAndSyncing(false);
+    }
+  };
+
+  const [isPullingCloudSync, setIsPullingCloudSync] = useState(false);
+  const [lastPullResult, setLastPullResult] = useState<CloudPullResult | null>(null);
+
+  const handlePullCloudSync = async () => {
+    setIsPullingCloudSync(true);
+    setLastPullResult(null);
+    try {
+      const cfg = handleSaveCloudConfig(false);
+      const res = await pullCloudSyncData(cfg);
+      setLastPullResult(res);
+      addSyncLog(`📥 Tarik Data Cloud: ${res.message}`);
+      if (res.success) {
+        recordAudit({
+          traceId: `CLOUD-PULL-${Date.now()}`,
+          userId: currentUser?.id || 'super-admin',
+          userName: currentUser?.name || 'Super Admin',
+          userRole: currentUser?.role || 'Super Admin',
+          module: 'SUPER_ADMIN',
+          action: 'CONFIG_CHANGE',
+          severity: 'INFO',
+          payloadAfter: {
+            action: 'CLOUD_PULL_SYNC',
+            transport: res.transport,
+            stats: res.mergedStats,
+          },
+        });
+      }
+    } catch (err: any) {
+      showToast(`Gagal menarik data cloud: ${err.message || 'Error koneksi'}`, 'error');
+    } finally {
+      setIsPullingCloudSync(false);
+    }
+  };
+
+  const [cloudGuideTab, setCloudGuideTab] = useState<'supabase' | 'gas'>('supabase');
+  const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+
+  const handleCopySnippet = (codeText: string, id: string) => {
+    try {
+      navigator.clipboard.writeText(codeText);
+      setCopiedSnippetId(id);
+      showToast('Kode berhasil disalin ke clipboard!', 'success');
+      setTimeout(() => setCopiedSnippetId(null), 2500);
+    } catch {
+      showToast('Gagal menyalin kode secara otomatis.', 'error');
+    }
+  };
+
   const handleSyncCloverLive = async () => {
     setIsSyncingClover(true);
     setCloverSyncResult(null);
@@ -481,6 +784,7 @@ export const SuperAdminModule: React.FC = () => {
   // Active Admin Tab
   const adminTab = (superAdminTab || 'system') as
     | 'system'
+    | 'cloud'
     | 'legality'
     | 'credentials'
     | 'ai-tools'
@@ -1773,6 +2077,7 @@ export const SuperAdminModule: React.FC = () => {
           </div>
           {[
             { id: 'system', label: 'Status Sistem', icon: Activity, color: '#00f2fe' },
+            { id: 'cloud', label: 'Integrasi Cloud', icon: Cloud, color: '#38bdf8' },
             { id: 'legality', label: 'Legalitas Usaha', icon: Building2, color: '#10b981' },
             { id: 'branches', label: 'Jaringan Cabang', icon: Store, color: '#10b981' },
             { id: 'master-data', label: 'Data Master & Migrasi', icon: Database, color: '#06b6d4' },
@@ -4107,6 +4412,578 @@ export const SuperAdminModule: React.FC = () => {
                 <span>Buka AI Smart Mapper</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB INTEGRASI CLOUD (DUAL-BACKEND SUPABASE & GAS) */}
+      {adminTab === 'cloud' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* HEADER CARD */}
+          <div
+            className={`p-6 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+            }`}
+          >
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-cyan-500/15 border border-cyan-500/35 text-cyan-400 flex items-center justify-center shrink-0">
+                  <Cloud className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`font-semibold text-lg tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Layanan Integrasi Cloud &amp; Dual-Backend Bridge
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      LIVE CLOUD SYNC
+                    </span>
+                  </div>
+                  <p className={`text-xs font-normal mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Kirim snapshot data riil (Katalog Produk, Transaksi POS, Entri Keuangan, &amp; Jurnal Buku Besar) secara paralel ke Supabase REST API dan Google Apps Script Webhook.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Pill Header */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-medium border flex items-center gap-1.5 ${
+                  dualBackendSync.getConfig().supabaseUrl && dualBackendSync.getConfig().supabaseAnonKey
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${dualBackendSync.getConfig().supabaseUrl ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                  <span>Supabase REST: {dualBackendSync.getConfig().supabaseUrl ? 'Terkonfigurasi' : 'Belum Diatur'}</span>
+                </span>
+                <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-medium border flex items-center gap-1.5 ${
+                  dualBackendSync.getConfig().gasWebhookUrl
+                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/35'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${dualBackendSync.getConfig().gasWebhookUrl ? 'bg-amber-400' : 'bg-slate-500'}`} />
+                  <span>GAS Webhook: {dualBackendSync.getConfig().gasWebhookUrl ? 'Terkonfigurasi' : 'Belum Diatur'}</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Form Input Dual Endpoint */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-4">
+              {/* Endpoint 1: Supabase REST API */}
+              <div className={`p-4 rounded-xl border space-y-3 ${
+                isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                      Jalur 1: Supabase REST API (PostgreSQL)
+                    </span>
+                  </div>
+                  {cloudPingResult?.supabase && (
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                      cloudPingResult.supabase.connected
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                    }`}>
+                      {cloudPingResult.supabase.statusText}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="text"
+                    value={cloudSupabaseUrl}
+                    onChange={(e) => setCloudSupabaseUrl(e.target.value)}
+                    placeholder="https://xyzcompany.supabase.co"
+                    className={`w-full px-3 py-2 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      isLight
+                        ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                        : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                    Supabase Anon / Public Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showCloudAnonKey ? 'text' : 'password'}
+                      value={cloudSupabaseAnonKey}
+                      onChange={(e) => setCloudSupabaseAnonKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className={`w-full px-3 py-2 pr-10 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                        isLight
+                          ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                          : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCloudAnonKey((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-400 cursor-pointer"
+                      title={showCloudAnonKey ? 'Sembunyikan Key' : 'Tampilkan Key'}
+                    >
+                      {showCloudAnonKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                  Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/cloud_sync</code> dengan otentikasi header <code className="font-mono">apikey</code>.
+                </p>
+              </div>
+
+              {/* Endpoint 2: Google Apps Script Webhook */}
+              <div className={`p-4 rounded-xl border space-y-3 ${
+                isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
+                      Jalur 2: Google Apps Script Webhook (Spreadsheet &amp; Mirror)
+                    </span>
+                  </div>
+                  {cloudPingResult?.gas && (
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                      cloudPingResult.gas.connected
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                        : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                    }`}>
+                      {cloudPingResult.gas.statusText}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                    Google Apps Script Webhook URL (Web App Deployment)
+                  </label>
+                  <input
+                    type="text"
+                    value={cloudGasWebhookUrl}
+                    onChange={(e) => setCloudGasWebhookUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                    className={`w-full px-3 py-2 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-amber-500 ${
+                      isLight
+                        ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                        : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                    }`}
+                  />
+                </div>
+                <p className={`text-[10px] leading-relaxed pt-3 ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                  Menerima payload snapshot berformat JSON secara langsung. Mendukung auto-mirroring mutasi kasir ke Google Sheets.
+                </p>
+              </div>
+            </div>
+
+            {/* Metrik Data yang Disinkronkan */}
+            <div className="pt-4">
+              <div className="text-xs font-mono font-medium uppercase tracking-wider text-slate-500 dark:text-gray-400 mb-2">
+                Ringkasan Snapshot Data Riil Sistem
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'}`}>
+                  <span className="text-[10px] font-mono text-slate-400 block">Katalog Produk</span>
+                  <span className="text-base font-bold font-mono text-cyan-500">{products?.length || 0} SKU</span>
+                </div>
+                <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'}`}>
+                  <span className="text-[10px] font-mono text-slate-400 block">Transaksi Kasir POS</span>
+                  <span className="text-base font-bold font-mono text-emerald-500">{sales?.length || 0} Transaksi</span>
+                </div>
+                <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'}`}>
+                  <span className="text-[10px] font-mono text-slate-400 block">Entri Arus Keuangan</span>
+                  <span className="text-base font-bold font-mono text-indigo-400">{financeEntries?.length || 0} Entri</span>
+                </div>
+                <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-900/60 border-slate-800'}`}>
+                  <span className="text-[10px] font-mono text-slate-400 block">Jurnal Buku Besar</span>
+                  <span className="text-base font-bold font-mono text-amber-500">{journalEntries?.length || 0} Jurnal</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons Bar */}
+            <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-5 mt-4 border-t ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveCloudConfig(true)}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer active:scale-95 ${
+                    isLight
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  Simpan Konfigurasi
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestPingOnly}
+                  disabled={isCloudTestingAndSyncing || isPullingCloudSync}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer active:scale-95 disabled:opacity-50 ${
+                    isLight
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  Uji Ping Koneksi
+                </button>
+
+                {/* Tombol: Tarik Data dari Cloud (Pull Sync) */}
+                <button
+                  type="button"
+                  id="btn-cloud-pull-sync"
+                  onClick={handlePullCloudSync}
+                  disabled={isPullingCloudSync || isCloudTestingAndSyncing}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-sm ${
+                    isLight
+                      ? 'bg-indigo-50 hover:bg-indigo-100 border-indigo-300 text-indigo-700'
+                      : 'bg-indigo-950/40 hover:bg-indigo-900/60 border-indigo-700/50 text-indigo-300'
+                  }`}
+                >
+                  <Download className={`w-4 h-4 ${isPullingCloudSync ? 'animate-bounce' : ''}`} />
+                  <span>
+                    {isPullingCloudSync
+                      ? 'Menarik Data Server...'
+                      : 'Tarik Data dari Cloud (Pull Sync)'}
+                  </span>
+                </button>
+              </div>
+
+              {/* Tombol Utama: Uji Koneksi & Sync Sekarang (Push Sync) */}
+              <button
+                type="button"
+                id="btn-cloud-test-and-sync-now"
+                onClick={handleTestAndSyncNow}
+                disabled={isCloudTestingAndSyncing || isPullingCloudSync}
+                className={`px-5 py-2.5 rounded-xl font-bold text-xs tracking-wide flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-lg ${
+                  isCloudTestingAndSyncing
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white shadow-emerald-500/25'
+                }`}
+              >
+                <RefreshCw className={`w-4 h-4 ${isCloudTestingAndSyncing ? 'animate-spin' : ''}`} />
+                <span>
+                  {isCloudTestingAndSyncing
+                    ? 'Menghubungkan &amp; Mengirim Snapshot...'
+                    : 'Uji Koneksi &amp; Sync Sekarang'}
+                </span>
+              </button>
+            </div>
+
+            {/* Hasil Eksekusi Pull Sync (Tarik Data dari Cloud) */}
+            {lastPullResult && (
+              <div
+                className={`mt-4 p-4 rounded-xl border text-xs space-y-2.5 animate-in fade-in ${
+                  lastPullResult.success
+                    ? isLight
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-950'
+                      : 'bg-indigo-950/25 border-indigo-500/40 text-indigo-300'
+                    : isLight
+                      ? 'bg-rose-50 border-rose-300 text-rose-950'
+                      : 'bg-rose-950/25 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    {lastPullResult.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-indigo-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+                    )}
+                    <span>{lastPullResult.message}</span>
+                  </div>
+                  <span className="font-mono text-[11px] opacity-80">
+                    {new Date(lastPullResult.timestamp).toLocaleTimeString('id-ID')}
+                  </span>
+                </div>
+
+                {lastPullResult.success && lastPullResult.mergedStats && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[11px]">
+                    <div className="p-2 rounded bg-white/40 dark:bg-black/20 border border-indigo-400/30">
+                      <div className="text-[10px] opacity-75">SKU Baru:</div>
+                      <div className="font-bold text-indigo-600 dark:text-indigo-400">+{lastPullResult.mergedStats.productsAdded} Item</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/40 dark:bg-black/20 border border-indigo-400/30">
+                      <div className="text-[10px] opacity-75">SKU Diperbarui:</div>
+                      <div className="font-bold text-indigo-600 dark:text-indigo-400">{lastPullResult.mergedStats.productsUpdated} Item</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/40 dark:bg-black/20 border border-indigo-400/30">
+                      <div className="text-[10px] opacity-75">Transaksi Kasir:</div>
+                      <div className="font-bold text-indigo-600 dark:text-indigo-400">+{lastPullResult.mergedStats.transactionsAdded} POS</div>
+                    </div>
+                    <div className="p-2 rounded bg-white/40 dark:bg-black/20 border border-indigo-400/30">
+                      <div className="text-[10px] opacity-75">Jurnal Akuntansi:</div>
+                      <div className="font-bold text-indigo-600 dark:text-indigo-400">+{lastPullResult.mergedStats.journalEntriesAdded} Entri</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Hasil Eksekusi Sinkronisasi Real-Time */}
+            {lastCloudSyncResult && (
+              <div
+                className={`mt-4 p-4 rounded-xl border text-xs space-y-2.5 animate-in fade-in ${
+                  lastCloudSyncResult.success
+                    ? isLight
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      : 'bg-emerald-950/25 border-emerald-500/40 text-emerald-300'
+                    : isLight
+                      ? 'bg-rose-50 border-rose-300 text-rose-950'
+                      : 'bg-rose-950/25 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    {lastCloudSyncResult.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+                    )}
+                    <span>{lastCloudSyncResult.message}</span>
+                  </div>
+                  <span className="font-mono text-[11px] opacity-80">
+                    {new Date(lastCloudSyncResult.timestamp).toLocaleTimeString('id-ID')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+                  <div className={`p-2.5 rounded-lg border ${
+                    lastCloudSyncResult.endpoints.supabase.success
+                      ? 'bg-white/40 dark:bg-black/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-white/40 dark:bg-black/20 border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                  }`}>
+                    <div className="font-bold">Supabase REST API:</div>
+                    <div>Status: {lastCloudSyncResult.endpoints.supabase.message}</div>
+                    {lastCloudSyncResult.endpoints.supabase.durationMs !== undefined && (
+                      <div>Durasi: {lastCloudSyncResult.endpoints.supabase.durationMs}ms</div>
+                    )}
+                  </div>
+
+                  <div className={`p-2.5 rounded-lg border ${
+                    lastCloudSyncResult.endpoints.gas.success
+                      ? 'bg-white/40 dark:bg-black/20 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                      : 'bg-white/40 dark:bg-black/20 border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                  }`}>
+                    <div className="font-bold">Google Apps Script Webhook:</div>
+                    <div>Status: {lastCloudSyncResult.endpoints.gas.message}</div>
+                    {lastCloudSyncResult.endpoints.gas.durationMs !== undefined && (
+                      <div>Durasi: {lastCloudSyncResult.endpoints.gas.durationMs}ms</div>
+                    )}
+                  </div>
+                </div>
+
+                {lastCloudSyncResult.errors.length > 0 && (
+                  <div className="pt-1 border-t border-rose-300/40 text-[11px]">
+                    <div className="font-semibold mb-0.5">Catatan Diagnosa Masalah:</div>
+                    <ul className="list-disc pl-5 space-y-0.5">
+                      {lastCloudSyncResult.errors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* PANDUAN SETUP BACKEND & SKRIP SIAP PAKAI */}
+          <div
+            className={`p-6 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-slate-200 shadow-sm'
+                : 'bg-[#161b22] border-[#30363d] shadow-md'
+            }`}
+          >
+            {/* Header Panduan */}
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/15 border border-indigo-500/35 text-indigo-400 flex items-center justify-center shrink-0">
+                  <FileCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className={`font-semibold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Panduan Setup Backend &amp; Skrip Siap Pakai
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                      READY TO DEPLOY
+                    </span>
+                  </div>
+                  <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Salin skrip backend berikut dan pasang di cloud Anda dalam 2 menit. Format payload 100% kompatibel dengan engine sinkronisasi JacS RetailOS.
+                  </p>
+                </div>
+              </div>
+
+              {/* Tab Selector: Supabase vs GAS */}
+              <div className={`flex items-center p-1 rounded-xl border ${
+                isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-800 border-slate-700'
+              }`}>
+                <button
+                  type="button"
+                  id="tab-guide-supabase"
+                  onClick={() => setCloudGuideTab('supabase')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    cloudGuideTab === 'supabase'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : isLight
+                        ? 'text-slate-600 hover:text-slate-900'
+                        : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Server className="w-3.5 h-3.5" />
+                  <span>1. Supabase SQL (Postgres)</span>
+                </button>
+                <button
+                  type="button"
+                  id="tab-guide-gas"
+                  onClick={() => setCloudGuideTab('gas')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    cloudGuideTab === 'gas'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : isLight
+                        ? 'text-slate-600 hover:text-slate-900'
+                        : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Cloud className="w-3.5 h-3.5" />
+                  <span>2. Google Apps Script</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TAB CONTENT: SUPABASE */}
+            {cloudGuideTab === 'supabase' && (
+              <div className="space-y-4 pt-4 animate-in fade-in">
+                {/* Langkah Panduan Supabase */}
+                <div className={`p-3.5 rounded-xl border text-xs leading-relaxed space-y-1.5 ${
+                  isLight ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950' : 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300'
+                }`}>
+                  <div className="font-bold flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Langkah Mudah Setup Supabase Database:</span>
+                  </div>
+                  <ol className="list-decimal pl-5 space-y-1 text-slate-700 dark:text-slate-300">
+                    <li>Buka dashboard project di <a href="https://supabase.com" target="_blank" rel="noreferrer" className="underline font-semibold hover:text-emerald-500">supabase.com</a>.</li>
+                    <li>Pilih menu <strong>SQL Editor</strong> di bilah navigasi kiri, lalu klik <strong>New Query</strong>.</li>
+                    <li>Klik tombol <strong>"Salin Skrip SQL"</strong> di bawah, tempelkan ke SQL Editor, dan klik tombol <strong>Run (F5)</strong>.</li>
+                    <li>Buka <strong>Project Settings → Data API</strong>, salin <strong>Project URL</strong> dan <strong>anon / public API key</strong>, lalu masukkan ke form di atas.</li>
+                  </ol>
+                </div>
+
+                {/* Editor Kode SQL dengan Tombol Salin */}
+                <div className="relative rounded-xl border border-slate-700 overflow-hidden bg-[#0d1117]">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-[#161b22] border-b border-slate-700/80 text-xs text-slate-300 font-mono">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      supabase_schema_jacs_snapshots.sql
+                    </span>
+                    <button
+                      type="button"
+                      id="btn-copy-supabase-sql"
+                      onClick={() => handleCopySnippet(SUPABASE_BACKEND_SQL_SNIPPET, 'supabase')}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 border ${
+                        copiedSnippetId === 'supabase'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                          : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
+                      }`}
+                    >
+                      {copiedSnippetId === 'supabase' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Skrip SQL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs font-mono text-emerald-400 overflow-x-auto max-h-96 leading-relaxed select-all">
+                    {SUPABASE_BACKEND_SQL_SNIPPET}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: GOOGLE APPS SCRIPT */}
+            {cloudGuideTab === 'gas' && (
+              <div className="space-y-4 pt-4 animate-in fade-in">
+                {/* Langkah Panduan Google Apps Script */}
+                <div className={`p-3.5 rounded-xl border text-xs leading-relaxed space-y-1.5 ${
+                  isLight ? 'bg-amber-50/60 border-amber-200 text-amber-950' : 'bg-amber-950/20 border-amber-500/30 text-amber-300'
+                }`}>
+                  <div className="font-bold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Langkah Mudah Deploy Google Apps Script Web App:</span>
+                  </div>
+                  <ol className="list-decimal pl-5 space-y-1 text-slate-700 dark:text-slate-300">
+                    <li>Buka <a href="https://script.google.com" target="_blank" rel="noreferrer" className="underline font-semibold hover:text-amber-500">script.google.com</a> atau buka Google Sheets lalu pilih menu <strong>Extensions → Apps Script</strong>.</li>
+                    <li>Ganti seluruh isi file <code>Code.gs</code> dengan kode di bawah ini.</li>
+                    <li>Klik <strong>Deploy → New deployment</strong> (di pojok kanan atas).</li>
+                    <li>Klik ikon gerigi lalu pilih <strong>Web app</strong>, konfigurasikan:
+                      <ul className="list-disc pl-5 mt-0.5 space-y-0.5">
+                        <li><strong>Execute as:</strong> <code>Me (akun Anda)</code></li>
+                        <li><strong>Who has access:</strong> <code>Anyone (Siapa saja)</code></li>
+                      </ul>
+                    </li>
+                    <li>Klik <strong>Deploy</strong>, berikan otorisasi izin jika diminta, lalu salin <strong>Web App URL</strong> (akhiran <code>/exec</code>) ke form di atas.</li>
+                  </ol>
+                </div>
+
+                {/* Editor Kode Apps Script dengan Tombol Salin */}
+                <div className="relative rounded-xl border border-slate-700 overflow-hidden bg-[#0d1117]">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-[#161b22] border-b border-slate-700/80 text-xs text-slate-300 font-mono">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      Code.gs (Google Apps Script Web App)
+                    </span>
+                    <button
+                      type="button"
+                      id="btn-copy-gas-script"
+                      onClick={() => handleCopySnippet(GOOGLE_APPS_SCRIPT_SNIPPET, 'gas')}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer active:scale-95 border ${
+                        copiedSnippetId === 'gas'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                          : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-200'
+                      }`}
+                    >
+                      {copiedSnippetId === 'gas' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Kode GAS</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs font-mono text-amber-400 overflow-x-auto max-h-96 leading-relaxed select-all">
+                    {GOOGLE_APPS_SCRIPT_SNIPPET}
+                  </pre>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
