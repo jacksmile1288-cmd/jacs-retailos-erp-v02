@@ -2,6 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PurchaseOrder } from '../../types';
 import {
+  GRN_FLEET_CUBIC_OPTIONS,
+  resolveGrnBulkCubicConversion,
+} from '../../utils/buildingDomainIsolation';
+import {
   X,
   PackageCheck,
   CheckCircle2,
@@ -26,7 +30,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
   onClose,
   isLight = false,
 }) => {
-  const { products, processGoodsReceipt } = useApp();
+  const { products, goodsReceipts, processGoodsReceipt } = useApp();
 
   const [deliveryOrderNo, setDeliveryOrderNo] = useState('');
   const [grReceivedDate, setGrReceivedDate] = useState(
@@ -160,6 +164,14 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
     });
   };
 
+  const handleItemUnitChange = (idx: number, nextUnit: string) => {
+    setGrItemsForm((prev) => {
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], unit: nextUnit };
+      return updated;
+    });
+  };
+
   const handleAcceptAllItems = () => {
     setGrItemsForm((prev) =>
       prev.map((it) => ({
@@ -212,20 +224,70 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
       return;
     }
 
+    const totalAcceptedNow = grItemsForm.reduce((acc, it) => acc + (it.acceptedQty || 0), 0);
+    const totalRejectedNow = grItemsForm.reduce((acc, it) => acc + (it.rejectedQty || 0), 0);
+    const rawAcceptedCostNow = grItemsForm.reduce(
+      (acc, it) => acc + (it.acceptedQty || 0) * (it.unitCost || 0),
+      0
+    );
+    const prevReceivedAmountNow = (goodsReceipts || [])
+      .filter(
+        (g) =>
+          g.status !== 'CANCELLED' &&
+          (g.poNumber === po.po_number || g.poId === po.po_number)
+      )
+      .reduce((sum, g) => {
+        if (typeof g.totalAmount === 'number' && g.totalAmount > 0) return sum + g.totalAmount;
+        return (
+          sum +
+          (g.items || []).reduce(
+            (s, it) =>
+              s + (Number(it.totalCost) || (Number(it.acceptedQty) || 0) * (Number(it.unitCost) || 0)),
+            0
+          )
+        );
+      }, 0);
+    const remainingPoValueNow = Math.max(
+      0,
+      Math.round((Number(po.total_amount) || 0) - prevReceivedAmountNow)
+    );
+    const isFullGoodReceiptNow =
+      grItemsForm.length > 0 &&
+      totalAcceptedNow > 0 &&
+      totalRejectedNow === 0 &&
+      grItemsForm.every((it) => it.rejectedQty === 0 && it.acceptedQty >= it.outstandingQty);
+    const finalGrValueNow =
+      isFullGoodReceiptNow && remainingPoValueNow > 0
+        ? remainingPoValueNow
+        : rawAcceptedCostNow;
+
     const res = processGoodsReceipt({
       poNumber: po.po_number,
+      poObject: po,
+      isFullGoodReceipt: isFullGoodReceiptNow,
+      expectedTotalAmount: finalGrValueNow,
       deliveryOrderNumber: deliveryOrderNo.trim(),
-      items: grItemsForm.map((it) => ({
-        productId: it.productId,
-        productName: it.productName,
-        orderedQty: it.orderedQty,
-        receivedQty: it.receivedQty,
-        acceptedQty: it.acceptedQty,
-        rejectedQty: it.rejectedQty,
-        unit: it.unit,
-        unitCost: it.unitCost,
-        rejectionReason: it.rejectionReason,
-      })),
+      items: grItemsForm.map((it) => {
+        const prod = products.find((p) => p.id === it.productId);
+        const conv = resolveGrnBulkCubicConversion({
+          unit: it.unit,
+          productId: it.productId,
+          productName: it.productName,
+          product: prod,
+        });
+        return {
+          productId: it.productId,
+          productName: it.productName,
+          orderedQty: it.orderedQty,
+          receivedQty: it.receivedQty,
+          acceptedQty: it.acceptedQty,
+          rejectedQty: it.rejectedQty,
+          unit: it.unit,
+          unitCost: it.unitCost,
+          rejectionReason: it.rejectionReason,
+          cubicConversionFactorM3: conv.isBulkCubicItem ? conv.factorM3 : 1,
+        };
+      }),
       notes: `${grNotes.trim()} [Tanggal Terima: ${grReceivedDate}]`,
     });
 
@@ -238,10 +300,60 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
 
   const totalAcceptedUnits = grItemsForm.reduce((acc, it) => acc + (it.acceptedQty || 0), 0);
   const totalRejectedUnits = grItemsForm.reduce((acc, it) => acc + (it.rejectedQty || 0), 0);
-  const totalAcceptedCost = grItemsForm.reduce(
+  const rawAcceptedCost = grItemsForm.reduce(
     (acc, it) => acc + (it.acceptedQty || 0) * (it.unitCost || 0),
     0
   );
+  const previouslyReceivedAmount = (goodsReceipts || [])
+    .filter(
+      (g) =>
+        g.status !== 'CANCELLED' &&
+        (g.poNumber === po.po_number || g.poId === po.po_number)
+    )
+    .reduce((sum, g) => {
+      if (typeof g.totalAmount === 'number' && g.totalAmount > 0) return sum + g.totalAmount;
+      return (
+        sum +
+        (g.items || []).reduce(
+          (s, it) =>
+            s + (Number(it.totalCost) || (Number(it.acceptedQty) || 0) * (Number(it.unitCost) || 0)),
+          0
+        )
+      );
+    }, 0);
+  const remainingPoAmount = Math.max(
+    0,
+    Math.round((Number(po.total_amount) || 0) - previouslyReceivedAmount)
+  );
+  const isFullGoodReceipt =
+    grItemsForm.length > 0 &&
+    totalAcceptedUnits > 0 &&
+    totalRejectedUnits === 0 &&
+    grItemsForm.every((it) => it.rejectedQty === 0 && it.acceptedQty >= it.outstandingQty);
+  const totalAcceptedCost =
+    isFullGoodReceipt && remainingPoAmount > 0 ? remainingPoAmount : rawAcceptedCost;
+
+  const hasBulkCubicItems = grItemsForm.some((it) => {
+    const prod = products.find((p) => p.id === it.productId);
+    return resolveGrnBulkCubicConversion({
+      unit: it.unit,
+      productId: it.productId,
+      productName: it.productName,
+      product: prod,
+    }).isBulkCubicItem;
+  });
+
+  const totalConvertedM3 = grItemsForm.reduce((acc, it) => {
+    const prod = products.find((p) => p.id === it.productId);
+    const conv = resolveGrnBulkCubicConversion({
+      unit: it.unit,
+      productId: it.productId,
+      productName: it.productName,
+      product: prod,
+    });
+    if (!conv.isBulkCubicItem) return acc;
+    return acc + Number(((it.acceptedQty || 0) * conv.factorM3).toFixed(2));
+  }, 0);
 
   return (
     <div
@@ -249,10 +361,10 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto"
     >
       <div
-        className={`w-full max-w-3xl rounded-2xl p-6 shadow-2xl relative border my-8 max-h-[90vh] flex flex-col ${
+        className={`w-full max-w-3xl rounded-2xl p-6 relative border my-8 max-h-[90vh] flex flex-col ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         {/* Modal Header */}
@@ -263,20 +375,20 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
             </div>
             <div>
               <h3
-                className={`font-bold text-base leading-tight ${
+                className={`font-medium text-base leading-6 ${
                   isLight ? 'text-slate-900' : 'text-white'
                 }`}
               >
-                Penerimaan Barang (Goods Receipt / GRN) & Sinkronisasi
+                Penerimaan Barang (Goods Receipt / GRN) &amp; Sinkronisasi
               </h3>
-              <div className="text-xs text-gray-400 mt-0.5 flex flex-wrap items-center gap-2">
-                <span className="font-mono font-bold text-sky-400">{po.po_number}</span>
+              <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400 mt-0.5 flex flex-wrap items-center gap-2">
+                <span className="font-mono font-medium text-sky-400">{po.po_number}</span>
                 <span>•</span>
-                <span className="font-semibold text-gray-300">
+                <span className="text-gray-300">
                   Vendor: {po.supplier_name}
                 </span>
                 <span>•</span>
-                <span className="font-mono text-emerald-400">
+                <span className="font-mono text-emerald-400 font-semibold">
                   Total PO: Rp {po.total_amount.toLocaleString('id-ID')}
                 </span>
               </div>
@@ -286,7 +398,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
             type="button"
             id="btn-close-gr-modal"
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
+            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-all cursor-pointer active:scale-[0.99]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -367,6 +479,36 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
             </div>
           </div>
 
+          {/* Bulk Cubic Conversion Guide Banner */}
+          {hasBulkCubicItems && (
+            <div
+              id="grn-bulk-cubic-conversion-banner"
+              className={`p-3 rounded-xl border text-[11px] space-y-1.5 ${
+                isLight
+                  ? 'bg-amber-50 border-amber-300 text-amber-950'
+                  : 'bg-amber-500/10 border-amber-500/35 text-amber-200'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 font-bold">
+                  <Boxes className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Konversi Kubikasi Otomatis Material Curah (Armada Vendor → Saldo Stok Dasar m³)
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full font-mono font-bold text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  Total Konversi Masuk: +{totalConvertedM3} m³
+                </span>
+              </div>
+              <div className="text-[10px] font-mono opacity-90 flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span>• 1 Dump Truck = 6.5 m³</span>
+                <span>• 1 Truk Engkel = 3.0 m³</span>
+                <span>• 1 Pick-up = 1.2 m³</span>
+                <span>• 1 m³ = 1.0 m³</span>
+              </div>
+            </div>
+          )}
+
           {/* Error Banner */}
           {grValidationError && (
             <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 flex items-center gap-2">
@@ -418,6 +560,14 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                   {grItemsForm.map((item, idx) => {
                     const isMismatch = item.acceptedQty + item.rejectedQty !== item.receivedQty;
                     const isOverOutstanding = item.acceptedQty > item.outstandingQty;
+                    const prod = products.find((p) => p.id === item.productId);
+                    const conv = resolveGrnBulkCubicConversion({
+                      unit: item.unit,
+                      productId: item.productId,
+                      productName: item.productName,
+                      product: prod,
+                    });
+                    const convertedStockM3 = Number((item.acceptedQty * conv.factorM3).toFixed(2));
 
                     return (
                       <tr
@@ -435,6 +585,36 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                           <div className="text-[10px] text-gray-400 font-mono">
                             {item.productId} • Satuan: {item.unit}
                           </div>
+                          {conv.isBulkCubicItem && (
+                            <div className="mt-1.5 space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-amber-400 font-semibold">
+                                  Armada/Satuan:
+                                </span>
+                                <select
+                                  value={item.unit}
+                                  onChange={(e) => handleItemUnitChange(idx, e.target.value)}
+                                  className={`px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold outline-none ${
+                                    isLight
+                                      ? 'bg-amber-50 border-amber-300 text-amber-900'
+                                      : 'bg-[#0d1117] border-amber-500/40 text-amber-300'
+                                  }`}
+                                >
+                                  {GRN_FLEET_CUBIC_OPTIONS.map((opt) => (
+                                    <option key={opt.unit} value={opt.unit}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono text-[10px]">
+                                <span>
+                                  Konversi: {item.acceptedQty} {item.unit} × {conv.factorM3} m³ ={' '}
+                                  <strong>+{convertedStockM3} m³</strong> (Stok Dasar)
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </td>
 
                         <td className="py-2.5 px-3 text-center font-mono">
@@ -584,14 +764,14 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] cursor-pointer transition font-medium"
+                className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] cursor-pointer transition-all font-medium text-xs active:scale-[0.99]"
               >
                 Batal
               </button>
               <button
                 type="submit"
                 id="btn-submit-create-grn"
-                className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition shadow-[0_0_15px_rgba(16,185,129,0.4)] cursor-pointer flex items-center gap-1.5 active:scale-95"
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-medium text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.4)] cursor-pointer flex items-center gap-1.5 active:scale-[0.99]"
               >
                 <PackageCheck className="w-4 h-4" />
                 <span>Terima Barang (Create GRN)</span>

@@ -22,3 +22,5 @@ export const hasValidProfileValue = (val?: string | null): boolean => {
 export const getCleanProfileValue = (val?: string | null): string | undefined => {
   return hasValidProfileValue(val) ? val!.trim() : undefined;
 };
+
+export * from './businessDomainConfig';

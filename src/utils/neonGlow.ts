@@ -47,11 +47,11 @@ export const getReactiveNeonGlowStyle = (
   if (isLight) {
     if (isSelected) {
       return {
-        borderColor: '#E2E8F0',
-        borderWidth: '1px',
+        borderColor: colorHex,
+        borderWidth: '2px',
         borderStyle: 'solid',
         backgroundColor: '#FFFFFF',
-        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+        boxShadow: `0 0 12px rgba(${r}, ${g}, ${b}, 0.25), 0 1px 3px 0 rgba(0, 0, 0, 0.1)`,
         transform: 'none',
         transition: 'all 150ms ease-out',
       };
@@ -59,22 +59,22 @@ export const getReactiveNeonGlowStyle = (
 
     if (isHovered) {
       return {
-        borderColor: '#CBD5E1',
-        borderWidth: '1px',
+        borderColor: colorHex,
+        borderWidth: '2px',
         borderStyle: 'solid',
-        backgroundColor: '#F8FAFC',
-        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+        backgroundColor: '#FAFAFA',
+        boxShadow: `0 0 10px rgba(${r}, ${g}, ${b}, 0.20), 0 1px 2px 0 rgba(0, 0, 0, 0.05)`,
         transform: 'none',
         transition: 'all 150ms ease-out',
       };
     }
 
     return {
-      borderColor: '#E2E8F0',
-      borderWidth: '1px',
+      borderColor: colorHex,
+      borderWidth: '2px',
       borderStyle: 'solid',
       backgroundColor: '#FFFFFF',
-      boxShadow: 'none',
+      boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
       transform: 'none',
       transition: 'all 150ms ease-out',
     };

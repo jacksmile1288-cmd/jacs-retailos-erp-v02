@@ -378,6 +378,14 @@ const RAW_SUPPLIER_LIST: LocalSupplierItem[] = [
 export const MASTER_LOCAL_SUPPLIERS: LocalSupplierItem[] = [...RAW_SUPPLIER_LIST];
 
 export const getDefaultSupplierForCategory = (catCode: number): LocalSupplierItem => {
+  if (catCode === 9) {
+    const tirta = RAW_SUPPLIER_LIST.find((s) => s.id === 'SUP-009' || s.name.includes('Tirta'));
+    if (tirta) return tirta;
+  }
+  if (catCode === 27) {
+    const tech = RAW_SUPPLIER_LIST.find((s) => s.id === 'SUP-001' || s.name.includes('Mitra Global') || s.name.includes('Elektronik'));
+    if (tech) return tech;
+  }
   return (
     RAW_SUPPLIER_LIST[(catCode - 1) % RAW_SUPPLIER_LIST.length] ||
     RAW_SUPPLIER_LIST[0]

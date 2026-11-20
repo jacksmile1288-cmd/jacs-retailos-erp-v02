@@ -1,5 +1,6 @@
 import React from 'react';
-import { Delete, Check, DollarSign } from 'lucide-react';
+import { Delete } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 interface VirtualNumpadProps {
   value: number;
@@ -12,6 +13,9 @@ export const VirtualNumpad: React.FC<VirtualNumpadProps> = ({
   onChange,
   totalAmount,
 }) => {
+  const { theme } = useApp();
+  const isLight = theme === 'light';
+
   const handleDigit = (digit: string) => {
     const currentStr = value === 0 ? '' : value.toString();
     const nextStr = currentStr + digit;
@@ -53,9 +57,11 @@ export const VirtualNumpad: React.FC<VirtualNumpadProps> = ({
             key={idx}
             type="button"
             onClick={() => handleQuickNominal(item.amount)}
-            className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+            className={`py-1.5 px-2 rounded-lg text-[11px] font-mono font-normal tracking-wide border transition-all active:scale-[0.99] cursor-pointer ${
               value === item.amount
                 ? 'bg-amber-500 border-amber-400 text-black shadow-sm'
+                : isLight
+                ? 'bg-slate-100 border-slate-300 text-slate-700 hover:border-cyan-500'
                 : 'bg-[#0d1117] border-[#30363d] text-gray-300 hover:border-gray-500 hover:text-white'
             }`}
           >
@@ -77,9 +83,13 @@ export const VirtualNumpad: React.FC<VirtualNumpadProps> = ({
                 handleDigit(k);
               }
             }}
-            className="h-11 sm:h-12 rounded-xl bg-[#21262d] hover:bg-[#30363d] text-white font-bold text-lg border border-[#30363d] active:scale-95 transition cursor-pointer flex items-center justify-center select-none"
+            className={`h-11 sm:h-12 rounded-xl font-mono font-normal text-base border transition-all active:scale-[0.99] cursor-pointer flex items-center justify-center select-none ${
+              isLight
+                ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300 shadow-sm'
+                : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d]'
+            }`}
           >
-            {k === '⌫' ? <Delete className="w-5 h-5 text-rose-400" /> : k}
+            {k === '⌫' ? <Delete className="w-5 h-5 text-rose-500" /> : k}
           </button>
         ))}
       </div>

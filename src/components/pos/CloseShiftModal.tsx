@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { CashierShift } from '../../types';
+import { resolveSynchronizedTerminalDisplayName } from '../../utils/terminalConfigUtils';
 import {
   Clock,
   X,
@@ -51,10 +52,19 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
   onShiftClosed,
   isLight = false,
 }) => {
-  const { activeShift, closeCashierShift, activeUser, showToast } = useApp();
+  const {
+    activeShift,
+    closeCashierShift,
+    activeUser,
+    showToast,
+    activeSector,
+    businessDomainConfig,
+    businessProfile,
+  } = useApp();
 
   const [inputMode, setInputMode] = useState<'DENOMINATIONS' | 'DIRECT'>('DENOMINATIONS');
   const [denomTab, setDenomTab] = useState<'ALL' | 'BANKNOTES' | 'COINS'>('ALL');
+  const [isClosingShift, setIsClosingShift] = useState(false);
 
   // Counts of banknotes
   const [banknoteCounts, setBanknoteCounts] = useState<Record<number, number>>({
@@ -84,6 +94,7 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
   const [notes, setNotes] = useState<string>(
     'Penutupan shift kasir reguler. Fisik kas laci telah dihitung teliti.'
   );
+  const [isBlindSubmitted, setIsBlindSubmitted] = useState<boolean>(false);
 
   // Initialize or reset when opened
   useEffect(() => {
@@ -106,6 +117,7 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
       });
       setOtherCoinsAmount(0);
       setNotes('Penutupan shift kasir reguler. Fisik kas laci telah dihitung teliti.');
+      setIsBlindSubmitted(false);
     }
   }, [isOpen, activeShift]);
 
@@ -141,7 +153,9 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
 
   // Expected Cash calculation: Opening Float + Total Cash Sales - Total Expenses
   const openingFloat = activeShift.initialCash || 0;
-  const cashSales = activeShift.totalCashSales || 0;
+  const netCashSales = activeShift.totalCashSales || 0;
+  const cashReturns = activeShift.totalSalesReturnCash || 0;
+  const grossCashSales = netCashSales + cashReturns;
   const expenses = activeShift.totalExpenses || 0;
   const expectedCash = activeShift.expectedCashInDrawer;
 
@@ -216,6 +230,8 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
 
   const handleConfirmClose = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isClosingShift) return;
+    setIsClosingShift(true);
     try {
       // Build denomination breakdown record
       const denominationBreakdown: Record<string, number> = {
@@ -237,6 +253,7 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
       onShiftClosed(result.shift);
       onClose();
     } catch (err: any) {
+      setIsClosingShift(false);
       showToast(err.message || 'Gagal menutup shift kasir');
     }
   };
@@ -247,21 +264,21 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200"
     >
       <div
-        className={`w-full max-w-3xl rounded-3xl p-5 sm:p-7 shadow-2xl relative border my-4 sm:my-8 flex flex-col max-h-[94vh] ${
+        className={`w-full max-w-3xl rounded-2xl p-5 sm:p-6 shadow-2xl relative border my-4 sm:my-8 flex flex-col max-h-[94vh] ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-900 shadow-slate-300/60'
-            : 'bg-[#161b22] border-[#30363d] text-white shadow-[0_0_60px_rgba(0,0,0,0.85)]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         }`}
       >
         {/* Accent Strip */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500" />
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-indigo-500 to-emerald-500" />
 
         <button
           onClick={onClose}
           className={`absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer ${
             isLight
               ? 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-gray-400 hover:text-white hover:bg-[#21262d]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
           }`}
           title="Tutup Modal"
         >
@@ -270,26 +287,27 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
 
         {/* Modal Header */}
         <div className="flex items-center gap-3.5 mb-4 pb-3 border-b border-slate-200 dark:border-slate-800 shrink-0">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 text-[#0052FF] dark:text-[#58a6ff] flex items-center justify-center border border-blue-500/40 shadow-sm shrink-0">
-            <Scale className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.2)] shrink-0">
+            <Scale className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30 uppercase tracking-wider">
+              <span className="text-[11px] font-mono font-normal tracking-wide px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 uppercase">
                 Cash Drawer Closing
               </span>
-              <span className="text-xs font-mono font-semibold text-slate-500 dark:text-gray-400">
-                Shift #{activeShift.id} • {activeShift.terminalName}
+              <span className="text-xs font-mono font-normal text-slate-500 dark:text-slate-400">
+                Shift #{activeShift.id} •{' '}
+                {resolveSynchronizedTerminalDisplayName(
+                  activeShift.stationCode || activeShift.terminalId || activeShift.terminalName,
+                  activeSector,
+                  businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+                )}
               </span>
             </div>
-            <h2
-              className={`text-lg sm:text-xl font-black tracking-tight mt-0.5 ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}
-            >
+            <h2 className="text-base sm:text-lg font-medium tracking-tight mt-0.5 text-slate-900 dark:text-white">
               Rekonsiliasi Kas Akhir Shift (Cash Drawer Closing)
             </h2>
-            <p className="text-xs text-slate-600 dark:text-gray-400">
+            <p className="text-xs leading-5 font-normal text-slate-500 dark:text-slate-400">
               Form input uang fisik laci (kertas & koin), perbandingan otomatis dengan sistem, dan pembukuan Finance.
             </p>
           </div>
@@ -318,7 +336,11 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
                 Terminal POS
               </span>
               <span className="font-bold text-slate-900 dark:text-white truncate block font-mono">
-                {activeShift.terminalName}
+                {resolveSynchronizedTerminalDisplayName(
+                  activeShift.stationCode || activeShift.terminalId || activeShift.terminalName,
+                  activeSector,
+                  businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+                )}
               </span>
             </div>
             <div>
@@ -339,18 +361,18 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
             </div>
           </div>
 
-          {/* 1. PERHITUNGAN SISTEM (Kas Awal + Penjualan Tunai - Kas Keluar) */}
+          {/* 1. PERHITUNGAN SISTEM (Kas Awal + Penjualan Tunai - Retur Tunai - Kas Keluar) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                 1. Rekapitulasi Kas Sistem (Expected System Cash)
               </span>
               <span className="text-[11px] text-slate-500 dark:text-gray-400">
-                Formula: Kas Awal + Penjualan Tunai - Kas Keluar
+                Formula: Kas Awal + Penjualan Tunai - Retur Tunai - Kas Keluar
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               {/* Saldo Kas Awal (Opening Float) */}
               <div
                 className={`p-3 rounded-2xl border ${
@@ -358,30 +380,47 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
                 }`}
               >
                 <div className="text-[10px] text-slate-600 dark:text-gray-400 font-bold uppercase">
-                  (+) Kas Awal (Opening Float)
+                  (+) Kas Awal
                 </div>
-                <div className="text-sm font-black font-mono text-slate-900 dark:text-white mt-1">
-                  Rp {openingFloat.toLocaleString('id-ID')}
+                <div className={`text-sm font-black font-mono mt-1 ${isBlindSubmitted ? 'text-slate-900 dark:text-white' : 'text-amber-500'}`}>
+                  {isBlindSubmitted ? `Rp ${openingFloat.toLocaleString('id-ID')}` : 'Terkunci'}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-gray-500 mt-0.5">
-                  Modal awal di laci kasir
+                  Modal awal laci
                 </div>
               </div>
 
-              {/* Total Penjualan Tunai Sistem */}
+              {/* Total Penjualan Tunai Sistem (Kotor / Gross) */}
               <div
                 className={`p-3 rounded-2xl border ${
                   isLight ? 'bg-emerald-50/70 border-emerald-300' : 'bg-emerald-950/20 border-emerald-500/40'
                 }`}
               >
                 <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold uppercase">
-                  (+) Penjualan Tunai Sistem
+                  (+) Penjualan Tunai (Gross)
                 </div>
-                <div className="text-sm font-black font-mono text-emerald-700 dark:text-emerald-400 mt-1">
-                  Rp {cashSales.toLocaleString('id-ID')}
+                <div className={`text-sm font-black font-mono mt-1 ${isBlindSubmitted ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-500'}`}>
+                  {isBlindSubmitted ? `Rp ${grossCashSales.toLocaleString('id-ID')}` : 'Terkunci'}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-gray-500 mt-0.5">
-                  Penerimaan kas sistem
+                  Penerimaan kotor
+                </div>
+              </div>
+
+              {/* Total Retur Tunai */}
+              <div
+                className={`p-3 rounded-2xl border ${
+                  isLight ? 'bg-amber-50/70 border-amber-300' : 'bg-amber-950/20 border-amber-500/40'
+                }`}
+              >
+                <div className="text-[10px] text-amber-700 dark:text-amber-400 font-bold uppercase">
+                  (-) Retur Tunai
+                </div>
+                <div className={`text-sm font-black font-mono mt-1 ${isBlindSubmitted ? 'text-amber-700 dark:text-amber-400' : 'text-amber-500'}`}>
+                  {isBlindSubmitted ? `-Rp ${cashReturns.toLocaleString('id-ID')}` : 'Terkunci'}
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-gray-500 mt-0.5">
+                  Refund pelanggan
                 </div>
               </div>
 
@@ -392,32 +431,32 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
                 }`}
               >
                 <div className="text-[10px] text-rose-700 dark:text-rose-400 font-bold uppercase">
-                  (-) Kas Keluar / Petty Cash
+                  (-) Kas Keluar
                 </div>
-                <div className="text-sm font-black font-mono text-rose-700 dark:text-rose-400 mt-1">
-                  -Rp {expenses.toLocaleString('id-ID')}
+                <div className={`text-sm font-black font-mono mt-1 ${isBlindSubmitted ? 'text-rose-700 dark:text-rose-400' : 'text-amber-500'}`}>
+                  {isBlindSubmitted ? `-Rp ${expenses.toLocaleString('id-ID')}` : 'Terkunci'}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-gray-500 mt-0.5">
-                  {activeShift.expenses.length}x Penarikan kasir
+                  {activeShift.expenses.length}x Petty cash
                 </div>
               </div>
 
               {/* Estimasi Kas Sistem yang Diharapkan */}
               <div
                 className={`p-3 rounded-2xl border shadow-sm ${
-                  isLight
-                    ? 'bg-blue-50 border-blue-400 text-blue-950'
-                    : 'bg-blue-500/15 border-blue-500/50 text-white'
+                  isBlindSubmitted
+                    ? isLight ? 'bg-blue-50 border-blue-400 text-blue-950' : 'bg-blue-500/15 border-blue-500/50 text-white'
+                    : isLight ? 'bg-amber-50 border-amber-400 text-amber-950' : 'bg-amber-500/15 border-amber-500/50 text-white'
                 }`}
               >
-                <div className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300">
-                  (=) Estimasi Kas di Laci
+                <div className={`text-[10px] font-black uppercase ${isBlindSubmitted ? 'text-blue-700 dark:text-blue-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                  (=) Estimasi Kas Sistem
                 </div>
-                <div className="text-base font-black font-mono text-blue-800 dark:text-blue-300 mt-0.5">
-                  Rp {expectedCash.toLocaleString('id-ID')}
+                <div className={`font-mono mt-0.5 ${isBlindSubmitted ? 'text-base font-black text-blue-800 dark:text-blue-300' : 'text-xs font-medium text-amber-800 dark:text-amber-300'}`}>
+                  {isBlindSubmitted ? `Rp ${expectedCash.toLocaleString('id-ID')}` : 'Terkunci - Input Hitungan Fisik Terlebih Dahulu'}
                 </div>
-                <div className="text-[10px] text-blue-600 dark:text-blue-400 mt-0.5 font-medium">
-                  Kas sistem wajib setor
+                <div className={`text-[10px] mt-0.5 font-medium ${isBlindSubmitted ? 'text-blue-600 dark:text-blue-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                  {isBlindSubmitted ? 'Kas wajib setor' : 'Blind Shift Closing Aktif'}
                 </div>
               </div>
             </div>
@@ -461,22 +500,8 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
                 </p>
               </div>
 
-              {/* Mode Selector & Auto Fill */}
+              {/* Mode Selector */}
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleAutoFillExpected}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1 ${
-                    isLight
-                      ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-xs'
-                      : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-[#30363d]'
-                  }`}
-                  title="Isi otomatis sesuai nominal ekspektasi sistem"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Auto-Fill Ekspektasi</span>
-                </button>
-
                 <div className="flex items-center bg-slate-200 dark:bg-[#0d1117] p-0.5 rounded-xl border border-slate-300 dark:border-[#30363d]">
                   <button
                     type="button"
@@ -754,98 +779,111 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
             )}
 
             {/* 3. PERHITUNGAN SELISIH OTOMATIS & STATUS REKONSILIASI */}
-            <div
-              className={`p-4 rounded-2xl border transition-all ${
-                isBalance
-                  ? isLight
-                    ? 'bg-emerald-50 border-emerald-400 text-emerald-950 shadow-xs'
-                    : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
-                  : isSurplus
-                  ? isLight
-                    ? 'bg-sky-50 border-sky-400 text-sky-950 shadow-xs'
-                    : 'bg-sky-500/15 border-sky-500/40 text-sky-200 shadow-[0_0_20px_rgba(56,189,248,0.2)]'
-                  : isLight
-                  ? 'bg-rose-50 border-rose-400 text-rose-950 shadow-xs'
-                  : 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.2)]'
-              }`}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  {isBalance ? (
-                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/40">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                  ) : (
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
-                        isSurplus
-                          ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 border-sky-500/40'
-                          : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/40'
-                      }`}
-                    >
-                      <AlertTriangle className="w-5 h-5" />
-                    </div>
-                  )}
-
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-xs uppercase tracking-wider opacity-80">
-                        Status Rekonsiliasi:
-                      </span>
-                      {/* TAMPILKAN STATUS: 'Seimbang', 'Lebih (Surplus)', atau 'Kurang (Shortage)' */}
-                      <span
-                        id="reconciliation-status-badge"
-                        className={`px-2.5 py-0.5 rounded-full text-xs font-black uppercase font-mono shadow-xs ${
-                          isBalance
-                            ? 'bg-emerald-600 text-white'
-                            : isSurplus
-                            ? 'bg-sky-600 text-white'
-                            : 'bg-rose-600 text-white'
+            {!isBlindSubmitted ? (
+              <div className={`p-4 rounded-2xl border text-xs font-normal space-y-2 ${
+                isLight ? 'bg-amber-50 border-amber-300 text-amber-950' : 'bg-amber-950/30 border-amber-800/40 text-amber-200'
+              }`}>
+                <div className="flex items-center gap-2 font-bold">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse shrink-0" />
+                  <span>Mode Blind Shift Closing Aktif (Kalkulasi Sistem Dikunci)</span>
+                </div>
+                <p className="leading-relaxed">
+                  Silakan masukkan hitungan fisik uang kertas dan koin di laci kasir serta catatan kendala shift di atas. Nominal estimasi kas sistem dan perbandingan selisih kas baru akan terbuka setelah Anda menekan tombol <strong className="font-bold underline">Kirim Laporan Tutup Shift (Blind Submit)</strong>.
+                </p>
+              </div>
+            ) : (
+              <div
+                className={`p-4 rounded-2xl border transition-all ${
+                  isBalance
+                    ? isLight
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-950 shadow-xs'
+                      : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-[0_0_20px_rgba(16,185,129,0.2)]'
+                    : isSurplus
+                    ? isLight
+                      ? 'bg-sky-50 border-sky-400 text-sky-950 shadow-xs'
+                      : 'bg-sky-500/15 border-sky-500/40 text-sky-200 shadow-[0_0_20px_rgba(56,189,248,0.2)]'
+                    : isLight
+                    ? 'bg-rose-50 border-rose-400 text-rose-950 shadow-xs'
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.2)]'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    {isBalance ? (
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/40">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
+                          isSurplus
+                            ? 'bg-sky-500/20 text-sky-600 dark:text-sky-400 border-sky-500/40'
+                            : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/40'
                         }`}
                       >
-                        {status}
-                      </span>
-                    </div>
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                    )}
 
-                    <div className="text-xs font-medium mt-1 leading-snug">
-                      {isBalance ? (
-                        <span>
-                          Kas fisik laci (Rp {actualCash.toLocaleString('id-ID')}) <strong>cocok 100%</strong> dengan ekspektasi kas sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: <strong>Seimbang</strong>.
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-normal text-xs uppercase tracking-wider opacity-80">
+                          Status Rekonsiliasi:
                         </span>
-                      ) : isSurplus ? (
-                        <span>
-                          Uang fisik di laci (Rp {actualCash.toLocaleString('id-ID')}) lebih besar{' '}
-                          <strong>+Rp {difference.toLocaleString('id-ID')}</strong> dari hitungan sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: <strong>Lebih (Surplus)</strong>.
+                        <span
+                          id="reconciliation-status-badge"
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal uppercase tracking-wide shadow-xs ${
+                            isBalance
+                              ? 'bg-emerald-600 text-white'
+                              : isSurplus
+                              ? 'bg-sky-600 text-white'
+                              : 'bg-rose-600 text-white'
+                          }`}
+                        >
+                          {status}
                         </span>
-                      ) : (
-                        <span>
-                          Uang fisik di laci (Rp {actualCash.toLocaleString('id-ID')}) kurang{' '}
-                          <strong>-Rp {Math.abs(difference).toLocaleString('id-ID')}</strong> dari hitungan sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: <strong>Kurang (Shortage)</strong>.
-                        </span>
-                      )}
+                      </div>
+
+                      <div className="text-xs leading-5 font-normal mt-1">
+                        {isBalance ? (
+                          <span>
+                            Kas fisik laci (Rp {actualCash.toLocaleString('id-ID')}) cocok 100% dengan ekspektasi kas sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: Seimbang.
+                          </span>
+                        ) : isSurplus ? (
+                          <span>
+                            Uang fisik di laci (Rp {actualCash.toLocaleString('id-ID')}) lebih besar{' '}
+                            +Rp {difference.toLocaleString('id-ID')} dari hitungan sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: Lebih (Surplus).
+                          </span>
+                        ) : (
+                          <span>
+                            Uang fisik di laci (Rp {actualCash.toLocaleString('id-ID')}) kurang{' '}
+                            -Rp {Math.abs(difference).toLocaleString('id-ID')} dari hitungan sistem (Rp {expectedCash.toLocaleString('id-ID')}). Status: Kurang (Shortage).
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-current/20">
-                  <span className="text-[10px] block opacity-80 font-bold uppercase tracking-wider">
-                    Nilai Selisih Kasir
-                  </span>
-                  <span className="text-base sm:text-xl font-black font-mono">
-                    {difference > 0
-                      ? `+Rp ${difference.toLocaleString('id-ID')}`
-                      : isBalance
-                      ? 'Rp 0'
-                      : `-Rp ${Math.abs(difference).toLocaleString('id-ID')}`}
-                  </span>
+                  <div className="text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-current/20">
+                    <span className="text-[10px] block opacity-80 font-mono font-normal uppercase tracking-wider">
+                      Nilai Selisih Kasir
+                    </span>
+                    <span className="text-base sm:text-lg font-mono font-semibold">
+                      {difference > 0
+                        ? `+Rp ${difference.toLocaleString('id-ID')}`
+                        : isBalance
+                        ? 'Rp 0'
+                        : `-Rp ${Math.abs(difference).toLocaleString('id-ID')}`}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Catatan Penutupan Shift */}
           <div>
-            <label className="text-xs font-bold text-slate-900 dark:text-slate-100 block mb-1">
+            <label className="text-xs font-normal text-slate-700 dark:text-slate-300 block mb-1">
               Catatan Penutupan Shift / Keterangan Selisih:
             </label>
             <input
@@ -853,26 +891,26 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Contoh: Selisih Rp 200 akibat koin kembalian, laci kasir terkunci aman"
-              className={`w-full px-3.5 py-2.5 rounded-xl border outline-none font-medium text-xs ${
+              className={`w-full px-3.5 py-2.5 rounded-xl border outline-none text-xs leading-5 font-normal ${
                 isLight
-                  ? 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
-                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-blue-500'
+                  ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-400'
               }`}
             />
           </div>
 
           {/* Finance Integration Notice */}
           <div
-            className={`p-3 rounded-2xl border text-[11px] leading-relaxed ${
+            className={`p-3 rounded-xl border text-[11px] leading-relaxed ${
               isLight
-                ? 'bg-slate-100 border-slate-200 text-slate-700'
-                : 'bg-slate-800/40 border-slate-700/50 text-gray-300'
+                ? 'bg-slate-50 border-slate-200 text-slate-600'
+                : 'bg-slate-800/40 border-slate-700/50 text-slate-400'
             }`}
           >
-            <span className="font-bold text-slate-900 dark:text-white">
+            <span className="font-medium text-slate-900 dark:text-white">
               Integrasi Otomatis Finance & Accounting (Status CLOSED):
             </span>{' '}
-            Saat dikonfirmasi, sistem otomatis membukukan setoran fisik (Rp {actualCash.toLocaleString('id-ID')}) ke kas brankas/utama Finance, membukukan selisih ke akun selisih kas, mengunci status shift menjadi <strong>CLOSED</strong>, dan mencatat ringkasan ke <strong>Audit Log Finance</strong>.
+            Saat dikonfirmasi, sistem otomatis membukukan setoran fisik (Rp {actualCash.toLocaleString('id-ID')}) ke kas brankas/utama Finance, membukukan selisih ke akun selisih kas, mengunci status shift menjadi CLOSED, dan mencatat ringkasan ke Audit Log Finance.
           </div>
         </div>
 
@@ -881,25 +919,55 @@ export const CloseShiftModal: React.FC<CloseShiftModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className={`px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl border font-normal text-xs transition cursor-pointer active:scale-[0.99] ${
               isLight
                 ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-gray-300'
+                : 'bg-slate-800/60 hover:bg-slate-700 border-slate-700 text-slate-300'
             }`}
           >
             Batal
           </button>
 
-          <button
-            id="btn-confirm-close-shift"
-            type="button"
-            onClick={handleConfirmClose}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 hover:from-blue-500 hover:to-emerald-500 text-white font-black text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(0,82,255,0.4)] transition cursor-pointer active:scale-95"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Konfirmasi Tutup Shift (CLOSED) & Simpan Rekonsiliasi</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          {!isBlindSubmitted ? (
+            <button
+              type="button"
+              onClick={() => {
+                setIsBlindSubmitted(true);
+                if (showToast) showToast('Laporan tutup shift berhasil dikirim (Blind Submit). Silakan tinjau perbandingan selisih kas.');
+              }}
+              className="px-5 py-2.5 rounded-xl font-medium text-xs bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-md transition cursor-pointer active:scale-[0.99] flex items-center gap-2"
+            >
+              <span>Kirim Laporan Tutup Shift (Blind Submit)</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBlindSubmitted(false)}
+                className={`px-3.5 py-2.5 rounded-xl border text-xs font-medium transition cursor-pointer ${
+                  isLight ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                Kembali / Edit
+              </button>
+              <button
+                id="btn-confirm-close-shift"
+                type="button"
+                disabled={isClosingShift}
+                onClick={handleConfirmClose}
+                className={`px-5 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 transition active:scale-[0.99] ${
+                  isClosingShift
+                    ? 'bg-slate-700/60 text-slate-400 border border-slate-600 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-cyan-600 via-indigo-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] cursor-pointer'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isClosingShift ? 'Menyimpan & Menutup Shift...' : 'Konfirmasi Tutup Shift (CLOSED) & Simpan Rekonsiliasi'}</span>
+                {!isClosingShift && <ArrowRight className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

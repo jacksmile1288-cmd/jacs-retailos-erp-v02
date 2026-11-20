@@ -163,15 +163,15 @@ export const PurchaseReturnModal: React.FC<PurchaseReturnModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-3xl rounded-2xl p-6 shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+        className={`w-full max-w-3xl rounded-2xl p-6 relative border my-8 flex flex-col max-h-[92vh] ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-all p-1 active:scale-[0.99] cursor-pointer"
           title="Tutup Modal"
         >
           <X className="w-5 h-5" />
@@ -184,14 +184,14 @@ export const PurchaseReturnModal: React.FC<PurchaseReturnModalProps> = ({
           </div>
           <div>
             <h3
-              className={`font-bold text-base leading-tight ${
+              className={`font-medium text-base leading-6 ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
-              Buat Retur Pembelian (Purchase Return) & Terbitkan Nota Debit
+              Buat Retur Pembelian (Purchase Return) &amp; Terbitkan Nota Debit
             </h3>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Pengembalian fisik barang rusak ke vendor rekanan & pemotongan otomatis tagihan Accounts Payable (AP).
+            <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400 mt-0.5">
+              Pengembalian fisik barang rusak ke vendor rekanan &amp; pemotongan otomatis tagihan Accounts Payable (AP)
             </p>
           </div>
         </div>
@@ -429,17 +429,17 @@ export const PurchaseReturnModal: React.FC<PurchaseReturnModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition-all font-medium text-xs cursor-pointer active:scale-[0.99]"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={selectedItems.length === 0 || totalDebitNoteAmount <= 0}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold transition shadow-[0_0_15px_rgba(244,63,94,0.35)] flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+              className="px-5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-medium text-xs transition-all shadow-[0_0_15px_rgba(244,63,94,0.35)] flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99]"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Terbitkan Nota Debit & Proses Retur</span>
+              <span>Terbitkan Nota Debit &amp; Proses Retur</span>
             </button>
           </div>
         </form>

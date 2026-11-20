@@ -1,331 +1,1110 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { AppProvider, useApp } from './context/AppContext';
-import { Topbar } from './components/Topbar';
-import { Sidebar } from './components/Sidebar';
-import { PinAuthModal } from './components/pos/PinAuthModal';
-import { ReceiptModal } from './components/pos/ReceiptModal';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
-  Power,
-  Building2,
-  Lock,
+  LogOut,
+  Sun,
+  Moon,
   ShieldAlert,
-  Sparkles,
+  Lock,
+  ArrowLeft,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  X,
   RefreshCw,
-  LogIn,
-  ArrowRight,
-  PanelLeftOpen,
+  Wrench,
+  Store,
+  Layers,
+  ChevronDown,
+  Briefcase,
+  CreditCard,
+  ShoppingBag,
+  Boxes,
+  Users,
+  Database,
+  ShieldCheck,
+  Monitor,
+  Coffee,
+  Clock,
+  Eye,
+  EyeOff,
+  KeyRound
 } from 'lucide-react';
+import { AuditProvider } from './AuditProvider';
+import { AppProvider, useApp } from './context/AppContext';
+import { DualBackendStatusWidget } from './components/DualBackendStatusWidget';
+import { PublicGateway } from './components/auth/PublicGateway';
+import { MasterDataModule } from './components/master/MasterDataModule';
+import SuperAdminModule from './components/admin/SuperAdminModule';
+import POSModule from './components/pos/PosModule';
+import { ModuleErrorBoundary } from './components/common/ModuleErrorBoundary';
+import { ActiveNavModule, User } from './types';
+import {
+  generatePosStations,
+  getOperationalTopologyOption,
+  normalizeStationCode,
+} from './utils/terminalConfigUtils';
 
-// Code-splitting: Muat modul hanya saat diklik (On-Demand Lazy Loading)
-const HomeModule = lazy(() => import('./components/home/HomeModule'));
-const PosModule = lazy(() => import('./components/pos/PosModule'));
-const DashboardModule = lazy(() => import('./components/dashboard/DashboardModule'));
-const ExecutiveModule = lazy(() => import('./components/executive/ExecutiveModule'));
-const FinanceModule = lazy(() => import('./components/finance/FinanceModule'));
-const PurchasingModule = lazy(() => import('./components/purchasing/PurchasingModule'));
-const WarehouseModule = lazy(() => import('./components/warehouse/WarehouseModule'));
-const HrModule = lazy(() => import('./components/hr/HrModule'));
-const MasterDataModule = lazy(() => import('./components/master/MasterDataModule'));
-const SuperAdminModule = lazy(() => import('./components/admin/SuperAdminModule'));
-
-// Fallback spinner saat modul sedang diunduh/dimuat
-const ModuleLoadingFallback: React.FC = () => (
-  <div className="flex-1 flex flex-col items-center justify-center p-12 min-h-[350px] text-center select-none">
-    <div className="relative flex items-center justify-center mb-4">
-      <div className="w-12 h-12 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
-      <div className="absolute w-6 h-6 rounded-full bg-cyan-500/10 animate-pulse" />
-    </div>
-    <div className="text-sm font-bold text-cyan-400 tracking-wide flex items-center gap-2">
-      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping inline-block" />
-      <span>Memuat modul...</span>
-    </div>
-    <p className="text-[11px] text-gray-500 mt-1 font-mono">JacS RetailOS ERP Enterprise</p>
-  </div>
-);
-
-// Bungkus render modul dengan Suspense
-function ModuleRenderer({ activeTab }: { activeTab: string }) {
-  return (
-    <Suspense fallback={<ModuleLoadingFallback />}>
-      {activeTab === 'home' && <HomeModule />}
-      {activeTab === 'pos' && <PosModule />}
-      {activeTab === 'dashboard' && <DashboardModule />}
-      {activeTab === 'executive' && <ExecutiveModule />}
-      {activeTab === 'finance' && <FinanceModule />}
-      {activeTab === 'purchasing' && <PurchasingModule />}
-      {activeTab === 'warehouse' && <WarehouseModule />}
-      {activeTab === 'hr' && <HrModule />}
-      {activeTab === 'master-data' && <MasterDataModule />}
-      {activeTab === 'admin' && <SuperAdminModule />}
-    </Suspense>
-  );
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importer: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await importer();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return await importer();
+    }
+  });
 }
 
-const MainLayout: React.FC = () => {
-  const {
-    activeNav,
-    setActiveNav,
-    theme,
-    isCashierWorkspaceActive,
-    activeUser,
-    setActiveUser,
-    users,
-    isGlobalMaintenance,
-    toggleGlobalMaintenance,
-    businessProfile,
-    isFirstRunSetup,
-    isSuperAdminAuthenticated,
-    setIsSuperAdminAuthenticated,
-    showToast,
-    isSidebarCollapsed,
-    toggleSidebar,
-  } = useApp();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+const ExecutiveModule = lazyWithRetry(() => import('./components/executive/ExecutiveModule'));
+const WarehouseModule = lazyWithRetry(() => import('./components/warehouse/WarehouseModule'));
+const PurchasingModule = lazyWithRetry(() => import('./components/purchasing/PurchasingModule'));
+const FinanceModule = lazyWithRetry(() => import('./components/finance/FinanceModule'));
+const HRModule = lazyWithRetry(() => import('./components/hr/HrModule'));
 
-  // Shortcut Keyboard Global: [Ctrl + B] / [Cmd + B] untuk toggle sidebar
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-        e.preventDefault();
-        toggleSidebar();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleSidebar]);
+function getAllowedModulesForUser(
+  user: User | null,
+  isSuperAdmin: boolean
+): ActiveNavModule[] {
+  if (!user) return [];
+  const roleStr = String(user.role || '').toUpperCase();
+  const divStr = String(user.division || '').toUpperCase();
 
-  // Tutup drawer mobile secara otomatis saat berpindah atau berada di resolusi desktop (>= 1024px)
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        setIsMobileMenuOpen(false);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const isFullscreenCashier = activeNav === 'pos' && isCashierWorkspaceActive;
-  const isIsolatedAdmin = activeNav === 'admin';
-  const isSuperAdmin = Boolean(
-    isSuperAdminAuthenticated || activeUser?.role === 'Super Admin'
-  );
-
-  // If first run setup is active or business profile is unconfigured, redirect initial flow directly to Super Admin profile onboarding
-  useEffect(() => {
-    const isProfileUnconfigured = !businessProfile?.name?.trim() || !businessProfile?.isConfigured;
-    if ((isFirstRunSetup || isProfileUnconfigured) && activeNav === 'pos') {
-      setActiveNav('admin');
-      showToast('Selesaikan registrasi profil entitas usaha terlebih dahulu di Super Admin sebelum menggunakan Kasir.');
-    }
-  }, [isFirstRunSetup, businessProfile, activeNav, setActiveNav, showToast]);
-
-  // ==============================================================
-  // 1. GLOBAL MAINTENANCE MODE STANDBY SCREEN (FOR REGULAR USERS)
-  // ==============================================================
-  if (isGlobalMaintenance && !isSuperAdmin && activeNav !== 'admin') {
-    return (
-      <div className={`min-h-screen flex items-center justify-center p-4 font-sans ${
-        theme === 'light' ? 'bg-slate-100 text-slate-900' : 'bg-[#0a0d12] text-white'
-      }`}>
-        <div className={`w-full max-w-xl rounded-3xl p-8 border shadow-2xl text-center space-y-6 ${
-          theme === 'light'
-            ? 'bg-white border-slate-300 shadow-slate-200'
-            : 'bg-[#161b22] border-rose-500/40 shadow-[0_0_50px_rgba(244,63,94,0.2)]'
-        }`}>
-          {/* Logo & Beacon */}
-          <div className="flex items-center justify-center gap-3">
-            {businessProfile.logoUrl ? (
-              <img
-                src={businessProfile.logoUrl}
-                alt="Logo"
-                className="w-12 h-12 object-contain rounded-xl"
-                onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-              />
-            ) : null}
-            <div className="text-left">
-              <h3 className="font-extrabold text-base tracking-tight text-cyan-400">
-                {businessProfile.name}
-              </h3>
-              <p className="text-[11px] text-gray-400 font-mono">
-                {businessProfile.category}
-              </p>
-            </div>
-          </div>
-
-          <div className="w-20 h-20 rounded-3xl mx-auto flex items-center justify-center bg-rose-500/15 border-2 border-rose-500/50 text-rose-400 shadow-[0_0_30px_rgba(244,63,94,0.35)] animate-pulse">
-            <Power className="w-10 h-10" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="px-3 py-1 rounded-full text-[11px] font-mono font-black bg-rose-500/20 text-rose-300 border border-rose-500/50 tracking-wider uppercase">
-              GLOBAL MAINTENANCE MODE ACTIVE
-            </span>
-            <h1 className="text-2xl font-black tracking-tight mt-2">
-              Sistem Dalam Pemeliharaan Terpusat
-            </h1>
-            <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
-              Akses reguler untuk operasional kasir POS, gudang inventori, dan SDM ditangguhkan sementara demi keamanan integritas data saat pemeliharaan, migrasi, atau diagnosa terpadu.
-            </p>
-          </div>
-
-          {/* System Info Bento */}
-          <div className="grid grid-cols-2 gap-3 text-left text-xs p-4 rounded-2xl bg-black/25 border border-gray-800">
-            <div>
-              <span className="text-[10px] text-gray-500 block">Status Gateway:</span>
-              <span className="font-mono font-bold text-rose-400">STANDBY / LOCKDOWN</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-gray-500 block">Akun Terdeteksi:</span>
-              <span className="font-bold text-gray-300">{activeUser?.name || 'Staff'} ({activeUser?.role || 'Reguler'})</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-gray-500 block">Otoritas Akses:</span>
-              <span className="text-amber-400 font-semibold">Khusus Super Admin</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-gray-500 block">Perkiraan Durasi:</span>
-              <span className="text-emerald-400 font-mono font-bold">&plusmn; 10 Menit</span>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <button
-              onClick={() => {
-                const superAdminUser = users.find((u) => u.role === 'Super Admin') || users[0];
-                if (superAdminUser) {
-                  setActiveUser(superAdminUser);
-                }
-                setActiveNav('admin');
-              }}
-              className="w-full sm:w-auto px-6 py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(236,72,153,0.35)] cursor-pointer transition active:scale-95"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Login sebagai Super Admin (Dev Console)</span>
-            </button>
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full sm:w-auto px-4 py-3 rounded-xl text-xs font-semibold border border-gray-700 hover:bg-gray-800 text-gray-300 transition cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5 inline mr-1" />
-              <span>Periksa Ulang Status</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  if (isSuperAdmin || roleStr.includes('SUPER') || divStr.includes('SUPER')) {
+    return ['admin', 'executive', 'finance', 'purchasing', 'pos', 'warehouse', 'hr', 'master-data', 'security'];
   }
 
+  // Unified Non-Blocking ERP: akses penuh ke seluruh 6 pilar manajemen + POS + Master Data
+  return ['pos', 'executive', 'finance', 'purchasing', 'warehouse', 'hr', 'master-data'];
+}
+
+const HYBRID_MANAGEMENT_PILLARS: Array<{
+  id: ActiveNavModule;
+  label: string;
+  shortLabel: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'executive', label: 'Executive & Management', shortLabel: 'Executive', icon: Briefcase },
+  { id: 'finance', label: 'Finance & Accounting', shortLabel: 'Finance', icon: CreditCard },
+  { id: 'purchasing', label: 'Purchasing', shortLabel: 'Purchasing', icon: ShoppingBag },
+  { id: 'warehouse', label: 'Warehouse & Inventory', shortLabel: 'Warehouse', icon: Boxes },
+  { id: 'hr', label: 'Human Resources (HR)', shortLabel: 'HR', icon: Users },
+  { id: 'master-data', label: 'Master Data Katalog', shortLabel: 'Master Data', icon: Database },
+];
+
+const ToastOverlay: React.FC = () => {
+  const { toastMessage, toastType, clearToast } = useApp();
+  if (!toastMessage) return null;
+
+  const toneClass =
+    toastType === 'error'
+      ? 'bg-rose-950/95 border-rose-500/60 text-rose-100'
+      : toastType === 'warning'
+      ? 'bg-amber-950/95 border-amber-500/60 text-amber-100'
+      : toastType === 'success'
+      ? 'bg-emerald-950/95 border-emerald-500/60 text-emerald-100'
+      : 'bg-slate-900/95 border-cyan-500/60 text-cyan-100';
+
+  const Icon =
+    toastType === 'error' || toastType === 'warning'
+      ? AlertTriangle
+      : toastType === 'success'
+      ? CheckCircle2
+      : Info;
+
   return (
-    <div className={`h-screen overflow-hidden flex flex-col font-sans transition-colors duration-200 ${
-      theme === 'light' ? 'bg-[#F1F5F9] text-[#0F172A]' : 'bg-[#0d1117] text-[#e6edf3]'
-    }`}>
-      {/* 1. Global Maintenance Alert Banner for Super Admin */}
-      {isGlobalMaintenance && isSuperAdmin && (
-        <div className="bg-gradient-to-r from-rose-700 via-pink-700 to-rose-700 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-lg z-50 shrink-0 animate-pulse">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-amber-300" />
-            <span>
-              <strong>GLOBAL MAINTENANCE MODE AKTIF:</strong> Seluruh pengguna reguler (Kasir &amp; Staff) sedang terkunci di halaman standby. Hanya Anda yang memiliki akses sistem.
-            </span>
-          </div>
-          <button
-            onClick={toggleGlobalMaintenance}
-            className="px-3 py-1 rounded-lg bg-white text-rose-900 font-extrabold text-[11px] hover:bg-rose-50 transition cursor-pointer shrink-0 ml-3"
-          >
-            Matikan Mode Maintenance
-          </button>
-        </div>
-      )}
-
-      {/* 2. First-Time Run Setup Onboarding Banner */}
-      {isFirstRunSetup && activeNav !== 'admin' && (
-        <div className="bg-gradient-to-r from-cyan-600 via-blue-600 to-cyan-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between shadow-lg z-50 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <Building2 className="w-4 h-4 shrink-0 text-cyan-200" />
-            <span>
-              <strong>SETUP PERTAMA (FIRST-RUN):</strong> Harap lengkapi Profil &amp; Registrasi Entitas Usaha di modul Super Admin sebelum memulai operasional kasir.
-            </span>
-          </div>
-          <button
-            onClick={() => setActiveNav('admin')}
-            className="px-3 py-1 rounded-lg bg-white text-blue-900 font-extrabold text-[11px] hover:bg-cyan-50 transition cursor-pointer shrink-0 ml-3 flex items-center gap-1"
-          >
-            <span>Buka Setup Profil Entitas Usaha</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Topbar: hidden only during active fullscreen cashier register */}
-      {!isFullscreenCashier && (
-        <Topbar onOpenMobileMenu={() => setIsMobileMenuOpen(true)} />
-      )}
-
-      <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        {/* Sidebar: hidden only during active fullscreen cashier register */}
-        {!isFullscreenCashier && (
-          <Sidebar
-            isOpenMobile={isMobileMenuOpen}
-            onCloseMobile={() => setIsMobileMenuOpen(false)}
-          />
-        )}
-
-        {/* Main Content Viewport: Berdampingan langsung (side-by-side) dengan Sidebar tanpa tumpang-tindih */}
-        <main
-          className={`flex-1 min-w-0 h-full transition-all duration-300 ease-in-out ${
-            !isFullscreenCashier
-              ? 'pt-4 pb-12 px-4 sm:px-6 md:px-8 overflow-y-auto overflow-x-hidden flex flex-col'
-              : 'p-0 sm:p-2 overflow-y-auto overflow-x-hidden w-full'
-          } max-w-full`}
-        >
-          <ModuleRenderer activeTab={activeNav} />
-        </main>
-      </div>
-
-      {/* Tombol Floating Toggle Sidebar di Tepi Kiri Layar saat Sidebar Ditutup */}
-      {isSidebarCollapsed && !isFullscreenCashier && (
+    <div className="fixed bottom-6 right-6 z-[70] max-w-sm animate-fadeIn">
+      <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shadow-2xl backdrop-blur-md text-xs font-semibold ${toneClass}`}>
+        <Icon className="w-4 h-4 shrink-0" />
+        <span className="flex-1">{toastMessage}</span>
         <button
           type="button"
-          id="btn-floating-sidebar-toggle"
-          onClick={toggleSidebar}
-          className={`fixed left-0 top-20 z-40 p-2 sm:p-2.5 rounded-r-xl border border-l-0 shadow-xl transition-all duration-200 group cursor-pointer flex items-center gap-1.5 animate-fadeIn ${
-            theme === 'light'
-              ? 'bg-white text-slate-700 hover:bg-cyan-50 hover:text-cyan-700 border-slate-300 hover:border-cyan-400 shadow-slate-300/50'
-              : 'bg-[#161b22] text-slate-200 hover:bg-[#21262d] hover:text-cyan-400 border-[#30363d] hover:border-cyan-500/50 shadow-[0_4px_20px_rgba(0,0,0,0.5)]'
-          }`}
-          title="Buka Navigasi Menu [Ctrl + B]"
-          aria-label="Buka Navigasi Menu"
+          onClick={clearToast}
+          className="opacity-70 hover:opacity-100 cursor-pointer p-0.5"
+          aria-label="Tutup notifikasi"
         >
-          <PanelLeftOpen className="w-4 h-4 text-cyan-500 group-hover:scale-110 transition-transform" />
-          <span className="text-[11px] font-bold hidden sm:group-hover:inline transition-opacity duration-200 pr-1">
-            Buka Menu (Ctrl+B)
-          </span>
+          <X className="w-3.5 h-3.5" />
         </button>
-      )}
-
-      {/* Global Modals */}
-      <PinAuthModal />
-      <ReceiptModal />
+      </div>
     </div>
   );
 };
 
-export default function App() {
+const MainLayout: React.FC = () => {
+  const {
+    currentUser,
+    isSuperAdminAuthenticated,
+    activeNav,
+    setActiveNav,
+    contextualProfile,
+    logout,
+    theme,
+    toggleTheme,
+    language,
+    toggleLanguage,
+    resetDemoData,
+    showToast,
+    isProductionMode,
+    remoteMaintenanceLock,
+    activeBranchId,
+    triggerManualHeartbeatPoll,
+    recordSystemError,
+    businessDomainConfig,
+    businessProfile,
+    boundStation,
+    activeTerminal,
+    cashierShifts,
+    setIsCashierWorkspaceActive,
+    verifyManagementAuthPin,
+    addAuditLog,
+    isIdleLocked,
+    idleLockedAt,
+    idleLockReason,
+    idleAutoLockMinutes,
+    unlockIdleScreen,
+  } = useApp();
+
+  const [moduleResetCounter, setModuleResetCounter] = useState(0);
+  const [posEntrySignal, setPosEntrySignal] = useState(0);
+  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+  const [isCashierStatusMenuOpen, setIsCashierStatusMenuOpen] = useState(false);
+
+  // Proteksi PIN Otorisasi Manajemen saat berpindah dari layar Kasir POS ke 6 Pilar Manajemen
+  const [pendingAuthTarget, setPendingAuthTarget] = useState<{
+    moduleId: ActiveNavModule;
+    label: string;
+  } | null>(null);
+  const [mgmtPinInput, setMgmtPinInput] = useState('');
+  const [mgmtPinError, setMgmtPinError] = useState<string | null>(null);
+  const [showMgmtPin, setShowMgmtPin] = useState(false);
+
+  // State Terminal Idle Auto-Lock
+  const [idleUnlockPin, setIdleUnlockPin] = useState('');
+  const [idleUnlockError, setIdleUnlockError] = useState<string | null>(null);
+  const [isUnlockingIdle, setIsUnlockingIdle] = useState(false);
+
+  const cashierStatusMenuRef = useRef<HTMLDivElement>(null);
+  const workspaceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        isCashierStatusMenuOpen &&
+        cashierStatusMenuRef.current &&
+        !cashierStatusMenuRef.current.contains(target)
+      ) {
+        setIsCashierStatusMenuOpen(false);
+      }
+      if (
+        isWorkspaceMenuOpen &&
+        workspaceMenuRef.current &&
+        !workspaceMenuRef.current.contains(target)
+      ) {
+        setIsWorkspaceMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isCashierStatusMenuOpen, isWorkspaceMenuOpen]);
+
+  const topologyMeta = getOperationalTopologyOption('NON_BLOCKING_ERP');
+
+  const allowedModules = useMemo(
+    () => getAllowedModulesForUser(currentUser, isSuperAdminAuthenticated),
+    [currentUser, isSuperAdminAuthenticated]
+  );
+
+  const activeStationCount = Math.max(
+    1,
+    Math.min(
+      10,
+      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1
+    )
+  );
+
+  const registeredStations = useMemo(
+    () =>
+      generatePosStations(
+        activeStationCount,
+        businessDomainConfig?.activePosTypes,
+        businessDomainConfig?.primaryBusinessModel
+      ),
+    [
+      activeStationCount,
+      businessDomainConfig?.activePosTypes,
+      businessDomainConfig?.primaryBusinessModel,
+    ]
+  );
+
+  const activeDeviceStationCode = useMemo(() => {
+    const candidate = normalizeStationCode(
+      boundStation?.stationCode ||
+        activeTerminal?.stationCode ||
+        activeTerminal?.id ||
+        registeredStations[0]?.stationCode ||
+        'POS-01'
+    );
+    return registeredStations.some((s) => s.stationCode === candidate)
+      ? candidate
+      : registeredStations[0]?.stationCode || 'POS-01';
+  }, [boundStation?.stationCode, activeTerminal?.stationCode, activeTerminal?.id, registeredStations]);
+
+  const stationStatusList = useMemo(() => {
+    return registeredStations.map((st) => {
+      const openShift = (cashierShifts || []).find(
+        (s) =>
+          s.status === 'OPEN' &&
+          normalizeStationCode(s.stationCode || s.terminalId || s.terminalName) === st.stationCode
+      );
+      const status: 'ONLINE' | 'ISTIRAHAT' | 'BELUM_BUKA' = openShift
+        ? openShift.isPaused
+          ? 'ISTIRAHAT'
+          : 'ONLINE'
+        : 'BELUM_BUKA';
+      return {
+        stationCode: st.stationCode,
+        displayName: st.displayName,
+        posTypeLabel: st.posTypeLabel,
+        status,
+        cashierName: openShift?.cashierName || null,
+        openedAt: openShift?.openedAt || null,
+        pausedAt: openShift?.pausedAt || null,
+      };
+    });
+  }, [registeredStations, cashierShifts]);
+
+  const onlineCashierCount = useMemo(
+    () => stationStatusList.filter((s) => s.status === 'ONLINE').length,
+    [stationStatusList]
+  );
+  const pausedCashierCount = useMemo(
+    () => stationStatusList.filter((s) => s.status === 'ISTIRAHAT').length,
+    [stationStatusList]
+  );
+  const unopenedCashierCount = useMemo(
+    () => stationStatusList.filter((s) => s.status === 'BELUM_BUKA').length,
+    [stationStatusList]
+  );
+  const totalStationCount = stationStatusList.length;
+  const activeDeviceStatus =
+    stationStatusList.find((s) => s.stationCode === activeDeviceStationCode)?.status || 'BELUM_BUKA';
+
+  // Jika belum login, tampilkan PublicGateway (halaman Login bawaan proyek dengan pembatasan RBAC)
+  if (!currentUser) {
+    return (
+      <>
+        <ToastOverlay />
+        <PublicGateway onLoginSuccess={() => {}} />
+      </>
+    );
+  }
+
+  const defaultAllowedModule: ActiveNavModule = allowedModules[0] || 'pos';
+  const requestedModule: ActiveNavModule =
+    activeNav === 'home' ? defaultAllowedModule : activeNav;
+  const currentModule: ActiveNavModule = requestedModule;
+  const isAuthorized = allowedModules.includes(currentModule);
+  const isLight = theme === 'light';
+  const isHybridWorkspaceSwitcherVisible = allowedModules.length > 1;
+  const activePillarMeta = HYBRID_MANAGEMENT_PILLARS.find((p) => p.id === currentModule);
+
+  const handleWorkspaceSwitch = (targetMod: ActiveNavModule) => {
+    setIsWorkspaceMenuOpen(false);
+    setIsCashierStatusMenuOpen(false);
+
+    // Kembali ke Kasir POS selalu instan tanpa PIN & tanpa terblokir
+    if (targetMod === 'pos') {
+      setPendingAuthTarget(null);
+      setIsCashierWorkspaceActive(false);
+      setPosEntrySignal((prev) => prev + 1);
+      setActiveNav('pos');
+      return;
+    }
+
+    // Jika sedang di layar Kasir POS dan menuju 6 Pilar Manajemen / SuperAdmin, wajib verifikasi PIN Otorisasi Manajemen
+    if (currentModule === 'pos') {
+      const targetMeta = HYBRID_MANAGEMENT_PILLARS.find((p) => p.id === targetMod);
+      const targetLabel =
+        targetMeta?.label || (targetMod === 'admin' ? 'Konsol SuperAdmin' : String(targetMod).toUpperCase());
+      setMgmtPinInput('');
+      setMgmtPinError(null);
+      setShowMgmtPin(false);
+      setPendingAuthTarget({ moduleId: targetMod, label: targetLabel });
+      return;
+    }
+
+    setIsCashierWorkspaceActive(false);
+    setActiveNav(targetMod);
+  };
+
+  const handleConfirmMgmtPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingAuthTarget) return;
+    if (!verifyManagementAuthPin(mgmtPinInput)) {
+      setMgmtPinError('PIN Otorisasi Manajemen salah! Periksa kembali PIN 6 digit dari SuperAdmin.');
+      addAuditLog(
+        'MANAGEMENT_PIN_AUTH_FAILED',
+        `Gagal verifikasi PIN Otorisasi Manajemen saat akses ke ${pendingAuthTarget.label} dari Kasir POS.`,
+        'WARNING'
+      );
+      showToast('PIN Otorisasi Manajemen salah! Akses ditolak.', 'error');
+      return;
+    }
+
+    const approvedMod = pendingAuthTarget.moduleId;
+    const approvedLabel = pendingAuthTarget.label;
+    setPendingAuthTarget(null);
+    setMgmtPinInput('');
+    setMgmtPinError(null);
+    setIsCashierWorkspaceActive(false);
+    setActiveNav(approvedMod);
+    addAuditLog(
+      'MANAGEMENT_PIN_AUTH_SUCCESS',
+      `Verifikasi PIN Otorisasi Manajemen berhasil untuk membuka ${approvedLabel}.`,
+      'INFO'
+    );
+    showToast(`Otorisasi berhasil. Membuka ${approvedLabel}...`, 'success');
+  };
+
   return (
-    <AppProvider>
-      <MainLayout />
-    </AppProvider>
+    <div
+      className={`h-screen w-full flex flex-col overflow-hidden font-sans selection:bg-cyan-500 selection:text-slate-950 transition-colors duration-200 ${
+        isLight ? 'bg-slate-50 text-slate-900' : 'bg-slate-950 text-slate-100'
+      }`}
+    >
+      <ToastOverlay />
+
+      {/* Slim Top Status Bar — Tata Letak Presisi Anti-Tumpuk */}
+      <header
+        id="app-topbar"
+        className={`sticky top-0 z-40 shrink-0 min-h-12 px-3 sm:px-4 py-1.5 border-b backdrop-blur-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5 ${
+          isLight
+            ? 'bg-[#F6F8FB]/95 border-slate-300/80 text-slate-900'
+            : 'bg-slate-950/95 border-slate-800 text-slate-100'
+        }`}
+      >
+        {/* KIRI: Identitas Brand + Loket Kasir Aktif + Live Counter Online */}
+        <div className="flex items-center gap-2 min-w-0 shrink">
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-slate-900 border border-cyan-500/40 flex items-center justify-center overflow-hidden shadow-sm shadow-cyan-500/20">
+              <img
+                src="/logo-jacs-enterprise.png"
+                alt="JacS Enterprise Logo"
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  if (parent && !parent.querySelector('.fallback-text')) {
+                    const span = document.createElement('span');
+                    span.className = 'font-black text-xs text-cyan-400 fallback-text';
+                    span.innerText = 'JE';
+                    parent.appendChild(span);
+                  }
+                }}
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-black text-xs sm:text-sm tracking-wider uppercase whitespace-nowrap">
+                JacS Enterprise
+              </span>
+              <span className="text-slate-500 hidden 2xl:inline">—</span>
+              <span
+                className={`hidden 2xl:inline-block px-1.5 py-0.5 font-mono text-[10px] font-bold rounded whitespace-nowrap ${
+                  isLight
+                    ? 'bg-cyan-50 text-cyan-700 border border-cyan-200'
+                    : 'bg-slate-800 text-cyan-400'
+                }`}
+              >
+                RetailOS ERP V2
+              </span>
+            </div>
+          </div>
+
+          {/* Identitas Loket & Operator Aktif: Format "Kasir 01 (Admin)" */}
+          {(() => {
+            const stationNumber = activeDeviceStationCode.replace(/^POS-/i, '').padStart(2, '0');
+            const operatorDisplayName = currentUser.name || contextualProfile.position || 'Admin';
+            const cashierIdentityLabel = `Kasir ${stationNumber} (${operatorDisplayName})`;
+            return (
+              <div
+                id="navbar-cashier-identity"
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-bold min-w-0 max-w-[175px] whitespace-nowrap shrink-0 ${
+                  isLight
+                    ? 'bg-slate-100 border-slate-200 text-slate-800'
+                    : 'bg-slate-900 border-slate-800 text-slate-100'
+                }`}
+                title={`Loket aktif: ${activeDeviceStationCode} · Operator: ${operatorDisplayName} (${currentUser.role})`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    activeDeviceStatus === 'ONLINE'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : activeDeviceStatus === 'ISTIRAHAT'
+                      ? 'bg-amber-400'
+                      : 'bg-slate-400'
+                  }`}
+                />
+                <Monitor className="w-3.5 h-3.5 text-cyan-500 shrink-0 hidden sm:inline" />
+                <span className="truncate">{cashierIdentityLabel}</span>
+                {activeDeviceStatus === 'ISTIRAHAT' && (
+                  <span className="px-1 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono text-[9px] uppercase shrink-0">
+                    Istirahat
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Live Counter Status Kasir Online + Popover Rincian Tiap Loket */}
+          <div className="relative shrink-0" ref={cashierStatusMenuRef}>
+            <button
+              type="button"
+              id="navbar-cashier-status-trigger"
+              onClick={() => {
+                setIsWorkspaceMenuOpen(false);
+                setIsCashierStatusMenuOpen((prev) => !prev);
+              }}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-semibold whitespace-nowrap cursor-pointer transition ${
+                onlineCashierCount > 0
+                  ? isLight
+                    ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
+                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                  : isLight
+                  ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
+                  : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300'
+              }`}
+              title="Klik untuk melihat rincian status tiap loket kasir (Online / Istirahat / Belum Buka Shift)"
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  onlineCashierCount > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                }`}
+              />
+              <span className="font-mono">
+                {onlineCashierCount} / {totalStationCount} Kasir Online
+              </span>
+              <ChevronDown className={`w-3 h-3 transition-transform ${isCashierStatusMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isCashierStatusMenuOpen && (
+              <div
+                id="navbar-cashier-status-popover"
+                className={`absolute left-0 mt-2 w-80 max-w-[92vw] rounded-xl border shadow-2xl p-3 z-50 space-y-2.5 ${
+                  isLight
+                    ? 'bg-white border-slate-300 text-slate-900'
+                    : 'bg-slate-900 border-slate-700 text-slate-100'
+                }`}
+              >
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                    <div>
+                      <div className="text-xs font-bold">Status Live Loket Kasir</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {onlineCashierCount} Online · {pausedCashierCount} Istirahat · {unopenedCashierCount} Belum Buka
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30">
+                      {totalStationCount} LOKET
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
+                    {stationStatusList.map((st) => {
+                      const isCurrentDevice = st.stationCode === activeDeviceStationCode;
+                      return (
+                        <div
+                          key={st.stationCode}
+                          className={`px-2.5 py-2 rounded-lg border flex items-center justify-between gap-2 ${
+                            isCurrentDevice
+                              ? isLight
+                                ? 'bg-cyan-50/70 border-cyan-300'
+                                : 'bg-cyan-500/10 border-cyan-500/35'
+                              : isLight
+                              ? 'bg-slate-50 border-slate-200'
+                              : 'bg-slate-950/70 border-slate-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-xs font-bold">{st.stationCode}</span>
+                              {isCurrentDevice && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
+                                  PC INI
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              {st.cashierName ? `Kasir: ${st.cashierName}` : st.posTypeLabel}
+                            </div>
+                          </div>
+
+                          {st.status === 'ONLINE' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Online
+                            </span>
+                          ) : st.status === 'ISTIRAHAT' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0">
+                              <Coffee className="w-3 h-3" />
+                              Istirahat
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30 shrink-0">
+                              <Clock className="w-3 h-3" />
+                              Belum Buka Shift
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+            )}
+          </div>
+
+          {/* Badge Arsitektur Non-Blocking ERP */}
+          <span
+            className={`hidden 2xl:inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono text-[10px] font-semibold whitespace-nowrap shrink-0 ${
+              isLight
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+            }`}
+            title={topologyMeta.description}
+          >
+            {topologyMeta.shortLabel}
+          </span>
+        </div>
+
+        {/* KANAN: Workspace Switcher + Status Widget + Kontrol Bahasa, Tema, & Logout dalam 1 Baris Rapi */}
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
+          {isHybridWorkspaceSwitcherVisible && (
+            <div className="relative flex items-center gap-1.5 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
+              <button
+                type="button"
+                id="btn-workspace-switcher-pos"
+                onClick={() => handleWorkspaceSwitch('pos')}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
+                  currentModule === 'pos'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                    : isLight
+                    ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
+                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+                }`}
+              >
+                <Store className="w-3.5 h-3.5 shrink-0" />
+                <span>Kasir POS</span>
+              </button>
+
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  id="btn-workspace-switcher-pillars"
+                  onClick={() => {
+                    setIsCashierStatusMenuOpen(false);
+                    setIsWorkspaceMenuOpen((prev) => !prev);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
+                    activePillarMeta || currentModule === 'admin'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                      : isLight
+                      ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
+                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {activePillarMeta
+                      ? activePillarMeta.shortLabel
+                      : currentModule === 'admin'
+                      ? 'SuperAdmin'
+                      : '6 Pilar Manajemen'}
+                  </span>
+                  {currentModule === 'pos' && <Lock className="w-2.5 h-2.5 opacity-75 shrink-0" />}
+                  <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${isWorkspaceMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isWorkspaceMenuOpen && (
+                  <div
+                    className={`absolute right-0 mt-2 w-64 rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 ${
+                      isLight
+                        ? 'bg-white border-slate-300 text-slate-900'
+                        : 'bg-slate-900 border-slate-700 text-slate-100'
+                    }`}
+                  >
+                    <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                      <span>Workspace Switcher · 6 Pilar</span>
+                      {currentModule === 'pos' && (
+                        <span className="inline-flex items-center gap-1 text-amber-500 font-semibold">
+                          <Lock className="w-2.5 h-2.5" /> PIN
+                        </span>
+                      )}
+                    </div>
+                    {HYBRID_MANAGEMENT_PILLARS.filter((p) => allowedModules.includes(p.id)).map((pillar) => {
+                      const PIcon = pillar.icon;
+                      const isActivePillar = currentModule === pillar.id;
+                      return (
+                        <button
+                          key={pillar.id}
+                          type="button"
+                          onClick={() => handleWorkspaceSwitch(pillar.id)}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition ${
+                            isActivePillar
+                              ? 'bg-cyan-500/20 text-cyan-500 border border-cyan-500/40 font-semibold'
+                              : isLight
+                              ? 'hover:bg-slate-100 text-slate-800'
+                              : 'hover:bg-slate-800 text-slate-200'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <PIcon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{pillar.label}</span>
+                          </span>
+                          {currentModule === 'pos' && <Lock className="w-3 h-3 text-amber-500/80 shrink-0" />}
+                        </button>
+                      );
+                    })}
+                    {isSuperAdminAuthenticated && (
+                      <button
+                        type="button"
+                        onClick={() => handleWorkspaceSwitch('admin')}
+                        className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer transition border-t mt-1 pt-2 ${
+                          currentModule === 'admin'
+                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                            : isLight
+                            ? 'border-slate-200 hover:bg-slate-100 text-slate-800'
+                            : 'border-slate-800 hover:bg-slate-800 text-amber-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                          <span>Konsol SuperAdmin</span>
+                        </span>
+                        {currentModule === 'pos' && <Lock className="w-3 h-3 text-amber-500/80 shrink-0" />}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Status Widget + Kontrol Bahasa, Tema, & Logout */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <DualBackendStatusWidget />
+
+          <button
+            type="button"
+            onClick={toggleLanguage}
+            className={`px-2 py-1 rounded-lg border text-[11px] font-mono font-bold uppercase transition cursor-pointer ${
+              isLight
+                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+            }`}
+            title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
+          >
+            {language.toUpperCase()}
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+              isLight
+                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+            title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Moon className="w-3.5 h-3.5 text-blue-600" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={logout}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+              isLight
+                ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                : 'bg-rose-950/60 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
+            }`}
+            title="Keluar & kembali ke halaman Login"
+          >
+            <LogOut className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>
+          </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Konten Modul Aktif */}
+      <main className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 pt-3 pb-20">
+        {remoteMaintenanceLock.locked &&
+          (isSuperAdminAuthenticated || currentUser?.role === 'Super Admin' || currentModule === 'admin') && (
+            <div className="mb-3 px-4 py-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-500 dark:text-rose-300 text-xs font-bold flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-4 h-4 shrink-0" />
+                <span>
+                  Remote Maintenance Lock AKTIF untuk target ({remoteMaintenanceLock.targetBranchId || 'ALL_BRANCHES'}): &ldquo;{remoteMaintenanceLock.message}&rdquo;
+                </span>
+              </div>
+              <span className="text-[10px] font-mono opacity-80">Konsol SuperAdmin tetap terbuka</span>
+            </div>
+          )}
+
+        {remoteMaintenanceLock.locked &&
+        !isSuperAdminAuthenticated &&
+        currentUser?.role !== 'Super Admin' &&
+        currentModule !== 'admin' &&
+        (!remoteMaintenanceLock.targetBranchId ||
+          remoteMaintenanceLock.targetBranchId === 'ALL_BRANCHES' ||
+          remoteMaintenanceLock.targetBranchId === activeBranchId) ? (
+          <div className="min-h-[75vh] flex items-center justify-center p-6">
+            <div
+              className={`max-w-lg w-full p-7 rounded-3xl border text-center space-y-5 shadow-2xl ${
+                isLight
+                  ? 'bg-[#F6F8FB] border-rose-300 text-slate-900'
+                  : 'bg-[#161b22] border-rose-500/40 text-slate-100'
+              }`}
+            >
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-500 flex items-center justify-center">
+                <Lock className="w-7 h-7 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-rose-500/15 border border-rose-500/30 text-[10px] font-mono font-bold text-rose-500 uppercase tracking-wider">
+                  REMOTE_MAINTENANCE_LOCK • {activeBranchId}
+                </div>
+                <h2 className="text-lg font-black uppercase tracking-wide">
+                  Terminal Sedang Dalam Pemeliharaan
+                </h2>
+                <p
+                  className={`text-sm font-medium p-3.5 rounded-xl border ${
+                    isLight
+                      ? 'bg-white border-slate-300 text-slate-700'
+                      : 'bg-[#0d1117] border-gray-800 text-slate-200'
+                  }`}
+                >
+                  {remoteMaintenanceLock.message}
+                </p>
+                {remoteMaintenanceLock.lockedAt && (
+                  <p className="text-[11px] font-mono text-slate-400">
+                    Dikunci oleh {remoteMaintenanceLock.lockedBy || 'SuperAdmin Pusat'} pada{' '}
+                    {new Date(remoteMaintenanceLock.lockedAt).toLocaleString('id-ID')}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await triggerManualHeartbeatPoll();
+                    showToast('Status pemeliharaan diperiksa ke server pusat.', 'info');
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Periksa Status Pusat</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Kembali ke Gateway Login</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : !isAuthorized ? (
+          <div className="min-h-[70vh] flex items-center justify-center p-6">
+            <div
+              className={`max-w-md w-full p-6 rounded-2xl border text-center space-y-4 shadow-xl ${
+                isLight ? 'bg-[#F6F8FB] border-rose-200 text-slate-900' : 'bg-slate-900 border-rose-500/30 text-slate-100'
+              }`}
+            >
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-base font-black uppercase tracking-wide flex items-center justify-center gap-1.5">
+                  <Lock className="w-4 h-4 text-rose-400" />
+                  Akses Divisi Dibatasi (RBAC)
+                </h2>
+                <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                  Sesi Anda sebagai <span className="font-bold text-cyan-400">{contextualProfile.position}</span> tidak memiliki izin untuk membuka modul{' '}
+                  <span className="font-mono font-bold uppercase">{currentModule}</span>.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveNav(defaultAllowedModule)}
+                  className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Kembali ke Divisi Saya</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Ganti Akun</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <ModuleErrorBoundary
+            key={`${currentModule}-${moduleResetCounter}`}
+            activeModule={currentModule}
+            branchId={activeBranchId}
+            isLight={isLight}
+            onErrorCaptured={recordSystemError}
+            onResetModule={() => setModuleResetCounter((c) => c + 1)}
+          >
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-64 text-xs font-mono text-cyan-400">
+                  Memuat modul JacS Enterprise...
+                </div>
+              }
+            >
+              {currentModule === 'executive' && <ExecutiveModule />}
+              {currentModule === 'pos' && <POSModule returnToRegisterSignal={posEntrySignal} />}
+              {currentModule === 'master-data' && <MasterDataModule />}
+              {currentModule === 'warehouse' && <WarehouseModule />}
+              {currentModule === 'purchasing' && <PurchasingModule />}
+              {currentModule === 'finance' && <FinanceModule />}
+              {currentModule === 'hr' && <HRModule />}
+              {currentModule === 'admin' && <SuperAdminModule />}
+            </Suspense>
+          </ModuleErrorBoundary>
+        )}
+      </main>
+
+      {/* Modal Verifikasi PIN Otorisasi Manajemen (6 Digit) saat keluar dari Kasir POS ke 6 Pilar Manajemen */}
+      {pendingAuthTarget && (
+        <div
+          id="modal-mgmt-auth-pin-navbar"
+          className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPendingAuthTarget(null)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden ${
+              isLight
+                ? 'bg-white border-amber-400 text-slate-900'
+                : 'bg-slate-900 border-amber-500/50 text-slate-100'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-500 flex items-center justify-center shrink-0">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">PIN Otorisasi Manajemen</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Tujuan: <strong className="text-amber-500">{pendingAuthTarget.label}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingAuthTarget(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="Tutup modal PIN"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmMgmtPinSubmit} className="p-5 space-y-4">
+              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>
+                Masukkan <strong>PIN Otorisasi Manajemen (6 digit)</strong> yang diatur di Konsol SuperAdmin sebelum meninggalkan layar Kasir POS.
+              </p>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="input-verify-mgmt-pin-navbar"
+                  className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                >
+                  PIN 6 Digit
+                </label>
+                <div className="relative">
+                  <input
+                    id="input-verify-mgmt-pin-navbar"
+                    type={showMgmtPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    autoFocus
+                    maxLength={6}
+                    value={mgmtPinInput}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      setMgmtPinInput(digits);
+                      setMgmtPinError(null);
+                    }}
+                    placeholder="••••••"
+                    className={`w-full px-4 py-3 pr-11 rounded-xl border font-mono font-bold text-lg tracking-[0.4em] text-center outline-none transition ${
+                      mgmtPinError
+                        ? 'border-rose-500 bg-rose-500/10 text-rose-500'
+                        : isLight
+                        ? 'bg-slate-50 border-slate-300 focus:border-amber-500 text-slate-900'
+                        : 'bg-slate-950 border-slate-700 focus:border-amber-400 text-amber-300'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMgmtPin((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-400 cursor-pointer"
+                    aria-label="Tampilkan atau sembunyikan PIN"
+                  >
+                    {showMgmtPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {mgmtPinError && (
+                <div className="p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-500 dark:text-rose-300 text-xs font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{mgmtPinError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingAuthTarget(null)}
+                  className={`px-4 py-2 rounded-xl border text-xs font-semibold cursor-pointer ${
+                    isLight
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Verifikasi &amp; Buka</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TERMINAL IDLE AUTO-LOCK FULL-SCREEN OVERLAY */}
+      {isIdleLocked && (
+        <div className="fixed inset-0 z-[150] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl border border-amber-500/50 bg-[#0d1117] text-white p-6 shadow-[0_0_40px_rgba(245,158,11,0.22)] space-y-5">
+            <div className="flex items-center gap-3.5 pb-4 border-b border-gray-800">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    TERMINAL IDLE AUTO-LOCK
+                  </span>
+                </div>
+                <h3 className="text-base font-black mt-1">
+                  Layar Kasir / Admin Terkunci Otomatis
+                </h3>
+                <p className="text-[11px] text-gray-400">
+                  {businessProfile?.name || 'JacS RetailOS'} • Modul {(activeNav || 'HOME').toUpperCase()}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-[#161b22] border border-gray-800 text-xs space-y-1">
+              <div className="flex items-center justify-between text-gray-400 text-[11px] font-mono">
+                <span>Alasan Kunci:</span>
+                <span className="text-amber-400 font-semibold">
+                  {idleAutoLockMinutes > 0 ? `Auto-Lock (${idleAutoLockMinutes} Menit)` : 'Manual Lock'}
+                </span>
+              </div>
+              <p className="text-gray-300 text-[11px]">{idleLockReason}</p>
+              {idleLockedAt && (
+                <p className="text-[10px] font-mono text-gray-500">
+                  Waktu Terkunci: {new Date(idleLockedAt).toLocaleTimeString('id-ID')}
+                </p>
+              )}
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setIdleUnlockError(null);
+                setIsUnlockingIdle(true);
+                const res = await unlockIdleScreen(idleUnlockPin);
+                setIsUnlockingIdle(false);
+                if (res.success) {
+                  setIdleUnlockPin('');
+                  setIdleUnlockError(null);
+                } else {
+                  setIdleUnlockError(res.message);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                  Masukkan PIN Divisi / Operator (4 Digit) atau PIN Manajemen (6 Digit)
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  value={idleUnlockPin}
+                  onChange={(e) => {
+                    setIdleUnlockPin(e.target.value);
+                    setIdleUnlockError(null);
+                  }}
+                  placeholder="•••• (Default: 1234 / 123456)"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-700 bg-[#090d13] text-amber-300 font-mono font-bold text-center text-lg tracking-[0.35em] focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {idleUnlockError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-400 text-xs font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{idleUnlockError}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isUnlockingIdle || !idleUnlockPin.trim()}
+                className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer shadow-lg shadow-amber-500/20"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>{isUnlockingIdle ? 'Memverifikasi PIN...' : 'Buka Kunci Layar Terminal'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};
+
+export function App() {
+  return (
+    <AuditProvider>
+      <AppProvider>
+        <MainLayout />
+      </AppProvider>
+    </AuditProvider>
   );
 }
+
+export default App;

@@ -146,7 +146,7 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
       id="modal-fnb-modifiers"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in"
     >
-      <div className="w-full max-w-lg bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl text-white relative max-h-[92vh] flex flex-col overflow-hidden">
+      <div className="w-full max-w-lg bg-[#161b22] border border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] rounded-2xl text-white relative max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header with Product Preview */}
         <div className="p-4 sm:p-5 border-b border-[#30363d] flex items-center justify-between bg-[#1f242c]">
           <div className="flex items-center gap-3.5 min-w-0">
@@ -163,11 +163,11 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
               </div>
             )}
             <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+              <span className="text-[10px] font-mono font-normal uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
                 {product.category} {isCoffee ? '• Kopi' : isTeaOrFresh ? '• Non-Kopi / Segar' : isPastryOrBakery ? '• Pastry & Bakery' : '• Makanan'}
               </span>
-              <h3 className="text-base font-bold text-white truncate mt-1">{product.name}</h3>
-              <div className="text-xs font-mono text-[#10B981] font-bold">
+              <h3 className="text-base font-medium text-white truncate mt-1">{product.name}</h3>
+              <div className="text-xs font-mono text-emerald-400 font-semibold">
                 Rp {product.sell_price.toLocaleString('id-ID')}
               </div>
             </div>
@@ -175,7 +175,7 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
 
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-[#30363d] transition cursor-pointer"
+            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-[#30363d] transition cursor-pointer active:scale-[0.99]"
           >
             <X className="w-5 h-5" />
           </button>
@@ -486,8 +486,8 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
         {/* Footer with Total and Add to Cart Button */}
         <div className="p-4 sm:p-5 border-t border-[#30363d] bg-[#161b22] flex items-center justify-between gap-4">
           <div>
-            <div className="text-[10px] text-gray-400">Total Harga Item ({qty} Porsi)</div>
-            <div className="text-lg font-black text-[#10B981] font-mono">
+            <div className="text-[10px] text-gray-400 font-normal">Total Harga Item ({qty} Porsi)</div>
+            <div className="text-lg font-semibold text-emerald-400 font-mono">
               Rp {totalPrice.toLocaleString('id-ID')}
             </div>
           </div>
@@ -496,7 +496,7 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-3 rounded-xl font-bold bg-[#21262d] hover:bg-[#30363d] text-gray-300 transition cursor-pointer text-xs"
+              className="px-4 py-3 rounded-xl font-medium bg-[#21262d] hover:bg-[#30363d] text-gray-300 transition cursor-pointer text-xs active:scale-[0.99]"
             >
               Batal
             </button>
@@ -504,7 +504,7 @@ export const FnbModifierModal: React.FC<FnbModifierModalProps> = ({
               id="btn-confirm-add-fnb-order"
               type="button"
               onClick={handleAdd}
-              className="px-5 py-3 rounded-xl font-bold bg-[#10B981] hover:bg-[#0ea371] text-black shadow-[0_0_15px_rgba(16,185,129,0.4)] transition cursor-pointer text-xs flex items-center gap-1.5"
+              className="px-5 py-3 rounded-xl font-medium bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] transition cursor-pointer text-xs flex items-center gap-1.5 active:scale-[0.99]"
             >
               <UtensilsCrossed className="w-4 h-4" />
               <span>Tambah ke Pesanan Meja</span>

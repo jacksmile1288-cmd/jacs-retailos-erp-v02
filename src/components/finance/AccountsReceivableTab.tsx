@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { InvoiceDue } from '../../types';
+import { filterArInvoicesByBusinessDomain } from '../../utils/buildingDomainIsolation';
 import {
   BookOpen,
   UserCheck,
@@ -25,8 +26,13 @@ interface AccountsReceivableTabProps {
 }
 
 export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ isLight = false }) => {
-  const { invoicesReceivable, finance, receiveCustomerPayment, language } = useApp();
+  const { invoicesReceivable, receiveCustomerPayment, language, businessDomainConfig } = useApp();
   const isEn = language === 'en';
+
+  const domainInvoicesReceivable = useMemo(
+    () => filterArInvoicesByBusinessDomain(invoicesReceivable || [], businessDomainConfig),
+    [invoicesReceivable, businessDomainConfig]
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'UNPAID' | 'ALL' | 'PAID'>('UNPAID');
@@ -39,18 +45,22 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
 
   // Unpaid receivable invoices
   const unpaidInvoices = useMemo(() => {
-    return invoicesReceivable.filter(
-      (inv) => inv.status === 'Unpaid' || inv.status === 'Overdue'
+    return domainInvoicesReceivable.filter(
+      (inv) =>
+        inv.status === 'Unpaid' ||
+        inv.status === 'UNPAID' ||
+        inv.status === 'Overdue' ||
+        inv.status === 'OVERDUE'
     );
-  }, [invoicesReceivable]);
+  }, [domainInvoicesReceivable]);
 
   const totalUnpaidAmount = useMemo(() => {
     return unpaidInvoices.reduce((acc, inv) => acc + inv.amount, 0);
   }, [unpaidInvoices]);
 
   const paidInvoices = useMemo(() => {
-    return invoicesReceivable.filter((inv) => inv.status === 'PAID' || inv.status === 'Paid');
-  }, [invoicesReceivable]);
+    return domainInvoicesReceivable.filter((inv) => inv.status === 'PAID' || inv.status === 'Paid');
+  }, [domainInvoicesReceivable]);
 
   const totalPaidAmount = useMemo(() => {
     return paidInvoices.reduce((acc, inv) => acc + inv.amount, 0);
@@ -58,15 +68,17 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
 
   const overdueInvoices = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    return invoicesReceivable.filter(
+    return domainInvoicesReceivable.filter(
       (inv) =>
-        (inv.status === 'Overdue' || (inv.status === 'Unpaid' && inv.due_date && inv.due_date < today))
+        inv.status === 'Overdue' ||
+        inv.status === 'OVERDUE' ||
+        ((inv.status === 'Unpaid' || inv.status === 'UNPAID') && inv.due_date && inv.due_date < today)
     );
-  }, [invoicesReceivable]);
+  }, [domainInvoicesReceivable]);
 
   // Filtered list
   const filteredInvoices = useMemo(() => {
-    return invoicesReceivable.filter((inv) => {
+    return domainInvoicesReceivable.filter((inv) => {
       const isPaid = inv.status === 'PAID' || inv.status === 'Paid';
       if (statusFilter === 'UNPAID' && isPaid) return false;
       if (statusFilter === 'PAID' && !isPaid) return false;
@@ -79,7 +91,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
       }
       return true;
     });
-  }, [invoicesReceivable, statusFilter, searchQuery]);
+  }, [domainInvoicesReceivable, statusFilter, searchQuery]);
 
   // Handle Receive Payment Modal Submit
   const handleConfirmReceivePayment = () => {
@@ -100,119 +112,94 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-sans">
       {/* SUMMARY KPI CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Outstanding AR */}
         <div
-          className={`p-4 rounded-2xl border shadow-sm ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 ${
+            unpaidInvoices.length > 0
+              ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)]'
+              : isLight ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
           }`}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+            <span className="text-[11px] leading-4 font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400">
               Total Piutang Belum Lunas
             </span>
-            <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-              <BookOpen className="w-4 h-4" />
-            </div>
           </div>
-          <div className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
+          <div className="text-lg leading-7 font-mono font-semibold text-purple-600 dark:text-purple-400">
             Rp {totalUnpaidAmount.toLocaleString('id-ID')}
-          </div>
-          <div className="mt-1">
-            <span className="bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs px-2 py-0.5 rounded inline-flex items-center gap-1 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-300">
-              {unpaidInvoices.length} Faktur Menunggu Pembayaran
-            </span>
           </div>
         </div>
 
         {/* Piutang Lewat Tempo (Overdue) */}
         <div
-          className={`p-4 rounded-2xl border shadow-sm ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 ${
+            overdueInvoices.length > 0
+              ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)]'
+              : isLight ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
           }`}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+            <span className="text-[11px] leading-4 font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400">
               Jatuh Tempo (Overdue)
             </span>
-            <div className="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
           </div>
-          <div className="text-2xl font-black font-mono text-rose-600 dark:text-rose-400">
+          <div className="text-lg leading-7 font-mono font-semibold text-rose-600 dark:text-rose-400">
             Rp {overdueInvoices.reduce((a, b) => a + b.amount, 0).toLocaleString('id-ID')}
           </div>
-          <span className="text-[11px] text-slate-500 dark:text-gray-400 mt-1 block">
-            {overdueInvoices.length} Tagihan Melewati Batas Tempo
-          </span>
         </div>
 
         {/* Total Piutang Terbayar */}
         <div
-          className={`p-4 rounded-2xl border shadow-sm ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 ${
+            isLight ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
           }`}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+            <span className="text-[11px] leading-4 font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400">
               Piutang Lunas (Terbayar)
             </span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
           </div>
-          <div className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+          <div className="text-lg leading-7 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
             Rp {totalPaidAmount.toLocaleString('id-ID')}
           </div>
-          <span className="text-[11px] text-slate-500 dark:text-gray-400 mt-1 block">
-            {paidInvoices.length} Faktur Berhasil Dilunasi
-          </span>
         </div>
 
         {/* Total Faktur AR */}
         <div
-          className={`p-4 rounded-2xl border shadow-sm ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 ${
+            isLight ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
           }`}
         >
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">
+            <span className="text-[11px] leading-4 font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400">
               Total Berkas Piutang (AR)
             </span>
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <Layers className="w-4 h-4" />
-            </div>
           </div>
-          <div className="text-2xl font-black font-mono text-slate-900 dark:text-white flex items-center gap-2">
-            <span>{invoicesReceivable.length}</span>
-            <span className="bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs px-2 py-0.5 rounded dark:bg-amber-950 dark:border-amber-800 dark:text-amber-300">
-              {invoicesReceivable.length} Faktur
-            </span>
-          </div>
-          <div className="mt-1">
-            <span className="font-bold text-xs px-2 py-0.5 rounded border border-slate-300 bg-slate-50 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 inline-block">
-              Akun Buku Besar: [1-10301] Piutang Usaha
-            </span>
+          <div className="text-lg leading-7 font-mono font-semibold text-slate-900 dark:text-white">
+            {domainInvoicesReceivable.length}
           </div>
         </div>
       </div>
 
       {/* FILTER & SEARCH CONTROLS */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div
+        className={`bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 text-sm`}
+      >
         {/* Search Input */}
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500 dark:text-slate-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Cari nama member/pelanggan, nomor faktur AR..."
-            className={`w-full pl-9 pr-4 py-2 rounded-xl text-xs border font-medium transition focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+            className={`w-full pl-9 pr-4 py-2 rounded-lg border outline-none text-sm leading-5 font-normal transition shadow-sm placeholder:text-slate-400 dark:placeholder:text-slate-600 ${
               isLight
-                ? 'bg-white border-slate-300 text-slate-900'
-                : 'bg-[#161b22] border-[#30363d] text-white'
+                ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
             }`}
           />
         </div>
@@ -224,12 +211,12 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
               key={`ar-st-${st}`}
               type="button"
               onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs leading-5 font-medium transition cursor-pointer active:scale-[0.99] ${
                 statusFilter === st
-                  ? 'bg-purple-600 text-white shadow-sm'
+                  ? 'bg-cyan-600 text-white shadow-sm'
                   : isLight
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  : 'bg-[#21262d] text-gray-300 hover:bg-[#30363d]'
+                  ? 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
+                  : 'bg-slate-950 text-gray-300 hover:bg-slate-800 border border-slate-700'
               }`}
             >
               {st === 'UNPAID'
@@ -244,27 +231,27 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
 
       {/* TABLE DAFTAR PIUTANG USAHA */}
       <div
-        className={`rounded-2xl border overflow-hidden shadow-sm ${
-          isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+        className={`rounded-2xl border overflow-hidden shadow-sm transition-all duration-200 hover:-translate-y-0.5 ${
+          isLight ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
         }`}
       >
         <div className="p-4 border-b border-slate-200 dark:border-[#30363d] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+            <BookOpen className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+            <h3 className="text-base leading-6 font-medium text-slate-900 dark:text-white">
               Buku Pembantu Piutang Usaha (Accounts Receivable Ledger)
             </h3>
           </div>
-          <span className="text-xs font-mono font-bold text-purple-600 dark:text-purple-400">
+          <span className="text-[11px] leading-4 font-mono font-normal text-cyan-600 dark:text-cyan-400">
             Akun 1-10301
           </span>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr
-                className={`border-b font-black uppercase text-[11px] tracking-wider ${
+                className={`border-b font-mono font-normal uppercase text-[11px] leading-4 tracking-widest ${
                   isLight
                     ? 'bg-slate-50 border-slate-200 text-slate-700'
                     : 'bg-[#0d1117] border-[#30363d] text-gray-300'
@@ -278,7 +265,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 <th className="py-3 px-3.5 text-center w-52">Aksi / Informasi Pelunasan</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-gray-800/80 font-medium">
+            <tbody className="divide-y divide-slate-100 dark:divide-gray-800/80 font-normal">
               {filteredInvoices.map((inv) => {
                 const isPaid = inv.status === 'PAID' || inv.status === 'Paid';
                 const today = new Date().toISOString().slice(0, 10);
@@ -287,59 +274,63 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 return (
                   <tr
                     key={`ar-inv-${inv.id}`}
-                    className={`hover:bg-slate-50 dark:hover:bg-[#21262d]/50 transition ${
+                    className={`hover:bg-slate-50 dark:hover:bg-[#21262d]/50 transition-colors ${
                       isLight ? 'text-slate-800' : 'text-slate-200'
                     }`}
                   >
                     {/* No. Faktur */}
                     <td className="py-3 px-3.5">
-                      <span className="font-mono font-bold text-purple-600 dark:text-purple-400 block">
+                      <span className="font-mono text-xs leading-5 text-cyan-600 dark:text-cyan-400 font-normal block">
                         {inv.invoice_number || inv.id}
                       </span>
-                      {inv.journal_ref && (
-                        <span className="text-[10px] text-gray-400 font-mono block">
-                          {inv.journal_ref}
-                        </span>
-                      )}
                     </td>
 
                     {/* Pelanggan */}
                     <td className="py-3 px-3.5">
                       <div className="flex items-center gap-2">
-                        <UserCheck className="w-4 h-4 text-purple-500 shrink-0" />
+                        <UserCheck className="w-4 h-4 text-cyan-500 shrink-0" />
                         <div>
-                          <span className="font-bold text-slate-900 dark:text-white block">
+                          <span className="text-sm leading-5 font-normal text-slate-900 dark:text-white block">
                             {inv.party_name}
-                          </span>
-                          <span className="text-[10px] text-gray-400 font-mono">
-                            {inv.terms || 'Tempo 30 Hari'}
                           </span>
                         </div>
                       </div>
                     </td>
 
-                    {/* Jatuh Tempo */}
+                    {/* Jatuh Tempo & Aging */}
                     <td className="py-3 px-3.5">
-                      <div className="flex items-center gap-1.5 text-xs font-mono">
-                        <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                        <span>{inv.due_date || '-'}</span>
-                      </div>
-                      {isOverdue && (
-                        <span className="text-[9px] font-black text-rose-500 uppercase tracking-tight block">
-                          Lewat Jatuh Tempo
+                      <div className="flex flex-col text-xs leading-5 font-mono font-normal">
+                        <span className="flex items-center gap-1.5">
+                           <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                           {inv.due_date || '-'}
                         </span>
-                      )}
+                        {!isPaid && inv.due_date && (
+                          <span className={`text-[10px] font-mono font-normal mt-0.5 ${
+                            isOverdue ? 'text-rose-500 font-medium' : 'text-slate-500'
+                          }`}>
+                            Aging: {(() => {
+                               const todayDate = new Date();
+                               const due = new Date(inv.due_date);
+                               const diffTime = Math.abs(todayDate.getTime() - due.getTime());
+                               const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                               if (diffDays <= 30) return '1-30 Hari';
+                               if (diffDays <= 60) return '31-60 Hari';
+                               return '>90 Hari';
+                            })()}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Nominal */}
-                    <td className="py-3 px-3.5 text-right font-mono font-bold text-sm text-slate-900 dark:text-white">
+                    <td className="py-3 px-3.5 text-right font-mono font-semibold text-lg leading-7 text-slate-900 dark:text-white">
                       Rp {inv.amount.toLocaleString('id-ID')}
                     </td>
 
                     {/* Status Badge */}
                     <td className="py-3 px-3.5 text-center">
                       <span
-                        className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                        className={`text-[11px] leading-4 font-mono font-normal px-2.5 py-1 rounded-full uppercase tracking-wider ${
                           isPaid
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                             : isOverdue
@@ -357,15 +348,15 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                         <button
                           type="button"
                           onClick={() => setActiveInvoiceToReceive(inv)}
-                          className="px-3 py-1.5 rounded-xl font-bold text-xs bg-purple-600 hover:bg-purple-700 text-white shadow-sm flex items-center justify-center gap-1.5 mx-auto transition cursor-pointer active:scale-95"
+                          className="px-3 py-1.5 rounded-xl font-medium text-xs leading-5 bg-cyan-600 hover:bg-cyan-700 text-white shadow-sm flex items-center justify-center gap-1.5 mx-auto transition cursor-pointer active:scale-[0.99]"
                           title="Terima Pembayaran Piutang ke Kas/Bank"
                         >
                           <DollarSign className="w-3.5 h-3.5" />
                           <span>Terima Pembayaran Piutang</span>
                         </button>
                       ) : (
-                        <div className="text-[10px] text-gray-400 font-mono text-center">
-                          <span className="text-emerald-600 dark:text-emerald-400 font-bold block">
+                        <div className="text-[11px] leading-4 text-gray-400 font-mono font-normal text-center">
+                          <span className="text-emerald-600 dark:text-emerald-400 block">
                             ✓ Lunas via {inv.paymentSource || 'Kas/Bank'}
                           </span>
                           {inv.paid_date && <span>Tgl: {inv.paid_date}</span>}
@@ -378,7 +369,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
 
               {filteredInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-xs text-slate-500 dark:text-gray-400">
+                  <td colSpan={6} className="py-8 text-center text-sm leading-5 font-normal text-slate-500 dark:text-gray-400">
                     Tidak ada faktur piutang yang ditemukan.
                   </td>
                 </tr>
@@ -396,31 +387,31 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-lg rounded-2xl p-5 sm:p-6 border shadow-[0_20px_60px_rgba(0,0,0,0.9)] relative animate-in zoom-in-95 space-y-4 ${
+            className={`w-full max-w-lg rounded-2xl p-5 sm:p-6 border relative animate-in zoom-in-95 space-y-4 transition-all ${
               isLight
-                ? 'bg-white border-slate-300 text-slate-900 shadow-slate-300'
-                : 'bg-[#161b22] border-[#30363d] text-white'
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
             }`}
           >
             {/* Tombol Tutup */}
             <button
               type="button"
               onClick={() => setActiveInvoiceToReceive(null)}
-              className="absolute top-4 right-4 text-white bg-slate-800 hover:bg-rose-600 border border-slate-600 p-2 rounded-xl transition cursor-pointer"
+              className="absolute top-4 right-4 text-white bg-slate-800 hover:bg-rose-600 border border-slate-600 p-2 rounded-xl transition cursor-pointer active:scale-[0.99]"
             >
               <X className="w-4 h-4" />
             </button>
 
             {/* Header Modal */}
             <div className="flex items-center gap-3 pr-10">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center justify-center shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 flex items-center justify-center shrink-0">
                 <DollarSign className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-black tracking-tight text-slate-900 dark:text-white">
+                <h3 className="text-base leading-6 font-medium tracking-tight text-slate-900 dark:text-white">
                   Penerimaan Pembayaran Piutang Usaha
                 </h3>
-                <p className="text-xs text-slate-600 dark:text-gray-400">
+                <p className="text-xs leading-5 font-normal text-slate-600 dark:text-gray-400">
                   Faktur #{activeInvoiceToReceive.invoice_number || activeInvoiceToReceive.id} • {activeInvoiceToReceive.party_name}
                 </p>
               </div>
@@ -429,24 +420,24 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
             {/* Detail Nominal Tagihan */}
             <div
               className={`p-4 rounded-xl border space-y-2 ${
-                isLight ? 'bg-purple-50/50 border-purple-200' : 'border-2 bg-purple-950/20 border-purple-900/50'
+                isLight ? 'bg-cyan-50/40 border-cyan-200' : 'bg-cyan-950/20 border-cyan-900/50'
               }`}
             >
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-600 dark:text-gray-400">Total Piutang Dilunasi:</span>
-                <span className="font-mono text-xl font-black text-purple-600 dark:text-purple-400">
+              <div className="flex items-center justify-between text-sm leading-5">
+                <span className="font-normal text-slate-600 dark:text-gray-400">Total Piutang Dilunasi:</span>
+                <span className="font-mono text-lg leading-7 font-semibold text-cyan-600 dark:text-cyan-400">
                   Rp {activeInvoiceToReceive.amount.toLocaleString('id-ID')}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-gray-400 pt-1 border-t border-purple-200/60 dark:border-purple-900/40">
-                <span>Pelanggan: <strong>{activeInvoiceToReceive.party_name}</strong></span>
-                <span>Jatuh Tempo: <strong>{activeInvoiceToReceive.due_date || '-'}</strong></span>
+              <div className="flex items-center justify-between text-xs leading-5 text-slate-500 dark:text-gray-400 pt-1 border-t border-cyan-200/60 dark:border-cyan-900/40">
+                <span>Pelanggan: {activeInvoiceToReceive.party_name}</span>
+                <span>Jatuh Tempo: {activeInvoiceToReceive.due_date || '-'}</span>
               </div>
             </div>
 
             {/* Pilihan Sumber Rekening Penerima (Kas / Bank) */}
             <div className="space-y-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-gray-300">
+              <label className="block text-sm leading-5 font-normal text-slate-700 dark:text-gray-300">
                 Pilih Rekening Tujuan Penerimaan Dana:
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -454,16 +445,16 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 <button
                   type="button"
                   onClick={() => setModalPaymentSource('Kas Kasir')}
-                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
+                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
                     modalPaymentSource === 'Kas Kasir'
-                      ? 'border-purple-600 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-black shadow-sm'
+                      ? 'border-cyan-600 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium shadow-sm'
                       : isLight
-                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
+                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-normal'
+                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-normal'
                   }`}
                 >
                   <Wallet className="w-5 h-5 text-emerald-500" />
-                  <span className="text-xs font-bold">Kas Kasir</span>
+                  <span className="text-xs font-medium">Kas Kasir</span>
                   <span className="text-[10px] text-gray-400 font-mono">1-10001 (Tunai)</span>
                 </button>
 
@@ -471,16 +462,16 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 <button
                   type="button"
                   onClick={() => setModalPaymentSource('Kas Utama')}
-                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
+                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
                     modalPaymentSource === 'Kas Utama'
-                      ? 'border-purple-600 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-black shadow-sm'
+                      ? 'border-cyan-600 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium shadow-sm'
                       : isLight
-                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
+                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-normal'
+                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-normal'
                   }`}
                 >
                   <Building2 className="w-5 h-5 text-blue-500" />
-                  <span className="text-xs font-bold">Kas Utama</span>
+                  <span className="text-xs font-medium">Kas Utama</span>
                   <span className="text-[10px] text-gray-400 font-mono">1-10000 (Brankas)</span>
                 </button>
 
@@ -488,16 +479,16 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 <button
                   type="button"
                   onClick={() => setModalPaymentSource('Bank Operasional')}
-                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
+                  className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center active:scale-[0.99] ${
                     modalPaymentSource === 'Bank Operasional'
-                      ? 'border-purple-600 bg-purple-500/10 text-purple-600 dark:text-purple-400 font-black shadow-sm'
+                      ? 'border-cyan-600 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-medium shadow-sm'
                       : isLight
-                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
+                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-normal'
+                      : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-normal'
                   }`}
                 >
                   <CreditCard className="w-5 h-5 text-indigo-500" />
-                  <span className="text-xs font-bold">Bank Operasional</span>
+                  <span className="text-xs font-medium">Bank Operasional</span>
                   <span className="text-[10px] text-gray-400 font-mono">1-10002 (Transfer)</span>
                 </button>
               </div>
@@ -505,7 +496,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
 
             {/* Catatan / Keterangan Penerimaan */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm leading-5 font-normal text-slate-700 dark:text-gray-300 mb-1">
                 Catatan / Bukti Referensi:
               </label>
               <input
@@ -513,7 +504,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 value={paymentNotes}
                 onChange={(e) => setPaymentNotes(e.target.value)}
                 placeholder="Contoh: Transfer Bank BCA ref 983210 atau Setor Tunai Kasir"
-                className={`w-full px-3 py-2 rounded-xl text-xs border font-medium transition focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                className={`w-full px-3 py-2 rounded-xl text-sm leading-5 font-normal border transition focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
                   isLight
                     ? 'bg-slate-50 border-slate-300 text-slate-900'
                     : 'bg-[#0d1117] border-[#30363d] text-white'
@@ -522,24 +513,24 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
             </div>
 
             {/* Pratinjau Jurnal Otomatis */}
-            <div className="p-3 rounded-xl border border-slate-200 dark:border-[#30363d] bg-slate-50/80 dark:bg-[#0d1117] text-[11px] space-y-1.5">
-              <span className="font-bold text-slate-800 dark:text-slate-200 block">
+            <div className="p-3 rounded-xl border border-slate-200 dark:border-[#30363d] bg-slate-50/80 dark:bg-[#0d1117] text-[11px] leading-4 space-y-1.5 font-normal">
+              <span className="text-slate-800 dark:text-slate-200 block font-medium">
                 📋 Jurnal Akuntansi Otomatis Diterbitkan:
               </span>
-              <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px]">
-                <div className="p-1.5 rounded bg-white dark:bg-black/30 border border-slate-200 dark:border-gray-800">
-                  <span className="text-blue-600 dark:text-blue-400 font-bold block">
+              <div className="grid grid-cols-2 gap-1.5 font-mono text-[11px] leading-4">
+                <div className="p-2 rounded bg-white dark:bg-black/30 border border-slate-200 dark:border-gray-800">
+                  <span className="text-blue-600 dark:text-blue-400 block font-normal">
                     [DEBIT] {modalPaymentSource === 'Bank Operasional' ? '1-10002 Bank Operasional' : modalPaymentSource === 'Kas Utama' ? '1-10000 Kas Utama' : '1-10001 Kas Kasir'}
                   </span>
-                  <span className="font-bold text-slate-900 dark:text-white">
+                  <span className="font-semibold text-slate-900 dark:text-white">
                     Rp {activeInvoiceToReceive.amount.toLocaleString('id-ID')}
                   </span>
                 </div>
-                <div className="p-1.5 rounded bg-white dark:bg-black/30 border border-slate-200 dark:border-gray-800">
-                  <span className="text-purple-600 dark:text-purple-400 font-bold block">
+                <div className="p-2 rounded bg-white dark:bg-black/30 border border-slate-200 dark:border-gray-800">
+                  <span className="text-purple-600 dark:text-purple-400 block font-normal">
                     [KREDIT] 1-10301 Piutang Usaha
                   </span>
-                  <span className="font-bold text-slate-900 dark:text-white">
+                  <span className="font-semibold text-slate-900 dark:text-white">
                     Rp {activeInvoiceToReceive.amount.toLocaleString('id-ID')}
                   </span>
                 </div>
@@ -551,7 +542,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
               <button
                 type="button"
                 onClick={() => setActiveInvoiceToReceive(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-gray-700 bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:bg-slate-200 transition"
+                className="px-4 py-2 rounded-xl text-xs font-medium border border-slate-300 dark:border-gray-700 bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:bg-slate-200 transition active:scale-[0.99]"
               >
                 Batal
               </button>
@@ -559,7 +550,7 @@ export const AccountsReceivableTab: React.FC<AccountsReceivableTabProps> = ({ is
                 type="button"
                 disabled={isProcessing}
                 onClick={handleConfirmReceivePayment}
-                className="px-5 py-2 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-600/30 transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+                className="px-5 py-2 rounded-xl text-xs leading-5 font-medium bg-cyan-600 hover:bg-cyan-700 text-white shadow-lg shadow-cyan-600/30 transition cursor-pointer flex items-center gap-1.5 active:scale-[0.99]"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>{isProcessing ? 'Memproses...' : 'Terima & Catat Pelunasan'}</span>

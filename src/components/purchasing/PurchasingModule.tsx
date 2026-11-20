@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { PurchaseOrder, SupplierMaster, PurchaseOrderStatus, GoodsReceipt } from '../../types';
+import { useAudit } from '../../audit';
+import { PurchaseOrder, PurchaseOrderStatus, GoodsReceipt } from '../../types';
 import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
 import { OfficialPoPrintModal } from './OfficialPoPrintModal';
 import { PoDetailModal } from './PoDetailModal';
@@ -8,12 +9,21 @@ import { SupplierPaymentModal } from './SupplierPaymentModal';
 import { AutoPoSummaryModal } from './AutoPoSummaryModal';
 import { PurchaseReturnModal } from './PurchaseReturnModal';
 import { GoodsReceiptModal } from './GoodsReceiptModal';
+import { SearchableProductCombobox } from '../common/SearchableProductCombobox';
+import {
+  BUILDING_PURCHASE_UNIT_OPTIONS,
+  filterGoodsReceiptsByBusinessDomain,
+  filterInventoryByBusinessDomain,
+  filterProductsByBusinessDomain,
+  filterPurchaseOrdersByBusinessDomain,
+  filterPurchaseRequestsByBusinessDomain,
+  filterSuppliersByBusinessDomain,
+} from '../../utils/buildingDomainIsolation';
 import {
   Plus,
   ShoppingBag,
   CheckCircle,
   Clock,
-  Building2,
   PackageCheck,
   X,
   FileText,
@@ -27,51 +37,82 @@ import {
   FilePlus2,
   Truck,
   ClipboardCheck,
-  AlertCircle,
-  Inbox,
   RotateCcw,
   Printer,
   Search,
-  Filter,
   CreditCard,
-  DollarSign,
-  Calendar,
-  Check,
   Eye,
   Trash2,
   Send,
-  ShieldCheck,
   ShieldAlert,
-  ChevronDown,
 } from 'lucide-react';
 
 export const PurchasingModule: React.FC = () => {
   const {
-    purchasing,
-    purchaseRequests,
+    purchasing: rawPurchasing,
+    purchaseRequests: rawPurchaseRequests,
     setPurchaseRequests,
-    products,
-    suppliers,
+    products: rawProducts,
+    suppliers: rawSuppliers,
+    inventory: rawInventory,
     createPurchaseOrder,
     updatePurchaseOrderStatus,
     updatePurchaseOrderPayment,
-    deletePurchaseOrder,
     createAutoReorderPO,
     reorderAllLowStock,
     approvePurchaseOrder,
     rejectPurchaseOrder,
     purchaseReturns,
     createPurchaseReturn,
-    goodsReceipts,
-    handleCreateGoodsReceipt,
+    goodsReceipts: rawGoodsReceipts,
     getProductAlertThreshold,
-    setActiveNav,
     showToast,
     theme,
     activeNeonCards,
     setActiveNeonCard,
     language,
+    activeUser,
+    businessDomainConfig,
+    activeSector,
+    isFnb,
+    isFashion,
+    isBuilding,
+    isService,
+    isRetail,
   } = useApp();
+
+  void isFnb;
+  void isFashion;
+  void isBuilding;
+  void isService;
+  void isRetail;
+
+  const products = useMemo(
+    () => filterProductsByBusinessDomain(rawProducts, businessDomainConfig),
+    [rawProducts, businessDomainConfig, activeSector]
+  );
+  const purchasing = useMemo(
+    () => filterPurchaseOrdersByBusinessDomain(rawPurchasing, businessDomainConfig),
+    [rawPurchasing, businessDomainConfig, activeSector]
+  );
+  const purchaseRequests = useMemo(
+    () => filterPurchaseRequestsByBusinessDomain(rawPurchaseRequests, businessDomainConfig),
+    [rawPurchaseRequests, businessDomainConfig, activeSector]
+  );
+  const suppliers = useMemo(
+    () => filterSuppliersByBusinessDomain(rawSuppliers, businessDomainConfig),
+    [rawSuppliers, businessDomainConfig, activeSector]
+  );
+  const inventory = useMemo(
+    () => filterInventoryByBusinessDomain(rawInventory, rawProducts, businessDomainConfig),
+    [rawInventory, rawProducts, businessDomainConfig, activeSector]
+  );
+  const goodsReceipts = useMemo(
+    () => filterGoodsReceiptsByBusinessDomain(rawGoodsReceipts, businessDomainConfig),
+    [rawGoodsReceipts, businessDomainConfig, activeSector]
+  );
+
+  const { recordAudit } = useAudit();
 
   const isLight = theme === 'light';
   const isEn = language === 'en';
@@ -109,7 +150,6 @@ export const PurchasingModule: React.FC = () => {
     }
   };
 
-  // 2 Purchase Orders dengan status 'APPROVED' / siap diterima
   const approvedPOs = useMemo(() => {
     return purchasing.filter(
       (po) =>
@@ -137,7 +177,6 @@ export const PurchasingModule: React.FC = () => {
   const [createIncludePpn, setCreateIncludePpn] = useState<boolean>(true);
   const [createNotes, setCreateNotes] = useState<string>('');
 
-  // Multi-item PO line items
   const [createPoItems, setCreatePoItems] = useState<
     Array<{
       productId: string;
@@ -161,12 +200,39 @@ export const PurchasingModule: React.FC = () => {
     ];
   });
 
-  // Adding product line item temporary selection
   const [tempProductId, setTempProductId] = useState<string>(products[0]?.id || '');
   const [tempQty, setTempQty] = useState<number>(10);
   const [tempUnitCost, setTempUnitCost] = useState<number>(products[0]?.cost_price || 500000);
+  const [tempUnit, setTempUnit] = useState<string>(products[0]?.unit || 'Sak');
 
-  // Dynamic PO Pending Count for Header Badge
+  React.useEffect(() => {
+    if (suppliers.length > 0 && !suppliers.some((s) => s.id === createSupplierId)) {
+      const firstSup = suppliers[0];
+      setCreateSupplierId(firstSup.id);
+      setCreateSupplierName(firstSup.name);
+      setCreatePaymentTerm(firstSup.paymentTerms || 'Tempo 30 Hari');
+    }
+  }, [suppliers, createSupplierId]);
+
+  React.useEffect(() => {
+    if (products.length > 0 && !products.some((p) => p.id === tempProductId)) {
+      const firstP = products[0];
+      setTempProductId(firstP.id);
+      setTempUnitCost(firstP.cost_price || 500000);
+      setTempUnit(firstP.unit || 'Sak');
+      setCreatePoItems([
+        {
+          productId: firstP.id,
+          productName: firstP.name,
+          qty: 10,
+          unitCost: firstP.cost_price || 500000,
+          subtotal: 10 * (firstP.cost_price || 500000),
+          unit: firstP.unit || 'Sak',
+        },
+      ]);
+    }
+  }, [products, tempProductId]);
+
   const pendingPoCount = useMemo(() => {
     return purchasing.filter(
       (p) =>
@@ -185,7 +251,6 @@ export const PurchasingModule: React.FC = () => {
     ).length;
   }, [purchasing]);
 
-  // Invoice AP Monitoring Metrics
   const invoiceMetrics = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     let unpaidTotal = 0;
@@ -225,7 +290,6 @@ export const PurchasingModule: React.FC = () => {
     };
   }, [purchasing]);
 
-  // Total PO Value & Pending Approval
   const totalPoValue = useMemo(() => {
     return purchasing.reduce((acc, p) => acc + p.total_amount, 0);
   }, [purchasing]);
@@ -239,18 +303,101 @@ export const PurchasingModule: React.FC = () => {
     ).length;
   }, [purchasing]);
 
+  const [processingPoNumber, setProcessingPoNumber] = useState<string | null>(null);
+
+  const handleApprovePo = (poNumber: string) => {
+    if (processingPoNumber) return;
+    setProcessingPoNumber(poNumber);
+    try {
+      approvePurchaseOrder(poNumber);
+    } finally {
+      setTimeout(() => {
+        setProcessingPoNumber(null);
+      }, 500);
+    }
+  };
+
+  const handleRejectPo = (poNumber: string) => {
+    if (processingPoNumber) return;
+    setProcessingPoNumber(poNumber);
+    try {
+      rejectPurchaseOrder(poNumber);
+    } finally {
+      setTimeout(() => {
+        setProcessingPoNumber(null);
+      }, 500);
+    }
+  };
+
   const lowStockProducts = useMemo(() => {
-    return products.filter((p) => getProductAlertThreshold(p).isLowStock);
-  }, [products, getProductAlertThreshold]);
+    const lowFromProducts = products.filter((p) => {
+      const thresholdInfo = getProductAlertThreshold(p);
+      const minStock = p.minStock ?? p.min_stock ?? thresholdInfo.minStock ?? 10;
+      return (
+        p.stock <= minStock ||
+        p.stock <= 10 ||
+        p.status === 'Low Stock' ||
+        p.status === 'Out of Stock' ||
+        p.status === 'ALERT' ||
+        thresholdInfo.isLowStock
+      );
+    });
+
+    const knownIds = new Set(lowFromProducts.map((p) => p.id.toLowerCase()));
+    const extraLowFromInv: typeof products = [];
+
+    (inventory || []).forEach((inv) => {
+      const finalStock = inv.final_stock ?? 0;
+      const safetyStock = inv.safety_stock ?? 10;
+      const isCritical =
+        finalStock <= safetyStock ||
+        finalStock <= 10 ||
+        inv.status === 'ALERT' ||
+        inv.status === 'LOW' ||
+        inv.status === 'Out of Stock';
+
+      if (isCritical) {
+        const matched = products.find(
+          (p) =>
+            p.id.toLowerCase() === inv.product_id.toLowerCase() ||
+            (p.sku && p.sku.toLowerCase() === inv.product_id.toLowerCase()) ||
+            (p.barcode && p.barcode.toLowerCase() === inv.product_id.toLowerCase()) ||
+            (p.name && inv.product_name && p.name.toLowerCase() === inv.product_name.toLowerCase())
+        );
+        if (matched) {
+          if (!knownIds.has(matched.id.toLowerCase())) {
+            knownIds.add(matched.id.toLowerCase());
+            extraLowFromInv.push(matched);
+          }
+        } else if (!knownIds.has(inv.product_id.toLowerCase())) {
+          knownIds.add(inv.product_id.toLowerCase());
+          extraLowFromInv.push({
+            id: inv.product_id,
+            name: inv.product_name || inv.product_id,
+            sku: inv.product_id,
+            category: 'Minuman',
+            price: 5000,
+            cost_price: 3500,
+            stock: inv.final_stock,
+            minStock: inv.safety_stock || 10,
+            unit: inv.unit || 'Pcs',
+            supplier: 'PT Tirta Investama (Danone Aqua)',
+            supplier_id: 'SUP-009',
+            status: 'Low Stock',
+          } as any);
+        }
+      }
+    });
+
+    return [...lowFromProducts, ...extraLowFromInv];
+  }, [products, inventory, getProductAlertThreshold]);
 
   const lowStockCount = lowStockProducts.length;
 
-  // Selected Supplier details for PO Creation
   const selectedSupplierObj = useMemo(() => {
     return suppliers.find((s) => s.id === createSupplierId || s.name === createSupplierName);
   }, [suppliers, createSupplierId, createSupplierName]);
 
-  // Handle supplier change in Create PO form
   const handleSupplierChange = (supId: string) => {
     setCreateSupplierId(supId);
     const sup = suppliers.find((s) => s.id === supId);
@@ -272,7 +419,6 @@ export const PurchasingModule: React.FC = () => {
     }
   };
 
-  // Add line item to Create PO
   const handleAddPoLineItem = () => {
     const prod = products.find((p) => p.id === tempProductId);
     if (!prod) {
@@ -284,7 +430,10 @@ export const PurchasingModule: React.FC = () => {
       return;
     }
 
-    const existingIdx = createPoItems.findIndex((it) => it.productId === tempProductId);
+    const chosenUnit = tempUnit || prod.unit || 'Unit';
+    const existingIdx = createPoItems.findIndex(
+      (it) => it.productId === tempProductId && it.unit === chosenUnit
+    );
     if (existingIdx >= 0) {
       setCreatePoItems((prev) => {
         const copy = [...prev];
@@ -306,18 +455,17 @@ export const PurchasingModule: React.FC = () => {
           qty: tempQty,
           unitCost: tempUnitCost,
           subtotal: tempQty * tempUnitCost,
-          unit: prod.unit || 'Unit',
+          unit: chosenUnit,
         },
       ]);
     }
-    showToast(`Ditambahkan ke draf PO: ${prod.name} (${tempQty})`);
+    showToast(`Ditambahkan ke draf PO: ${prod.name} (${tempQty} ${chosenUnit})`);
   };
 
   const handleRemovePoLineItem = (idx: number) => {
     setCreatePoItems((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // Calculations for Create PO
   const createSubtotal = useMemo(() => {
     return createPoItems.reduce((acc, it) => acc + it.subtotal, 0);
   }, [createPoItems]);
@@ -330,7 +478,6 @@ export const PurchasingModule: React.FC = () => {
     return createSubtotal + createPpnAmount;
   }, [createSubtotal, createPpnAmount]);
 
-  // Handle Create PO Submission
   const handleCreatePOSubmit = (status: 'Draft' | 'Menunggu Approval Pimpinan' | 'Menunggu Approval Direksi') => {
     if (createPoItems.length === 0) {
       showToast('Wajib memasukkan setidaknya satu produk ke dalam PO.');
@@ -348,7 +495,7 @@ export const PurchasingModule: React.FC = () => {
         ? 'Menunggu Approval Direksi'
         : 'Menunggu Approval Pimpinan';
 
-    createPurchaseOrder({
+    const poPayload = {
       date: new Date().toISOString().slice(0, 10),
       supplier_name: createSupplierName,
       supplier_id: createSupplierId,
@@ -359,7 +506,7 @@ export const PurchasingModule: React.FC = () => {
       ppn_amount: createPpnAmount,
       total_amount: createGrandTotal,
       payment_term: createPaymentTerm,
-      payment_status: 'Belum Bayar',
+      payment_status: 'Belum Bayar' as const,
       due_date: createDueDate,
       notes: createNotes.trim() || undefined,
       status: finalStatus,
@@ -372,21 +519,39 @@ export const PurchasingModule: React.FC = () => {
         unit: it.unit,
         received_qty: 0,
       })),
+    };
+
+    createPurchaseOrder(poPayload);
+
+    // Audit Trail Rekaman Penerbitan PO
+    recordAudit({
+      traceId: `PO-GEN-${Date.now()}`,
+      userId: activeUser?.id || 'purchasing-staff',
+      userName: activeUser?.name || 'Staff Purchasing',
+      userRole: activeUser?.role || 'Purchasing',
+      module: 'PURCHASING',
+      action: 'PURCHASE_ORDER_CREATE',
+      severity: createGrandTotal > 20000000 ? 'CRITICAL' : 'INFO',
+      entityId: createSupplierId,
+      payloadAfter: {
+        supplier: createSupplierName,
+        itemCount: createPoItems.length,
+        totalAmount: createGrandTotal,
+        paymentTerm: createPaymentTerm,
+        status: finalStatus,
+      },
     });
 
     setIsCreateModalOpen(false);
   };
 
-  // Goods Receipt Modal Opening
   const openGoodsReceiptModal = (po: PurchaseOrder) => {
     setSelectedPoForGr(po);
     setIsGrModalOpen(true);
   };
 
-  // Filtered Purchasing Table
   const filteredPurchasing = useMemo(() => {
     return purchasing.filter((po) => {
-      // Status filter
       if (statusFilter !== 'ALL') {
         if (statusFilter === 'Draft' && po.status !== 'Draft') return false;
         if (
@@ -406,14 +571,16 @@ export const PurchasingModule: React.FC = () => {
           statusFilter === 'Disetujui' &&
           po.status !== 'Disetujui (Approved)' &&
           po.status !== 'Disetujui' &&
-          po.status !== 'Approved'
+          po.status !== 'Approved' &&
+          po.status !== 'APPROVED'
         )
           return false;
         if (
           statusFilter === 'Dipesan' &&
           po.status !== 'Dipesan' &&
           po.status !== 'SENT_TO_VENDOR' &&
-          po.status !== 'Sent'
+          po.status !== 'Sent' &&
+          po.status !== 'Ordered'
         )
           return false;
         if (
@@ -434,7 +601,6 @@ export const PurchasingModule: React.FC = () => {
           return false;
       }
 
-      // Payment Filter
       if (paymentFilter !== 'ALL') {
         const todayStr = new Date().toISOString().slice(0, 10);
         const isPaid = po.payment_status === 'Lunas' || po.payment_status === 'PAID';
@@ -447,7 +613,6 @@ export const PurchasingModule: React.FC = () => {
         if ((paymentFilter === 'Lunas' || paymentFilter === 'PAID') && !isPaid) return false;
       }
 
-      // Search Query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchPo = po.po_number.toLowerCase().includes(q);
@@ -461,7 +626,6 @@ export const PurchasingModule: React.FC = () => {
     });
   }, [purchasing, statusFilter, paymentFilter, searchQuery]);
 
-  // 3 Neon Purchasing Metric Cards
   const purchasingCards = [
     {
       id: 'po-value',
@@ -470,8 +634,6 @@ export const PurchasingModule: React.FC = () => {
       sub: `${purchasing.length} Total PO • ${pendingApprovalCount} Butuh Approval`,
       colorHex: '#8b5cf6',
       icon: ShoppingBag,
-      focusDesc:
-        'Fokus Analisis: Total komitmen belanja pengadaan barang modal, status approval, dan alokasi anggaran.',
     },
     {
       id: 'low-stock',
@@ -480,8 +642,6 @@ export const PurchasingModule: React.FC = () => {
       sub: 'Perlu Pengadaan Segera ke Supplier',
       colorHex: '#f59e0b',
       icon: AlertTriangle,
-      focusDesc:
-        'Fokus Analisis: Daftar SKU yang butuh restock mendesak untuk menjaga suplai operasional.',
     },
     {
       id: 'sku-stock',
@@ -490,23 +650,19 @@ export const PurchasingModule: React.FC = () => {
       sub: `${products.length} SKU Dalam Katalog Suplai`,
       colorHex: '#38bdf8',
       icon: Boxes,
-      focusDesc:
-        'Fokus Analisis: Portofolio mitra rekanan vendor terdaftar dan monitoring SLA pengiriman.',
     },
   ];
 
   const selectedCardId = activeNeonCards['purchasing'] || 'po-value';
-  const selectedPurchasingCard =
-    purchasingCards.find((c) => c.id === selectedCardId) || purchasingCards[0];
 
   return (
     <div id="purchasing-module" className="space-y-6 max-w-7xl mx-auto pb-8">
       {/* Header */}
       <div
-        className={`p-5 rounded-2xl border transition duration-200 ${
+        className={`p-5 rounded-2xl border transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -514,35 +670,34 @@ export const PurchasingModule: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full ${
                 isLight
-                  ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs'
-                  : 'bg-[#f43f5e]/15 border border-[#f43f5e]/40 text-[#f43f5e] font-bold text-[11px]'
+                  ? 'bg-cyan-50 border border-cyan-300 text-cyan-900 font-medium text-xs'
+                  : 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 font-medium text-[11px]'
               }`}>
                 <Layers className="w-3.5 h-3.5" />
-                <span>Purchasing & Goods Receipt</span>
+                <span>Purchasing &amp; Goods Receipt</span>
               </div>
 
-              {/* Dynamic Badge Jumlah PO Pending */}
               <div
                 className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-mono ${
                   isLight
-                    ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs'
-                    : 'bg-rose-500/20 text-rose-400 border border-rose-500/40 font-bold text-[11px]'
+                    ? 'bg-amber-100 border border-amber-300 text-amber-900 font-normal text-xs'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-normal text-[11px]'
                 }`}
-                title="Jumlah Purchase Order yang aktif atau membutuhkan tindakan (Draft, Approval, Pengiriman, atau Penerimaan)"
+                title="Jumlah Purchase Order yang aktif atau membutuhkan tindakan"
               >
-                <span className={`w-2 h-2 rounded-full ${isLight ? 'bg-amber-600' : 'bg-rose-400 animate-pulse'}`} />
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                 <span>{pendingPoCount} PO Pending</span>
               </div>
             </div>
 
             <h2
-              className={`text-xl sm:text-2xl font-black tracking-tight ${
+              className={`text-xl leading-7 font-medium tracking-tight ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
-              Purchasing & Pengadaan Barang
+              Purchasing &amp; Pengadaan Barang
             </h2>
-            <p className="text-xs text-[#8b949e] mt-0.5">
+            <p className="text-xs font-normal text-[#8b949e] mt-0.5">
               Penerbitan PO multi-item, alur approval pimpinan, verifikasi surat jalan Goods Receipt (GR), dan monitoring tagihan supplier.
             </p>
           </div>
@@ -550,7 +705,7 @@ export const PurchasingModule: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={() => setIsCreateModalOpen(true)}
-              className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer active:scale-95 ${
+              className={`flex items-center gap-1.5 text-xs font-medium px-4 py-2.5 rounded-xl transition-all cursor-pointer active:scale-[0.99] ${
                 isLight
                   ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 shadow-sm'
                   : 'bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-[0_0_15px_rgba(0,82,255,0.4)]'
@@ -563,7 +718,7 @@ export const PurchasingModule: React.FC = () => {
         </div>
       </div>
 
-      {/* 3 NEON PURCHASING METRIC CARDS */}
+      {/* 3 Neon Purchasing Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         {purchasingCards.map((card) => {
           const Icon = card.icon;
@@ -584,7 +739,7 @@ export const PurchasingModule: React.FC = () => {
               onMouseEnter={() => setHoveredCardId(card.id)}
               onMouseLeave={() => setHoveredCardId(null)}
               style={glowStyle}
-              className="relative p-4 rounded-2xl text-left cursor-pointer overflow-hidden flex flex-col justify-between min-h-[135px] transition-all duration-150 ease-out"
+              className="relative p-4 rounded-2xl text-left cursor-pointer overflow-hidden flex flex-col justify-between min-h-[135px] transition-all duration-150 ease-out hover:-translate-y-0.5 active:scale-[0.99]"
             >
               <div
                 className="absolute top-0 left-0 right-0 h-1.5 transition-all duration-150 ease-out"
@@ -596,7 +751,7 @@ export const PurchasingModule: React.FC = () => {
 
               <div className="flex items-center justify-between">
                 <span
-                  className="text-xs font-bold uppercase tracking-wider"
+                  className="text-xs font-medium uppercase tracking-wider"
                   style={{ color: isSelected ? card.colorHex : '#8b949e' }}
                 >
                   {card.title}
@@ -615,14 +770,14 @@ export const PurchasingModule: React.FC = () => {
 
               <div className="mt-2">
                 <div
-                  className={`text-lg sm:text-xl font-black font-mono tracking-tight ${
+                  className={`text-lg sm:text-xl font-semibold font-mono tracking-tight ${
                     isLight ? 'text-slate-900' : 'text-white'
                   }`}
                   style={{ color: isSelected ? card.colorHex : undefined }}
                 >
                   {card.value}
                 </div>
-                <div className="text-[11px] text-[#8b949e] font-medium mt-1 truncate">
+                <div className="text-[11px] text-[#8b949e] font-normal mt-1 truncate">
                   {card.sub}
                 </div>
               </div>
@@ -631,23 +786,23 @@ export const PurchasingModule: React.FC = () => {
         })}
       </div>
 
-      {/* MONITORING INVOICE & TAGIHAN SUPPLIER (AP MONITORING WIDGET) */}
+      {/* AP Monitoring Widget */}
       <div
-        className={`p-4 rounded-2xl border transition duration-200 ${
+        className={`p-4 rounded-2xl border transition-all duration-200 ${
           isLight
-            ? 'bg-slate-50 border-slate-200'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#30363d]/40 mb-3.5">
           <div className="flex items-center gap-2">
             <CreditCard className="w-4 h-4 text-emerald-400" />
             <h3
-              className={`font-black text-sm ${
+              className={`font-medium text-base leading-6 ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
-              Monitoring Tagihan & Invoice Supplier (Accounts Payable)
+              Monitoring Tagihan &amp; Invoice Supplier (Accounts Payable)
             </h3>
           </div>
           <span className="text-xs text-gray-400">
@@ -656,38 +811,37 @@ export const PurchasingModule: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Card 1: Belum Bayar */}
           <button
             type="button"
             onClick={() => {
               setPaymentFilter(paymentFilter === 'Belum Bayar' ? 'ALL' : 'Belum Bayar');
               setActivePurchasingTab('po');
             }}
-            className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+            className={`p-3.5 rounded-xl border text-left transition-all duration-150 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer ${
               paymentFilter === 'Belum Bayar'
                 ? isLight
                   ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-sm'
                   : 'bg-amber-500/20 border-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
                 : isLight
-                ? 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                ? 'bg-white border-slate-200 hover:border-amber-400 shadow-sm'
                 : 'bg-[#0d1117] border-[#30363d] hover:border-amber-500/50'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className={`uppercase tracking-wide ${
-                isLight ? 'text-slate-900 font-bold text-xs' : 'text-amber-400 text-[11px] font-bold'
+              <span className={`uppercase tracking-widest font-mono text-[11px] leading-4 font-normal ${
+                isLight ? 'text-slate-900' : 'text-amber-400'
               }`}>
                 BELUM BAYAR (UNPAID)
               </span>
-              <span className={`font-mono px-2 py-0.5 rounded border ${
+              <span className={`font-mono px-2 py-0.5 rounded border text-[11px] font-normal ${
                 isLight
-                  ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs'
-                  : 'bg-amber-500/20 text-amber-300 border-amber-500/30 text-xs font-bold'
+                  ? 'bg-amber-100 border-amber-300 text-amber-950'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
               }`}>
                 {invoiceMetrics.unpaidCount} Faktur
               </span>
             </div>
-            <div className={`text-base sm:text-lg font-black font-mono mt-1.5 ${
+            <div className={`text-lg leading-7 font-semibold font-mono mt-1.5 ${
               isLight ? 'text-slate-900' : 'text-white'
             }`}>
               Rp {invoiceMetrics.unpaidTotal.toLocaleString('id-ID')}
@@ -697,38 +851,37 @@ export const PurchasingModule: React.FC = () => {
             </div>
           </button>
 
-          {/* Card 2: Jatuh Tempo */}
           <button
             type="button"
             onClick={() => {
               setPaymentFilter(paymentFilter === 'Jatuh Tempo' ? 'ALL' : 'Jatuh Tempo');
               setActivePurchasingTab('po');
             }}
-            className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+            className={`p-3.5 rounded-xl border text-left transition-all duration-150 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer ${
               paymentFilter === 'Jatuh Tempo'
                 ? isLight
                   ? 'bg-rose-50 border-rose-300 text-rose-900 shadow-sm'
                   : 'bg-rose-500/20 border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.2)]'
                 : isLight
-                ? 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                ? 'bg-white border-slate-200 hover:border-rose-400 shadow-sm'
                 : 'bg-[#0d1117] border-[#30363d] hover:border-rose-500/50'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className={`uppercase tracking-wide ${
-                isLight ? 'text-slate-900 font-bold text-xs' : 'text-rose-400 text-[11px] font-bold'
+              <span className={`uppercase tracking-widest font-mono text-[11px] leading-4 font-normal ${
+                isLight ? 'text-slate-900' : 'text-rose-400'
               }`}>
                 TEMPO (OVERDUE)
               </span>
-              <span className={`font-mono px-2 py-0.5 rounded border ${
+              <span className={`font-mono px-2 py-0.5 rounded border text-[11px] font-normal ${
                 isLight
-                  ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs'
-                  : 'bg-rose-500/20 text-rose-300 border-rose-500/30 text-xs font-bold'
+                  ? 'bg-rose-100 border-rose-300 text-rose-950'
+                  : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
               }`}>
                 {invoiceMetrics.overdueCount} Faktur
               </span>
             </div>
-            <div className={`text-base sm:text-lg font-black font-mono mt-1.5 ${
+            <div className={`text-lg leading-7 font-semibold font-mono mt-1.5 ${
               isLight ? 'text-rose-700' : 'text-rose-400'
             }`}>
               Rp {invoiceMetrics.overdueTotal.toLocaleString('id-ID')}
@@ -738,63 +891,62 @@ export const PurchasingModule: React.FC = () => {
             </div>
           </button>
 
-          {/* Card 3: Lunas */}
           <button
             type="button"
             onClick={() => {
               setPaymentFilter(paymentFilter === 'Lunas' ? 'ALL' : 'Lunas');
               setActivePurchasingTab('po');
             }}
-            className={`p-3.5 rounded-xl border text-left transition cursor-pointer ${
+            className={`p-3.5 rounded-xl border text-left transition-all duration-150 hover:-translate-y-0.5 active:scale-[0.99] cursor-pointer ${
               paymentFilter === 'Lunas'
                 ? isLight
                   ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-sm'
                   : 'bg-emerald-500/20 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
                 : isLight
-                ? 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
+                ? 'bg-white border-slate-200 hover:border-emerald-400 shadow-sm'
                 : 'bg-[#0d1117] border-[#30363d] hover:border-emerald-500/50'
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className={`uppercase tracking-wide ${
-                isLight ? 'text-slate-900 font-bold text-xs' : 'text-emerald-400 text-[11px] font-bold'
+              <span className={`uppercase tracking-widest font-mono text-[11px] leading-4 font-normal ${
+                isLight ? 'text-slate-900' : 'text-emerald-400'
               }`}>
                 LUNAS (PAID)
               </span>
-              <span className={`font-mono px-2 py-0.5 rounded border ${
+              <span className={`font-mono px-2 py-0.5 rounded border text-[11px] font-normal ${
                 isLight
-                  ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs'
-                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-xs font-bold'
+                  ? 'bg-emerald-100 border-emerald-300 text-emerald-950'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
               }`}>
                 {invoiceMetrics.paidCount} Faktur
               </span>
             </div>
-            <div className={`text-base sm:text-lg font-black font-mono mt-1.5 ${
+            <div className={`text-lg leading-7 font-semibold font-mono mt-1.5 ${
               isLight ? 'text-emerald-700' : 'text-emerald-400'
             }`}>
               Rp {invoiceMetrics.paidTotal.toLocaleString('id-ID')}
             </div>
             <div className="text-[10px] text-gray-400 mt-0.5">
-              Faktur telah lunas & terkonfirmasi oleh finance
+              Faktur telah lunas &amp; terkonfirmasi oleh finance
             </div>
           </button>
         </div>
       </div>
 
-      {/* DYNAMIC FOCUS PANEL FOR CARD (LOW STOCK QUICK REORDER TRIGGER) */}
+      {/* Focus Panel: Low Stock Alert */}
       {selectedCardId === 'low-stock' && (
         <div
-          className={`p-5 rounded-2xl border transition duration-200 ${
+          className={`p-5 rounded-2xl border transition-all duration-200 ${
             isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+              ? 'bg-white border-amber-500/70 shadow-[0_0_16px_rgba(245,158,11,0.18)]'
+              : 'bg-[#161b22] border-amber-500/40 shadow-[0_0_16px_rgba(245,158,11,0.12)]'
           }`}
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs mb-3">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span className="font-bold text-white">SKU & Bahan Baku yang Butuh Restock Segera:</span>
-              <span className="px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 font-mono text-[11px]">
+              <span className={`font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>SKU &amp; Bahan Baku yang Butuh Restock Segera:</span>
+              <span className="px-2 py-0.5 rounded-full font-normal bg-amber-500/20 text-amber-400 font-mono text-[11px] animate-pulse">
                 {lowStockCount} Item Kritis
               </span>
             </div>
@@ -803,7 +955,7 @@ export const PurchasingModule: React.FC = () => {
               <button
                 type="button"
                 onClick={handleReorderAll}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs shadow-[0_0_15px_rgba(245,158,11,0.35)] transition cursor-pointer self-start sm:self-auto active:scale-95"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-medium text-xs shadow-[0_0_15px_rgba(245,158,11,0.35)] transition-all cursor-pointer self-start sm:self-auto active:scale-[0.99]"
                 title="Buat draf PO otomatis dikelompokkan per Supplier Rekanan"
               >
                 <Zap className="w-3.5 h-3.5 fill-current" />
@@ -830,7 +982,7 @@ export const PurchasingModule: React.FC = () => {
                 return (
                   <div
                     key={`po-lowstock-${p.id}-${pIdx}`}
-                    className={`p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${
+                    className={`p-3.5 rounded-xl border flex flex-col justify-between gap-3 transition-all hover:-translate-y-0.5 ${
                       isLight
                         ? 'bg-amber-500/5 border-amber-500/30'
                         : 'bg-amber-500/10 border-amber-500/30'
@@ -838,15 +990,15 @@ export const PurchasingModule: React.FC = () => {
                   >
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-mono text-amber-500 font-bold">
+                        <span className="text-[11px] font-mono text-amber-500 font-normal">
                           {p.id}
                         </span>
-                        <span className="text-xs font-mono font-black text-amber-500">
+                        <span className="text-xs font-mono font-semibold text-amber-500">
                           Stok: {p.stock} {p.unit || 'Unit'}
                         </span>
                       </div>
                       <div
-                        className={`text-sm font-bold truncate ${
+                        className={`text-sm font-medium truncate ${
                           isLight ? 'text-slate-900' : 'text-white'
                         }`}
                       >
@@ -854,7 +1006,7 @@ export const PurchasingModule: React.FC = () => {
                       </div>
                       <div className="text-[10px] text-gray-400 mt-1 space-y-0.5">
                         <div>Safety Alert: ≤{policyInfo.minStock} {p.unit || 'Unit'} • Target: {maxStock}</div>
-                        <div className="text-emerald-400 font-mono font-bold">
+                        <div className="text-emerald-400 font-mono font-medium">
                           Kebutuhan PO: +{orderQty} {p.unit || 'Unit'}
                         </div>
                       </div>
@@ -864,8 +1016,8 @@ export const PurchasingModule: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleAutoReorderSingle(p)}
-                        className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-lg cursor-pointer transition flex items-center justify-center gap-1 shadow-sm active:scale-95"
-                        title={`Auto-generate draf PO untuk ${p.name} (+${orderQty} ${p.unit || 'Unit'})`}
+                        className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-medium text-xs rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1 shadow-sm active:scale-[0.99]"
+                        title={`Auto-generate draf PO untuk ${p.name}`}
                       >
                         <Zap className="w-3 h-3 fill-current" />
                         <span>Auto PO (+{orderQty})</span>
@@ -878,7 +1030,7 @@ export const PurchasingModule: React.FC = () => {
                           setTempQty(orderQty);
                           setIsCreateModalOpen(true);
                         }}
-                        className="px-2.5 py-1.5 bg-black/20 hover:bg-black/30 text-gray-300 text-xs rounded-lg cursor-pointer transition"
+                        className="px-2.5 py-1.5 bg-black/20 hover:bg-black/30 text-gray-300 text-xs rounded-lg cursor-pointer transition-all active:scale-[0.99]"
                         title="Buka form PO manual"
                       >
                         Manual
@@ -892,41 +1044,41 @@ export const PurchasingModule: React.FC = () => {
         </div>
       )}
 
-      {/* DAFTAR 2 PURCHASE ORDER BERSTATUS APPROVED / SIAP DITERIMA (GOODS RECEIPT QUEUE) */}
+      {/* Approved PO Queue */}
       {approvedPOs.length > 0 && (
         <div
           id="approved-po-queue"
-          className={`p-5 rounded-2xl border transition duration-200 ${
+          className={`p-5 rounded-2xl border transition-all duration-200 ${
             isLight
-              ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-white border-emerald-200 shadow-sm'
-              : 'bg-gradient-to-r from-emerald-950/20 via-[#161b22] to-teal-950/20 border-emerald-500/30'
+              ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-white border-emerald-500/70 shadow-[0_0_16px_rgba(16,185,129,0.18)]'
+              : 'bg-gradient-to-r from-emerald-950/20 via-[#161b22] to-teal-950/20 border-emerald-500/40 shadow-[0_0_16px_rgba(16,185,129,0.12)]'
           }`}
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-[#30363d]/40">
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                isLight ? 'bg-emerald-100 text-emerald-800 border border-slate-200 shadow-xs' : 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
+                isLight ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-xs' : 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
               }`}>
                 <PackageCheck className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className={`font-bold text-sm sm:text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  <h3 className={`font-medium text-base leading-6 ${isLight ? 'text-slate-900' : 'text-white'}`}>
                     Daftar Purchase Order Siap Diterima (Status APPROVED)
                   </h3>
                   <span
                     id="badge-approved-pos-count"
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border ${
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-normal border ${
                       isLight
-                        ? 'bg-amber-50 text-amber-800 border-slate-200'
-                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                     }`}
                   >
                     {approvedPOs.length} PO Siap Terima
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Dokumen PO telah memperoleh otorisasi pimpinan/direksi. Klik tombol <strong>Terima Barang (Create GRN)</strong> untuk verifikasi fisik & sinkronisasi otomatis ke Gudang dan Hutang Dagang.
+                <p className="text-xs font-normal text-gray-400 mt-0.5">
+                  Dokumen PO telah memperoleh otorisasi. Klik tombol <span className="font-medium text-emerald-500">Terima Barang (Create GRN)</span> untuk verifikasi fisik &amp; sinkronisasi otomatis ke Gudang.
                 </p>
               </div>
             </div>
@@ -934,7 +1086,7 @@ export const PurchasingModule: React.FC = () => {
             <button
               type="button"
               onClick={() => setActivePurchasingTab('gr')}
-              className="text-xs text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer shrink-0 self-start sm:self-auto"
+              className="text-xs text-emerald-400 hover:text-emerald-300 font-medium flex items-center gap-1 cursor-pointer shrink-0 self-start sm:self-auto transition-all active:scale-[0.99]"
             >
               <span>Riwayat Goods Receipt ({goodsReceipts.length})</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -951,7 +1103,7 @@ export const PurchasingModule: React.FC = () => {
                 <div
                   key={`approved-card-${po.po_number}`}
                   id={`approved-po-card-${po.po_number}`}
-                  className={`p-4 rounded-xl border flex flex-col justify-between gap-3.5 transition duration-150 ${
+                  className={`p-4 rounded-xl border flex flex-col justify-between gap-3.5 transition-all duration-150 hover:-translate-y-0.5 ${
                     isLight
                       ? 'bg-white border-slate-200 hover:border-emerald-500 shadow-sm'
                       : 'bg-[#0d1117] border-[#30363d] hover:border-emerald-500/50'
@@ -964,12 +1116,12 @@ export const PurchasingModule: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setSelectedPoForDetail(po)}
-                            className="font-mono font-bold text-sm text-[#0052FF] hover:underline cursor-pointer flex items-center gap-1"
+                            className="font-mono font-medium text-sm text-[#0052FF] hover:underline cursor-pointer flex items-center gap-1 active:scale-[0.99]"
                           >
                             <span>{po.po_number}</span>
                             <Eye className="w-3 h-3 opacity-60" />
                           </button>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono">
+                          <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono">
                             APPROVED
                           </span>
                         </div>
@@ -979,7 +1131,7 @@ export const PurchasingModule: React.FC = () => {
                       </div>
 
                       <div className="text-right">
-                        <div className="font-mono font-black text-emerald-400 text-sm sm:text-base">
+                        <div className="font-mono font-semibold text-emerald-400 text-sm sm:text-base">
                           Rp {po.total_amount.toLocaleString('id-ID')}
                         </div>
                         <div className="text-[10px] text-amber-400 font-mono mt-0.5">
@@ -989,7 +1141,7 @@ export const PurchasingModule: React.FC = () => {
                     </div>
 
                     <div className="p-2.5 rounded-lg bg-black/20 border border-[#30363d]/50 space-y-1">
-                      <div className={`font-bold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      <div className={`font-medium text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
                         {po.supplier_name}
                       </div>
                       <div className="text-[11px] text-gray-400 truncate" title={po.items}>
@@ -1007,7 +1159,7 @@ export const PurchasingModule: React.FC = () => {
                       type="button"
                       id={`btn-create-grn-${po.po_number}`}
                       onClick={() => openGoodsReceiptModal(po)}
-                      className={`px-3.5 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                      className={`px-3.5 py-2 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer active:scale-[0.99] ${
                         isLight
                           ? 'bg-emerald-600 hover:bg-emerald-700 border border-emerald-600 shadow-sm'
                           : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-[0_0_12px_rgba(16,185,129,0.35)]'
@@ -1024,30 +1176,29 @@ export const PurchasingModule: React.FC = () => {
         </div>
       )}
 
-      {/* MAIN PURCHASING TABS & DATA TABLE */}
+      {/* Main Purchasing Tabs */}
       <div
-        className={`rounded-2xl border overflow-hidden shadow-lg transition duration-200 ${
+        className={`rounded-2xl border overflow-hidden shadow-lg transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-200'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
-        {/* Navigation Tabs Bar */}
         <div className="p-4 border-b border-slate-200 dark:border-[#30363d] pb-2 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className={`flex items-center rounded-xl p-0.5 border ${
-              isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-800/80 border-slate-700'
+              isLight ? 'bg-slate-100 border-slate-300' : 'bg-slate-800/80 border-slate-700'
             }`}>
               <button
                 type="button"
                 onClick={() => setActivePurchasingTab('po')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 active:scale-[0.99] ${
                   activePurchasingTab === 'po'
                     ? isLight
-                      ? 'bg-white text-blue-600 border border-slate-200 shadow-sm'
+                      ? 'bg-blue-600 text-white shadow-sm'
                       : 'bg-[#0052FF] text-white shadow-sm'
                     : isLight
-                    ? 'text-slate-600 hover:text-slate-900'
+                    ? 'text-slate-700 hover:bg-slate-200'
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -1059,13 +1210,13 @@ export const PurchasingModule: React.FC = () => {
                 type="button"
                 id="tab-btn-purchasing-pr"
                 onClick={() => setActivePurchasingTab('pr')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99] ${
                   activePurchasingTab === 'pr'
                     ? isLight
-                      ? 'bg-white text-amber-600 border border-slate-200 shadow-sm'
-                      : 'bg-amber-600 text-slate-950 font-bold shadow-sm'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-amber-600 text-slate-950 shadow-sm'
                     : isLight
-                    ? 'text-slate-600 hover:text-slate-900'
+                    ? 'text-slate-700 hover:bg-slate-200'
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -1073,7 +1224,7 @@ export const PurchasingModule: React.FC = () => {
                 <span>Draf Permintaan / PR ({purchaseRequests.length})</span>
                 {purchaseRequests.filter((pr) => pr.status === 'PENDING' || pr.status === 'Pending Approval').length > 0 && (
                   <span className={`px-1.5 py-0.2 rounded-full font-mono border ${
-                    isLight ? 'bg-amber-200 border border-amber-400 text-amber-950 font-black text-[10px]' : 'bg-amber-500/30 text-amber-300 border-amber-500/40 text-[10px] font-bold'
+                    isLight ? 'bg-amber-200 border border-amber-400 text-amber-950 text-[10px] font-normal animate-pulse' : 'bg-amber-500/30 text-amber-300 border-amber-500/40 text-[10px] font-normal animate-pulse'
                   }`}>
                     {purchaseRequests.filter((pr) => pr.status === 'PENDING' || pr.status === 'Pending Approval').length} PENDING
                   </span>
@@ -1084,21 +1235,21 @@ export const PurchasingModule: React.FC = () => {
                 type="button"
                 id="tab-btn-purchasing-gr"
                 onClick={() => setActivePurchasingTab('gr')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99] ${
                   activePurchasingTab === 'gr'
                     ? isLight
-                      ? 'bg-white text-emerald-600 border border-slate-200 shadow-sm'
+                      ? 'bg-emerald-600 text-white shadow-sm'
                       : 'bg-emerald-600 text-white shadow-sm'
                     : isLight
-                    ? 'text-slate-600 hover:text-slate-900'
+                    ? 'text-slate-700 hover:bg-slate-200'
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
                 <PackageCheck className="w-3.5 h-3.5" />
                 <span>Penerimaan Barang / GR ({goodsReceipts.length})</span>
                 {approvedPOs.length > 0 && (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold border ${
-                    isLight ? 'bg-amber-50 text-amber-800 border-slate-200' : 'bg-amber-500/30 text-amber-300 border-amber-500/40'
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-normal border ${
+                    isLight ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : 'bg-amber-500/30 text-amber-300 border-amber-500/40'
                   }`}>
                     {approvedPOs.length} Siap Terima
                   </span>
@@ -1108,13 +1259,13 @@ export const PurchasingModule: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActivePurchasingTab('invoices')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99] ${
                   activePurchasingTab === 'invoices'
                     ? isLight
-                      ? 'bg-white text-purple-600 border border-slate-200 shadow-sm'
+                      ? 'bg-purple-600 text-white shadow-sm'
                       : 'bg-purple-600 text-white shadow-sm'
                     : isLight
-                    ? 'text-slate-600 hover:text-slate-900'
+                    ? 'text-slate-700 hover:bg-slate-200'
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
@@ -1139,7 +1290,6 @@ export const PurchasingModule: React.FC = () => {
               isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
             }`}
           >
-            {/* Search Box */}
             <div className="relative flex-1 min-w-[220px] max-w-md">
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
               <input
@@ -1164,7 +1314,6 @@ export const PurchasingModule: React.FC = () => {
               )}
             </div>
 
-            {/* Filter Dropdowns */}
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1.5">
                 <span className="text-gray-400">{isEn ? 'PO Status:' : 'Status PO:'}</span>
@@ -1228,14 +1377,14 @@ export const PurchasingModule: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
+                className={`border-b uppercase tracking-widest font-mono font-normal text-[11px] leading-4 ${
                   isLight
                     ? 'bg-slate-100 text-slate-700 border-slate-200'
                     : 'bg-[#0d1117] text-[#8b949e] border-[#30363d]'
                 }`}
               >
                 <tr>
-                  <th className="py-3 px-4">No. PO & Tanggal</th>
+                  <th className="py-3 px-4">No. PO &amp; Tanggal</th>
                   <th className="py-3 px-4">Supplier / Vendor</th>
                   <th className="py-3 px-4">Rincian Barang</th>
                   <th className="py-3 px-4 text-right">Total Nilai (PPN 11%)</th>
@@ -1292,7 +1441,6 @@ export const PurchasingModule: React.FC = () => {
                           isLight ? 'hover:bg-slate-50' : 'hover:bg-[#21262d]/50'
                         }`}
                       >
-                        {/* No PO & Date */}
                         <td className="py-3 px-4 font-mono">
                           <button
                             type="button"
@@ -1307,7 +1455,6 @@ export const PurchasingModule: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Supplier */}
                         <td className="py-3 px-4">
                           <div
                             className={`font-semibold ${
@@ -1332,7 +1479,6 @@ export const PurchasingModule: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Items */}
                         <td className="py-3 px-4 max-w-xs truncate text-gray-300">
                           <div>{po.items}</div>
                           {po.item_details && po.item_details.length > 0 && (
@@ -1342,7 +1488,6 @@ export const PurchasingModule: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Total Amount & PPN */}
                         <td className="py-3 px-4 text-right font-mono">
                           <div className="font-bold text-[#10B981] text-xs">
                             Rp {po.total_amount.toLocaleString('id-ID')}
@@ -1352,7 +1497,6 @@ export const PurchasingModule: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Status Lifecycle Dokumen */}
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           {isReceived && (
                             <span className={`px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${
@@ -1377,37 +1521,46 @@ export const PurchasingModule: React.FC = () => {
                             </span>
                           )}
                           {isApproved && (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-400 border-emerald-500/30 inline-flex items-center gap-1">
+                            <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-emerald-500/15 text-emerald-400 border-emerald-500/30 inline-flex items-center gap-1">
                               <CheckCircle className="w-3 h-3 text-emerald-400" />
                               <span>Disetujui (Approved)</span>
                             </span>
                           )}
                           {isPendingDireksi && (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-purple-500/20 text-purple-300 border-purple-500/40 inline-flex items-center gap-1 shadow-[0_0_8px_rgba(168,85,247,0.25)]">
-                              <ShieldAlert className="w-3 h-3 text-purple-400" />
+                            <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-amber-500/20 text-amber-300 border-amber-500/40 inline-flex items-center gap-1 shadow-[0_0_8px_rgba(245,158,11,0.25)]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                              <ShieldAlert className="w-3 h-3 text-amber-400" />
                               <span>Approval Direksi (&gt; 20 Jt)</span>
                             </span>
                           )}
                           {isPendingPimpinan && (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/30 inline-flex items-center gap-1">
+                            <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/30 inline-flex items-center gap-1 shadow-[0_0_8px_rgba(245,158,11,0.2)]">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                               <Clock className="w-3 h-3" />
                               <span>Menunggu Approval</span>
                             </span>
                           )}
                           {isDraft && (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-slate-500/15 text-slate-400 border-slate-500/30 inline-flex items-center gap-1">
-                              <span>Draft PO</span>
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-slate-500/15 text-slate-400 border-slate-500/30 inline-flex items-center gap-1">
+                                <span>Draft PO</span>
+                              </span>
+                              {(po.po_number?.startsWith('PO-AUTO') || po.notes?.includes('AUTO-REORDER')) && (
+                                <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-amber-500/20 text-amber-300 border-amber-500/40 inline-flex items-center gap-1 shadow-[0_0_8px_rgba(245,158,11,0.25)] animate-pulse">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                                  <span>AUTO-REORDER</span>
+                                </span>
+                              )}
+                            </div>
                           )}
                           {isRejected && (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-rose-500/15 text-rose-400 border-rose-500/30 inline-flex items-center gap-1">
+                            <span className="text-[10px] font-normal font-mono px-2.5 py-0.5 rounded-full border bg-rose-500/15 text-rose-400 border-rose-500/30 inline-flex items-center gap-1">
                               <XCircle className="w-3 h-3" />
                               <span>Ditolak</span>
                             </span>
                           )}
                         </td>
 
-                        {/* Status Tagihan Supplier */}
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           {(() => {
                             const isPaid = po.payment_status === 'Lunas' || po.payment_status === 'PAID';
@@ -1422,7 +1575,7 @@ export const PurchasingModule: React.FC = () => {
                                   type="button"
                                   onClick={() => setSelectedPoForPayment(po)}
                                   className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition cursor-pointer font-mono"
-                                  title="Faktur Lunas (PAID). Klik untuk melihat/edit data pembayaran."
+                                  title="Faktur Lunas (PAID)"
                                 >
                                   PAID
                                 </button>
@@ -1444,7 +1597,7 @@ export const PurchasingModule: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => setSelectedPoForPayment(po)}
-                                className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition cursor-pointer"
+                                className="text-[10px] font-mono font-normal px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 transition cursor-pointer active:scale-[0.99]"
                                 title="Belum bayar. Klik untuk mencatat pelunasan."
                               >
                                 Belum Bayar
@@ -1453,30 +1606,26 @@ export const PurchasingModule: React.FC = () => {
                           })()}
                         </td>
 
-                        {/* Aksi Baris */}
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1.5">
-                            {/* Tombol Cetak Dokumen PO Resmi */}
                             <button
                               type="button"
                               onClick={() => setSelectedPoForPrint(po)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-700 transition cursor-pointer active:scale-[0.99]"
                               title="Cetak Dokumen PO Resmi (A4)"
                             >
                               <Printer className="w-3.5 h-3.5 text-cyan-400" />
                             </button>
 
-                            {/* Tombol Detail PO */}
                             <button
                               type="button"
                               onClick={() => setSelectedPoForDetail(po)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-700 transition cursor-pointer active:scale-[0.99]"
                               title="Lihat Detail PO"
                             >
                               <Eye className="w-3.5 h-3.5 text-blue-400" />
                             </button>
 
-                            {/* Lifecycle Action Button */}
                             {isDraft && (
                               <button
                                 type="button"
@@ -1488,8 +1637,8 @@ export const PurchasingModule: React.FC = () => {
                                       : 'Menunggu Approval Pimpinan'
                                   )
                                 }
-                                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
-                                title={po.total_amount > 20000000 ? "Ajukan Otorisasi Direksi (> Rp 20 Jt)" : "Ajukan ke pimpinan untuk persetujuan"}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer active:scale-[0.99]"
+                                title={po.total_amount > 20000000 ? "Ajukan Otorisasi Direksi (> Rp 20 Jt)" : "Ajukan ke pimpinan"}
                               >
                                 <Send className="w-3 h-3" />
                                 <span>Ajukan</span>
@@ -1500,21 +1649,31 @@ export const PurchasingModule: React.FC = () => {
                               <div className="flex items-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => approvePurchaseOrder(po.po_number)}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.3)] active:scale-95"
+                                  disabled={processingPoNumber === po.po_number}
+                                  onClick={() => handleApprovePo(po.po_number)}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition ${
+                                    processingPoNumber === po.po_number
+                                      ? 'bg-slate-700/60 text-slate-400 border border-slate-600 cursor-not-allowed shadow-none'
+                                      : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.3)] active:scale-[0.99]'
+                                  }`}
                                   title={isPendingDireksi ? "Setujui Otorisasi Direksi (> Rp 20 Jt)" : "Setujui PO (Approve)"}
                                 >
                                   <CheckCircle2 className="w-3 h-3" />
-                                  <span>Setujui (Approve)</span>
+                                  <span>{processingPoNumber === po.po_number ? 'Memproses...' : 'Setujui (Approve)'}</span>
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => rejectPurchaseOrder(po.po_number)}
-                                  className="px-2 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer active:scale-95"
+                                  disabled={processingPoNumber === po.po_number}
+                                  onClick={() => handleRejectPo(po.po_number)}
+                                  className={`px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition border ${
+                                    processingPoNumber === po.po_number
+                                      ? 'bg-slate-700/60 text-slate-400 border-slate-600 cursor-not-allowed'
+                                      : 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border-rose-500/30 cursor-pointer active:scale-[0.99]'
+                                  }`}
                                   title="Tolak PO (Reject)"
                                 >
                                   <XCircle className="w-3 h-3" />
-                                  <span>Tolak</span>
+                                  <span>{processingPoNumber === po.po_number ? 'Memproses...' : 'Tolak'}</span>
                                 </button>
                               </div>
                             )}
@@ -1525,8 +1684,8 @@ export const PurchasingModule: React.FC = () => {
                                   type="button"
                                   id={`btn-receive-po-${po.po_number}`}
                                   onClick={() => openGoodsReceiptModal(po)}
-                                  className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition shadow-[0_0_10px_rgba(16,185,129,0.35)] cursor-pointer active:scale-95"
-                                  title="Barang sudah tiba? Catat penerimaan barang (Create GRN)"
+                                  className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition shadow-[0_0_10px_rgba(16,185,129,0.35)] cursor-pointer active:scale-[0.99]"
+                                  title="Catat penerimaan barang (Create GRN)"
                                 >
                                   <PackageCheck className="w-3.5 h-3.5" />
                                   <span>Terima Barang (Create GRN)</span>
@@ -1536,8 +1695,8 @@ export const PurchasingModule: React.FC = () => {
                                   onClick={() =>
                                     updatePurchaseOrderStatus(po.po_number, 'Dipesan')
                                   }
-                                  className="px-2 py-1 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/30 rounded-lg text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
-                                  title="Teruskan pesanan ke vendor (Dipesan)"
+                                  className="px-2 py-1 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer active:scale-[0.99]"
+                                  title="Teruskan pesanan ke vendor"
                                 >
                                   <Truck className="w-3 h-3" />
                                   <span>Kirim</span>
@@ -1549,24 +1708,36 @@ export const PurchasingModule: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => openGoodsReceiptModal(po)}
-                                className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition shadow-[0_0_10px_rgba(16,185,129,0.35)] cursor-pointer active:scale-95"
+                                className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition shadow-[0_0_10px_rgba(16,185,129,0.35)] cursor-pointer active:scale-[0.99]"
                                 title="Catat barang masuk & verifikasi Surat Jalan vendor"
                               >
-                                <PackageCheck className="w-3 h-3" />
+                                <PackageCheck className="w-3.5 h-3.5" />
                                 <span>Terima Barang</span>
                               </button>
                             )}
 
                             {isReceived && (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedPoForPayment(po)}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1 rounded flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
-                                title="Kelola status pembayaran vendor"
-                              >
-                                <CreditCard className="w-3.5 h-3.5" />
-                                <span>Bayar</span>
-                              </button>
+                              po.payment_status === 'Lunas' || po.payment_status === 'PAID' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPoForPayment(po)}
+                                  className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer hover:bg-emerald-500/30 active:scale-[0.99]"
+                                  title="Faktur Lunas (PAID)"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Faktur Selesai</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPoForPayment(po)}
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs px-3 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-[0.99]"
+                                  title="Kelola status pembayaran vendor"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  <span>Bayar</span>
+                                </button>
+                              )
                             )}
                           </div>
                         </td>
@@ -1579,12 +1750,12 @@ export const PurchasingModule: React.FC = () => {
           </div>
         )}
 
-        {/* TAB PR: DRAF PURCHASE REQUEST (ROP NOTIFICATIONS & PERMINTAAN PEMBELIAN) */}
+        {/* TAB PR: DRAF PURCHASE REQUEST */}
         {activePurchasingTab === 'pr' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
+                className={`font-mono font-normal tracking-widest uppercase text-[11px] leading-4 border-b ${
                   isLight
                     ? 'bg-slate-100 text-slate-700 border-slate-200'
                     : 'bg-[#0d1117] text-[#8b949e] border-[#30363d]'
@@ -1606,8 +1777,8 @@ export const PurchasingModule: React.FC = () => {
                     <td colSpan={7} className="text-center py-12 text-gray-500">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <CheckCircle className="w-8 h-8 text-emerald-400 opacity-60" />
-                        <span className="font-semibold text-sm">Tidak ada draf Purchase Request aktif</span>
-                        <span className="text-xs text-gray-400">Seluruh stok produk berada dalam batas aman ROP</span>
+                        <span className="font-medium text-sm">Tidak ada draf Purchase Request aktif</span>
+                        <span className="text-xs text-gray-400 font-normal">Seluruh stok produk berada dalam batas aman ROP</span>
                       </div>
                     </td>
                   </tr>
@@ -1628,30 +1799,30 @@ export const PurchasingModule: React.FC = () => {
                           isPending ? (isLight ? 'bg-amber-50/30' : 'bg-amber-950/10') : ''
                         }`}
                       >
-                        <td className="py-3 px-4 font-mono font-bold text-cyan-400">
+                        <td className="py-3 px-4 font-mono font-medium text-cyan-400">
                           <div>{pr.pr_number}</div>
                           <div className="text-[10px] text-gray-400 font-normal">{pr.date}</div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className={`font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          <div className={`font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>
                             {pr.requester_name}
                           </div>
-                          <div className="text-[10px] text-gray-400">{pr.department}</div>
+                          <div className="text-[10px] text-gray-400 font-normal">{pr.department}</div>
                         </td>
                         <td className="py-3 px-4">
-                          <div className={`font-bold ${isLight ? 'text-slate-800' : 'text-[#e6edf3]'}`}>
+                          <div className={`font-medium ${isLight ? 'text-slate-800' : 'text-[#e6edf3]'}`}>
                             {pr.item_name}
                           </div>
-                          <div className="text-[11px] font-mono text-amber-500 font-semibold">
+                          <div className="text-[11px] font-mono text-amber-500 font-normal">
                             Kebutuhan Pesan: {pr.qty} Unit
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-right font-mono font-bold">
+                        <td className="py-3 px-4 text-right font-mono font-semibold text-sm">
                           Rp {pr.estimated_cost.toLocaleString('id-ID')}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-normal uppercase tracking-wider ${
                               pr.urgency === 'High'
                                 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                                 : pr.urgency === 'Medium'
@@ -1664,12 +1835,12 @@ export const PurchasingModule: React.FC = () => {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span
-                            className={`px-2.5 py-1 rounded-full text-[11px] font-mono border inline-flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-mono font-normal border inline-flex items-center gap-1 ${
                               isPending
                                 ? isLight
-                                  ? 'bg-amber-200 border border-amber-400 text-amber-950 font-black text-[10px]'
-                                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse font-bold'
-                                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold'
+                                  ? 'bg-amber-200 border border-amber-400 text-amber-950 text-[10px]'
+                                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             }`}
                           >
                             {isPending && <Clock className="w-3 h-3 text-amber-400" />}
@@ -1679,27 +1850,26 @@ export const PurchasingModule: React.FC = () => {
                         <td className="py-3 px-4 text-center">
                           {isPending ? (
                             <span
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30 inline-flex items-center gap-1 cursor-default"
-                              title="Menunggu persetujuan manajerial di modul Executive sebelum dapat diproses menjadi PO"
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30 inline-flex items-center gap-1 cursor-default"
+                              title="Menunggu persetujuan manajerial di modul Executive"
                             >
                               <Clock className="w-3 h-3 text-amber-400" />
                               <span>Menunggu Approval</span>
                             </span>
                           ) : pr.status === 'REJECTED' || pr.status === 'Rejected' || pr.status === 'Ditolak' ? (
                             <span
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30 inline-flex items-center gap-1 cursor-default"
-                              title="Purchase Request telah ditolak oleh Direksi/Executive"
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/30 inline-flex items-center gap-1 cursor-default"
+                              title="Purchase Request telah ditolak"
                             >
                               <XCircle className="w-3 h-3 text-rose-400" />
                               <span>Ditolak</span>
                             </span>
                           ) : pr.status === 'Converted to PO' ? (
-                            <span className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-cyan-400 font-bold bg-cyan-500/10 border border-cyan-500/20 inline-flex items-center gap-1">
+                            <span className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-cyan-400 font-medium bg-cyan-500/10 border border-cyan-500/20 inline-flex items-center gap-1">
                               <CheckCircle className="w-3 h-3 text-cyan-400" />
                               <span>Sudah Jadi PO</span>
                             </span>
                           ) : (
-                            /* PR berstatus APPROVED: Staf Purchasing dapat memproses PO */
                             <button
                               type="button"
                               id={`btn-process-pr-to-po-${pr.pr_number}`}
@@ -1718,8 +1888,8 @@ export const PurchasingModule: React.FC = () => {
                                 );
                                 showToast(`Purchase Request ${pr.pr_number} berhasil diproses menjadi Purchase Order (PO)!`);
                               }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer shadow-md inline-flex items-center gap-1.5 active:scale-95"
-                              title="Purchase Request telah disetujui (APPROVED). Klik untuk memproses dokumen PO resmi ke Supplier"
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer shadow-md inline-flex items-center gap-1.5 active:scale-[0.99]"
+                              title="Proses PO"
                             >
                               <Zap className="w-3.5 h-3.5 fill-current" />
                               <span>Proses PO (APPROVED)</span>
@@ -1735,7 +1905,7 @@ export const PurchasingModule: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 2: RIWAYAT GOODS RECEIPT (GR HISTORY) */}
+        {/* TAB 2: RIWAYAT GOODS RECEIPT */}
         {activePurchasingTab === 'gr' && (
           <div>
             {approvedPOs.length > 0 && (
@@ -1748,10 +1918,10 @@ export const PurchasingModule: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <PackageCheck className="w-4 h-4 text-emerald-400" />
-                    <span className={`font-bold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    <span className={`font-medium text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
                       Purchase Order Siap Diterima (Status APPROVED):
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30">
                       {approvedPOs.length} PO
                     </span>
                   </div>
@@ -1761,17 +1931,17 @@ export const PurchasingModule: React.FC = () => {
                   {approvedPOs.map((po) => (
                     <div
                       key={`gr-tab-po-${po.po_number}`}
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
-                        isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all hover:-translate-y-0.5 ${
+                        isLight ? 'bg-white border-slate-200 shadow-xs' : 'bg-[#161b22] border-[#30363d]'
                       }`}
                     >
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-sky-400 text-xs">{po.po_number}</span>
-                          <span className="text-[10px] font-semibold text-gray-400">{po.supplier_name}</span>
+                          <span className="font-mono font-medium text-sky-400 text-xs">{po.po_number}</span>
+                          <span className="text-[10px] font-normal text-gray-400">{po.supplier_name}</span>
                         </div>
                         <div className="text-[10px] text-gray-400 truncate max-w-xs">{po.items}</div>
-                        <div className="text-[10px] font-mono text-emerald-400 font-bold mt-0.5">
+                        <div className="text-[10px] font-mono text-emerald-400 font-semibold mt-0.5">
                           Rp {po.total_amount.toLocaleString('id-ID')}
                         </div>
                       </div>
@@ -1780,7 +1950,7 @@ export const PurchasingModule: React.FC = () => {
                         type="button"
                         id={`btn-gr-tab-create-${po.po_number}`}
                         onClick={() => openGoodsReceiptModal(po)}
-                        className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition shadow-sm cursor-pointer shrink-0 active:scale-95"
+                        className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-medium flex items-center gap-1 transition shadow-sm cursor-pointer shrink-0 active:scale-[0.99]"
                       >
                         <PackageCheck className="w-3.5 h-3.5" />
                         <span>Terima Barang (Create GRN)</span>
@@ -1794,7 +1964,7 @@ export const PurchasingModule: React.FC = () => {
             <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
+                className={`font-mono font-normal tracking-widest uppercase text-[11px] leading-4 border-b ${
                   isLight
                     ? 'bg-slate-100 text-slate-700 border-slate-200'
                     : 'bg-[#0d1117] text-[#8b949e] border-[#30363d]'
@@ -1820,7 +1990,7 @@ export const PurchasingModule: React.FC = () => {
               >
                 {goodsReceipts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-500 font-medium">
+                    <td colSpan={8} className="py-8 text-center text-gray-500 font-normal">
                       Belum ada dokumen Goods Receipt tercatat
                     </td>
                   </tr>
@@ -1832,53 +2002,52 @@ export const PurchasingModule: React.FC = () => {
                         isLight ? 'hover:bg-slate-50' : 'hover:bg-[#21262d]/50'
                       }`}
                     >
-                      <td className="py-3 px-4 font-mono font-bold text-emerald-400">
+                      <td className="py-3 px-4 font-mono font-medium text-emerald-400">
                         {gr.id}
                       </td>
-                      <td className="py-3 px-4 text-gray-400 font-mono text-[11px]">
+                      <td className="py-3 px-4 text-gray-400 font-mono text-[11px] font-normal">
                         {gr.receivedDate}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="font-mono font-bold text-sky-400">{gr.poNumber}</div>
-                        <div className="text-[11px] text-amber-300 font-mono">
+                        <div className="font-mono font-medium text-sky-400">{gr.poNumber}</div>
+                        <div className="text-[11px] text-amber-300 font-mono font-normal">
                           DO: {gr.deliveryOrderNumber}
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-semibold">{gr.vendorName}</td>
-                      <td className="py-3 px-4 text-gray-300 text-[11px]">
+                      <td className="py-3 px-4 font-medium">{gr.vendorName}</td>
+                      <td className="py-3 px-4 text-gray-300 text-[11px] font-normal">
                         {gr.receivedByUserId}
                       </td>
                       <td className="py-3 px-4 max-w-sm">
                         <div className="space-y-1">
                           {gr.items.map((item, itIdx) => (
                             <div key={itIdx} className="text-[11px] flex items-center justify-between gap-2">
-                              <span className="truncate">{item.productName}:</span>
-                              <span className="font-mono font-bold text-emerald-400 shrink-0">
+                              <span className="truncate font-normal">{item.productName}:</span>
+                              <span className="font-mono font-semibold text-emerald-400 shrink-0">
                                 +{item.acceptedQty} {item.unit}
                               </span>
                               {item.rejectedQty > 0 && (
-                                <span className="font-mono font-bold text-rose-400 shrink-0">
+                                <span className="font-mono font-semibold text-rose-400 shrink-0">
                                   (Reject: {item.rejectedQty})
                                 </span>
                               )}
                             </div>
                           ))}
                           {gr.notes && (
-                            <div className="text-[10px] text-gray-400 italic">
+                            <div className="text-[10px] text-gray-400 italic font-normal">
                               Ket: {gr.notes}
                             </div>
                           )}
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-400 border-emerald-500/30 inline-flex items-center gap-1">
+                        <span className="text-[10px] font-mono font-normal px-2.5 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-400 border-emerald-500/30 inline-flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                           <span>TERVERIFIKASI</span>
                         </span>
                       </td>
                       <td className="py-3 px-4 text-center">
                         {(() => {
-                          const hasRejected = gr.items.some((it) => it.rejectedQty > 0);
                           const existingReturns = (purchaseReturns || []).filter(
                             (r) => r.grId === gr.id || r.poNumber === gr.poNumber
                           );
@@ -1887,18 +2056,14 @@ export const PurchasingModule: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => setSelectedGrForReturn(gr)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                                  hasRejected
-                                    ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 shadow-[0_0_10px_rgba(244,63,94,0.25)]'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-gray-300 border border-slate-700'
-                                }`}
-                                title="Buat Retur Pembelian & Terbitkan Nota Debit untuk memotong tagihan vendor"
+                                className="bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 font-medium px-3 py-1.5 rounded-lg text-xs shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer active:scale-[0.99]"
+                                title="Buat Retur Pembelian & Terbitkan Nota Debit"
                               >
-                                <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                                <RotateCcw className="w-3.5 h-3.5" />
                                 <span>Buat Retur Pembelian</span>
                               </button>
                               {existingReturns.length > 0 && (
-                                <span className="text-[9px] font-mono text-emerald-400 font-semibold">
+                                <span className="text-[9px] font-mono text-emerald-400 font-normal">
                                   {existingReturns.length} Nota Debit Terbit
                                 </span>
                               )}
@@ -1915,12 +2080,12 @@ export const PurchasingModule: React.FC = () => {
         </div>
       )}
 
-        {/* TAB 3: REKAP TAGIHAN VENDOR (INVOICE AP TABLE) */}
+        {/* TAB 3: REKAP TAGIHAN VENDOR */}
         {activePurchasingTab === 'invoices' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
+                className={`font-mono font-normal tracking-widest uppercase text-[11px] leading-4 border-b ${
                   isLight
                     ? 'bg-slate-100 text-slate-700 border-slate-200'
                     : 'bg-[#0d1117] text-[#8b949e] border-[#30363d]'
@@ -1964,48 +2129,48 @@ export const PurchasingModule: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setSelectedPoForDetail(po)}
-                          className="font-bold text-sky-400 hover:underline cursor-pointer flex items-center gap-1"
+                          className="font-medium text-sky-400 hover:underline cursor-pointer flex items-center gap-1 active:scale-[0.99]"
                         >
                           <span>{po.po_number}</span>
                           <Eye className="w-3 h-3 opacity-60" />
                         </button>
-                        <div className="text-[10px] text-gray-400 mt-0.5">{po.date}</div>
+                        <div className="text-[10px] text-gray-400 font-normal mt-0.5">{po.date}</div>
                         {po.debit_notes && po.debit_notes.length > 0 && (
-                          <div className="text-[9px] font-mono text-rose-400 mt-0.5 font-bold">
+                          <div className="text-[9px] font-mono text-rose-400 mt-0.5 font-normal">
                             ND: {po.debit_notes.join(', ')}
                           </div>
                         )}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="font-semibold text-white">{po.supplier_name}</div>
-                        <div className="text-[10px] text-gray-400 truncate max-w-xs">{po.items}</div>
+                        <div className={`font-medium ${isLight ? 'text-slate-900' : 'text-white'}`}>{po.supplier_name}</div>
+                        <div className="text-[10px] text-gray-400 font-normal truncate max-w-xs">{po.items}</div>
                       </td>
                       <td className="py-3 px-4">
                         <div className="text-amber-400 font-medium">{po.payment_term || 'Tempo 30 Hari'}</div>
                         <div className="text-[10px] font-mono mt-0.5">
-                          <span className={isOverdue ? 'text-rose-400 font-bold' : 'text-gray-400'}>
+                          <span className={isOverdue ? 'text-rose-400 font-medium' : 'text-gray-400 font-normal'}>
                             JT: {po.due_date || '-'}
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-right font-mono text-gray-300">
+                      <td className="py-3 px-4 text-right font-mono text-gray-300 font-normal">
                         Rp {po.total_amount.toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-right font-mono">
                         {returnAmount > 0 ? (
-                          <span className="font-bold text-rose-400">
+                          <span className="font-semibold text-rose-400">
                             -Rp {returnAmount.toLocaleString('id-ID')}
                           </span>
                         ) : (
-                          <span className="text-gray-500">-</span>
+                          <span className="text-gray-500 font-normal">-</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right font-mono font-black text-emerald-400 text-xs">
+                      <td className="py-3 px-4 text-right font-mono font-semibold text-emerald-400 text-xs">
                         Rp {netPayable.toLocaleString('id-ID')}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span
-                          className={`font-bold px-2.5 py-0.5 rounded-full text-[10px] font-mono ${
+                          className={`font-mono font-normal px-2.5 py-0.5 rounded-full text-[10px] ${
                             isPaid
                               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                               : isOverdue
@@ -2022,8 +2187,8 @@ export const PurchasingModule: React.FC = () => {
                           onClick={() => setSelectedPoForPayment(po)}
                           className={
                             isPaid
-                              ? 'px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-[11px] font-bold transition cursor-pointer'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1 rounded inline-flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95'
+                              ? 'px-3 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium transition cursor-pointer active:scale-[0.99]'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs px-3 py-1 rounded inline-flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-[0.99]'
                           }
                         >
                           {isPaid ? 'Detail Pembayaran' : 'Bayar'}
@@ -2038,19 +2203,19 @@ export const PurchasingModule: React.FC = () => {
         )}
       </div>
 
-      {/* MODAL 1: FORM BUAT PURCHASE ORDER (MULTI-ITEM, REGISTERED SUPPLIER, PPN 11%, COD/TEMPO) */}
+      {/* MODAL 1: FORM BUAT PURCHASE ORDER */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
           <div
-            className={`w-full max-w-2xl rounded-2xl p-6 shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+            className={`w-full max-w-2xl rounded-2xl p-6 relative border my-8 flex flex-col max-h-[92vh] ${
               isLight
-                ? 'bg-white border-slate-300 text-slate-800'
-                : 'bg-[#161b22] border-[#30363d] text-gray-200'
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
             }`}
           >
             <button
               onClick={() => setIsCreateModalOpen(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white"
+              className="absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer active:scale-[0.99]"
             >
               <X className="w-5 h-5" />
             </button>
@@ -2061,22 +2226,21 @@ export const PurchasingModule: React.FC = () => {
               </div>
               <div>
                 <h3
-                  className={`font-bold text-base ${
+                  className={`font-medium text-base leading-6 ${
                     isLight ? 'text-slate-900' : 'text-white'
                   }`}
                 >
                   Penerbitan Dokumen Purchase Order (PO)
                 </h3>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-400 font-normal">
                   Formulir pengadaan barang modal resmi ke supplier terdaftar.
                 </p>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto pt-4 space-y-4 text-xs pr-1">
-              {/* Supplier Selection */}
               <div>
-                <label className="font-bold text-gray-300 block mb-1">
+                <label className="font-medium text-gray-300 block mb-1">
                   Pilih Supplier Terdaftar <span className="text-rose-400">*</span>
                 </label>
                 <select
@@ -2095,7 +2259,6 @@ export const PurchasingModule: React.FC = () => {
                   ))}
                 </select>
 
-                {/* Selected Supplier Info Card */}
                 {selectedSupplierObj && (
                   <div
                     className={`mt-2 p-3 rounded-xl border text-[11px] space-y-1 ${
@@ -2122,7 +2285,6 @@ export const PurchasingModule: React.FC = () => {
                 )}
               </div>
 
-              {/* Add Product Items to PO */}
               <div
                 className={`p-3.5 rounded-xl border ${
                   isLight
@@ -2133,23 +2295,62 @@ export const PurchasingModule: React.FC = () => {
                 <div className="font-bold text-gray-300 uppercase tracking-wide text-[11px] mb-2">
                   Tambah Produk yang Dipesan
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
                   <div className="md:col-span-2">
                     <label className="text-[10px] text-gray-400 block mb-1">
                       Pilih Produk Katalog
                     </label>
-                    <select
-                      value={tempProductId}
-                      onChange={(e) => {
-                        setTempProductId(e.target.value);
-                        const p = products.find((prod) => prod.id === e.target.value);
-                        if (p) setTempUnitCost(p.cost_price || 500000);
+                    <SearchableProductCombobox
+                      products={products}
+                      selectedId={tempProductId}
+                      onSelect={(id) => {
+                        setTempProductId(id);
+                        const p = products.find((prod) => prod.id === id);
+                        if (p) {
+                          setTempUnitCost(p.cost_price || 500000);
+                          setTempUnit(p.unit || 'Sak');
+                        }
                       }}
-                      className="w-full px-2.5 py-2 rounded-lg bg-[#161b22] border border-[#30363d] text-white text-xs outline-none"
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">
+                      Satuan Beli
+                    </label>
+                    <select
+                      value={tempUnit}
+                      onChange={(e) => {
+                        const nextUnit = e.target.value;
+                        setTempUnit(nextUnit);
+                        const p = products.find((prod) => prod.id === tempProductId);
+                        if (p && p.cost_price) {
+                          if (nextUnit === 'Ret Dump Truck') {
+                            setTempUnitCost(Math.round(p.cost_price * 6.5));
+                          } else if (nextUnit === 'Ret Truk Engkel') {
+                            setTempUnitCost(Math.round(p.cost_price * 3.0));
+                          } else if (nextUnit === 'Ret Pick-up') {
+                            setTempUnitCost(Math.round(p.cost_price * 1.2));
+                          } else {
+                            setTempUnitCost(p.cost_price);
+                          }
+                        }
+                      }}
+                      className="w-full px-2 py-2 rounded-lg bg-[#161b22] border border-[#30363d] text-cyan-300 text-xs font-mono font-bold outline-none"
                     >
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} (Stok: {p.stock})
+                      {Array.from(
+                        new Set([
+                          products.find((p) => p.id === tempProductId)?.unit || 'Sak',
+                          ...BUILDING_PURCHASE_UNIT_OPTIONS,
+                          'Unit',
+                          'Pcs',
+                          'Box',
+                          'Karton',
+                        ])
+                      ).map((u) => (
+                        <option key={u} value={u}>
+                          {u}
                         </option>
                       ))}
                     </select>
@@ -2186,17 +2387,16 @@ export const PurchasingModule: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleAddPoLineItem}
-                    className="px-3 py-1.5 rounded-lg bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-[#0052FF] hover:bg-[#0043d1] text-white font-medium text-xs flex items-center gap-1 transition cursor-pointer active:scale-[0.99]"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>+ Tambah Item ke PO</span>
                   </button>
                 </div>
 
-                {/* Line Items Table */}
                 <div className="mt-3 border rounded-lg overflow-hidden border-[#30363d]">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-black/30 text-gray-400 text-[10px] uppercase font-bold border-b border-[#30363d]">
+                    <thead className="bg-black/30 text-gray-400 text-[10px] uppercase font-mono font-normal tracking-wider border-b border-[#30363d]">
                       <tr>
                         <th className="py-2 px-3">Item Produk</th>
                         <th className="py-2 px-3 text-center">Qty</th>
@@ -2209,25 +2409,25 @@ export const PurchasingModule: React.FC = () => {
                       {createPoItems.map((item, idx) => (
                         <tr key={idx}>
                           <td className="py-2 px-3">
-                            <div className="font-semibold">{item.productName}</div>
-                            <div className="text-[10px] text-gray-400 font-mono">
+                            <div className="font-medium">{item.productName}</div>
+                            <div className="text-[10px] text-gray-400 font-mono font-normal">
                               {item.productId}
                             </div>
                           </td>
-                          <td className="py-2 px-3 text-center font-mono font-bold">
+                          <td className="py-2 px-3 text-center font-mono font-normal">
                             {item.qty} {item.unit}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono">
+                          <td className="py-2 px-3 text-right font-mono font-normal">
                             Rp {item.unitCost.toLocaleString('id-ID')}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-400">
+                          <td className="py-2 px-3 text-right font-mono font-semibold text-emerald-400">
                             Rp {item.subtotal.toLocaleString('id-ID')}
                           </td>
                           <td className="py-2 px-3 text-center">
                             <button
                               type="button"
                               onClick={() => handleRemovePoLineItem(idx)}
-                              className="text-rose-400 hover:text-rose-300 p-1"
+                              className="text-rose-400 hover:text-rose-300 p-1 cursor-pointer active:scale-[0.99]"
                               title="Hapus baris"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -2240,10 +2440,9 @@ export const PurchasingModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Payment Terms & Due Date */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-gray-300 block mb-1">
+                  <label className="font-medium text-gray-300 block mb-1">
                     Termin Pembayaran (Payment Terms)
                   </label>
                   <select
@@ -2266,7 +2465,7 @@ export const PurchasingModule: React.FC = () => {
                       d.setDate(d.getDate() + days);
                       setCreateDueDate(d.toISOString().slice(0, 10));
                     }}
-                    className={`w-full px-3 py-2 rounded-xl border outline-none font-semibold ${
+                    className={`w-full px-3 py-2 rounded-xl border outline-none font-medium ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF]'
                         : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
@@ -2282,14 +2481,14 @@ export const PurchasingModule: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="font-bold text-gray-300 block mb-1">
+                  <label className="font-medium text-gray-300 block mb-1">
                     Tanggal Jatuh Tempo Tagihan
                   </label>
                   <input
                     type="date"
                     value={createDueDate}
                     onChange={(e) => setCreateDueDate(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-xl border outline-none font-mono ${
+                    className={`w-full px-3 py-2 rounded-xl border outline-none font-mono font-normal ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF]'
                         : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
@@ -2298,7 +2497,6 @@ export const PurchasingModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tax PPN 11% Toggle & Calculations */}
               <div
                 className={`p-3.5 rounded-xl border space-y-2 ${
                   isLight
@@ -2307,7 +2505,7 @@ export const PurchasingModule: React.FC = () => {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold text-gray-200">
+                  <label className="flex items-center gap-2 cursor-pointer font-medium text-gray-200">
                     <input
                       type="checkbox"
                       checked={createIncludePpn}
@@ -2316,7 +2514,7 @@ export const PurchasingModule: React.FC = () => {
                     />
                     <span>Kenakan PPN 11% (Pajak Pertambahan Nilai)</span>
                   </label>
-                  <span className="text-[11px] text-gray-400">
+                  <span className="text-[11px] text-gray-400 font-normal">
                     Tarif resmi UU HPP 11%
                   </span>
                 </div>
@@ -2324,28 +2522,27 @@ export const PurchasingModule: React.FC = () => {
                 <div className="pt-2 border-t border-[#30363d]/50 space-y-1 text-xs">
                   <div className="flex justify-between text-gray-400">
                     <span>Subtotal Barang:</span>
-                    <span className="font-mono text-gray-200">
+                    <span className="font-mono text-gray-200 font-normal">
                       Rp {createSubtotal.toLocaleString('id-ID')}
                     </span>
                   </div>
                   <div className="flex justify-between text-gray-400">
                     <span>PPN 11%:</span>
-                    <span className="font-mono text-gray-200">
+                    <span className="font-mono text-gray-200 font-normal">
                       Rp {createPpnAmount.toLocaleString('id-ID')}
                     </span>
                   </div>
-                  <div className="flex justify-between font-bold text-sm pt-1 border-t border-gray-700">
-                    <span className="text-white">Total Nilai Purchase Order:</span>
-                    <span className="font-mono text-emerald-400">
+                  <div className="flex justify-between text-sm pt-1 border-t border-gray-700">
+                    <span className="text-white font-medium">Total Nilai Purchase Order:</span>
+                    <span className="font-mono text-emerald-400 font-semibold text-base">
                       Rp {createGrandTotal.toLocaleString('id-ID')}
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Notes */}
               <div>
-                <label className="font-bold text-gray-300 block mb-1">
+                <label className="font-medium text-gray-300 block mb-1">
                   Catatan Tambahan / Instruksi Vendor (Opsional)
                 </label>
                 <textarea
@@ -2353,7 +2550,7 @@ export const PurchasingModule: React.FC = () => {
                   placeholder="Instruksi packing, kontak penerima gudang, dll..."
                   value={createNotes}
                   onChange={(e) => setCreateNotes(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border outline-none ${
+                  className={`w-full px-3 py-2 rounded-xl border outline-none font-normal ${
                     isLight
                       ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF]'
                       : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
@@ -2362,12 +2559,11 @@ export const PurchasingModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Modal Actions */}
             <div className="pt-4 border-t border-[#30363d] flex flex-wrap items-center justify-between gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsCreateModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium"
+                className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium cursor-pointer active:scale-[0.99]"
               >
                 Batal
               </button>
@@ -2376,14 +2572,14 @@ export const PurchasingModule: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleCreatePOSubmit('Draft')}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-200 font-bold border border-slate-700 transition cursor-pointer"
+                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium px-5 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer active:scale-[0.99]"
                 >
                   Simpan sebagai Draft
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCreatePOSubmit('Menunggu Approval Pimpinan')}
-                  className="px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold shadow-[0_0_12px_rgba(0,82,255,0.4)] transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-medium shadow-[0_0_12px_rgba(0,82,255,0.4)] transition cursor-pointer active:scale-[0.99]"
                 >
                   Terbitkan & Ajukan Approval
                 </button>
@@ -2393,7 +2589,7 @@ export const PurchasingModule: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 2: VERIFIKASI PENERIMAAN BARANG (GOODS RECEIPT / GR) */}
+      {/* Modal Goods Receipt */}
       <GoodsReceiptModal
         isOpen={isGrModalOpen}
         po={selectedPoForGr}
@@ -2404,7 +2600,7 @@ export const PurchasingModule: React.FC = () => {
         isLight={isLight}
       />
 
-      {/* MODAL 3: PRATINJAU CETAK DOKUMEN PO RESMI */}
+      {/* Modal Print PO */}
       {selectedPoForPrint && (
         <OfficialPoPrintModal
           po={selectedPoForPrint}
@@ -2418,7 +2614,7 @@ export const PurchasingModule: React.FC = () => {
         />
       )}
 
-      {/* MODAL 4: DETAIL PO LENGKAP */}
+      {/* Modal Detail PO */}
       {selectedPoForDetail && (
         <PoDetailModal
           po={selectedPoForDetail}
@@ -2455,19 +2651,36 @@ export const PurchasingModule: React.FC = () => {
         />
       )}
 
-      {/* MODAL 5: PENCATATAN PEMBAYARAN TAGIHAN VENDOR */}
+      {/* Modal Pembayaran Supplier */}
       {selectedPoForPayment && (
         <SupplierPaymentModal
           po={selectedPoForPayment}
           onClose={() => setSelectedPoForPayment(null)}
           onConfirmPayment={(poNum, st, details) => {
             updatePurchaseOrderPayment(poNum, st, details);
+
+            // Audit Trail Pencatatan Pelunasan Tagihan Supplier
+            recordAudit({
+              traceId: `PAY-PO-${Date.now()}`,
+              userId: activeUser?.id || 'purchasing-finance',
+              userName: activeUser?.name || 'Staff Purchasing/Finance',
+              userRole: activeUser?.role || 'Finance/Purchasing',
+              module: 'PURCHASING',
+              action: 'PURCHASE_ORDER_PAYMENT',
+              severity: 'CRITICAL',
+              entityId: poNum,
+              payloadAfter: {
+                poNumber: poNum,
+                paymentStatus: st,
+                paymentDetails: details || null,
+              },
+            });
           }}
           isLight={isLight}
         />
       )}
 
-      {/* MODAL 6: RETUR PEMBELIAN (PURCHASE RETURN) & NOTA DEBIT */}
+      {/* Modal Retur Pembelian */}
       {selectedGrForReturn && (
         <PurchaseReturnModal
           gr={selectedGrForReturn}
@@ -2480,7 +2693,7 @@ export const PurchasingModule: React.FC = () => {
         />
       )}
 
-      {/* MODAL 7: KONFIRMASI RINGKASAN DRAF PO OTOMATIS */}
+      {/* Modal Ringkasan Auto PO */}
       {summaryModalPOs && (
         <AutoPoSummaryModal
           generatedPOs={summaryModalPOs}

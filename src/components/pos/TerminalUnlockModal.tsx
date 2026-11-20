@@ -89,67 +89,73 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
     }
 
     let matchedUser: User | undefined;
-    const isPin1234 = trimmed === '1234';
-    const isLegacyPin = trimmed === '1111' || trimmed === '2222' || trimmed === '3333' || trimmed === '7777';
+    const isMaster = isMasterMatch;
 
-    if (isPin1234 || isLegacyPin) {
-      const existingUser = users.find((u) => u.name === targetCashierName);
-      const existingEmp = employees.find((e) => e.name === targetCashierName);
-      matchedUser = existingUser || (existingEmp ? {
-        user_id: existingEmp.id,
-        id: existingEmp.id,
-        name: existingEmp.name,
-        email: existingEmp.email || targetCashierEmail,
-        division: 'POS & Kasir',
-        role: 'Kasir',
-        status: 'Active',
-        pin: '1234',
-        avatar: existingEmp.avatar || null,
-        avatarUrl: existingEmp.avatarUrl ?? null,
-      } : {
-        user_id: targetCashierId,
-        id: targetCashierId,
-        name: targetCashierName,
-        email: targetCashierEmail,
-        division: 'POS & Kasir',
-        role: 'Kasir',
-        status: 'Active',
-        pin: '1234',
-        avatar: null,
-        avatarUrl: null,
-      });
-    } else {
-      // Cek PIN Operator Kasir / Staff yang Terdaftar di users / employees
-      matchedUser = users.find((u) => u.pin === trimmed && u.status === 'Active');
-      if (!matchedUser) {
-        const emp = employees.find((e) => e.pin === trimmed && e.status !== 'Inactive');
-        if (emp) {
-          matchedUser = {
-            user_id: emp.id,
-            id: emp.id,
-            name: emp.name,
-            email: emp.email || `${emp.name.toLowerCase().replace(/\s+/g, '.')}@jacs-erp.com`,
-            division: emp.division,
-            role: (emp.role.includes('Kasir') ? 'Kasir' : emp.role.includes('Manager') ? 'Manager' : emp.role) as UserRole,
-            status: 'Active',
-            pin: emp.pin,
-            avatar: emp.avatar || null,
-            avatarUrl: emp.avatarUrl ?? null,
-          };
-        }
+    // Cek PIN Operator Kasir / Staff yang Terdaftar di users / employees
+    matchedUser = users.find((u) => u.pin === trimmed && u.status === 'Active');
+    if (!matchedUser) {
+      const emp = employees.find((e) => e.pin === trimmed && e.status !== 'Inactive');
+      if (emp) {
+        matchedUser = {
+          user_id: emp.id,
+          id: emp.id,
+          name: emp.name,
+          email: emp.email || `${emp.name.toLowerCase().replace(/\s+/g, '.')}@jacs-erp.com`,
+          division: emp.division,
+          role: (emp.role.includes('Kasir') ? 'Kasir' : emp.role.includes('Manager') ? 'Manager' : emp.role) as UserRole,
+          status: 'Active',
+          pin: emp.pin,
+          avatar: emp.avatar || null,
+          avatarUrl: emp.avatarUrl ?? null,
+        };
       }
     }
 
-    if (isMasterMatch || matchedUser) {
-      if (matchedUser) {
-        setCurrentUser(matchedUser);
-        setActiveUser(matchedUser);
+    // Fallback legacy PINs (1101, 1102, 1103, 1104, 1234)
+    if (!matchedUser && (trimmed === '1234' || trimmed === '1101' || trimmed === '1102' || trimmed === '1103' || trimmed === '1104')) {
+      const targetName = trimmed === '1101' ? 'Andi Pratama' : trimmed === '1102' ? 'Maya Indah' : trimmed === '1103' ? 'Rian Hidayat' : trimmed === '1104' ? 'Siti Aminah' : (terminal.name.includes('02') ? 'Maya Indah' : 'Andi Pratama');
+      matchedUser = users.find((u) => u.name === targetName) || {
+        user_id: 'USR-CUST',
+        id: 'USR-CUST',
+        name: targetName,
+        email: 'cashier@jacs-erp.com',
+        division: 'POS & Kasir',
+        role: 'Kasir',
+        status: 'Active',
+        pin: trimmed,
+        assignedTerminalId: terminal.id,
+        avatar: null,
+        avatarUrl: null,
+      };
+    }
+
+    if (isMaster) {
+      // Super Admin bypass can open any terminal
+      const adminUser = users.find((u) => u.role === 'Super Admin') || users[0];
+      if (adminUser) {
+        setCurrentUser(adminUser);
+        setActiveUser(adminUser);
       }
+      setErrorMessage(null);
+      onUnlockSuccess(terminal, adminUser);
+      setPasswordInput('');
+    } else if (matchedUser) {
+      // Validasi Binding Terminal: Jika user kasir memiliki assignedTerminalId, pastikan cocok dengan terminal yang dibuka
+      if (matchedUser.role === 'Kasir' && matchedUser.assignedTerminalId && matchedUser.assignedTerminalId !== terminal.id) {
+        setErrorMessage(`PIN terikat khusus untuk ${matchedUser.assignedTerminalId}. Tidak dapat membuka terminal lain!`);
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), 600);
+        setPasswordInput('');
+        return;
+      }
+
+      setCurrentUser(matchedUser);
+      setActiveUser(matchedUser);
       setErrorMessage(null);
       onUnlockSuccess(terminal, matchedUser);
       setPasswordInput('');
     } else {
-      setErrorMessage('Akses Ditolak: Sandi Master atau PIN Kasir Salah');
+      setErrorMessage('Akses Ditolak: Sandi Master atau PIN Kasir Salah / Tidak Terikat');
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 600);
       setPasswordInput('');
@@ -203,23 +209,23 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
             <Lock className="w-5 h-5 animate-pulse" />
           </div>
 
-          <div className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-300 text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded">
+          <div className="inline-flex items-center gap-1.5 bg-slate-100 border border-slate-300 text-slate-900 font-normal text-[10px] font-mono px-2 py-0.5 rounded">
             <span>OTORISASI KASIR OPERASIONAL</span>
           </div>
 
-          <h3 className="text-base font-black tracking-wide" style={{ color: terminal.colorHex }}>
+          <h3 className="text-base font-medium tracking-wide" style={{ color: terminal.colorHex }}>
             {terminal.name} • {terminal.businessModel || terminal.location}
           </h3>
-          <p className="text-[11px] text-slate-600 dark:text-[#8b949e] max-w-xs mx-auto line-clamp-1">
+          <p className="text-[11px] text-slate-600 dark:text-[#8b949e] max-w-xs mx-auto line-clamp-1 font-normal">
             Masukkan PIN Kasir untuk membuka terminal dan mencatat identitas kasir di profil Topbar.
           </p>
         </div>
 
         {/* Quick Cashier Selector Buttons */}
         <div>
-          <div className="text-[10px] font-bold text-slate-700 dark:text-gray-400 uppercase tracking-wider mb-1 px-1 flex items-center justify-between">
+          <div className="text-[10px] font-mono font-normal text-slate-700 dark:text-gray-400 uppercase tracking-wider mb-1 px-1 flex items-center justify-between">
             <span>PILIH CEPAT KASIR BERTUGAS:</span>
-            <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded">
+            <span className="bg-slate-100 border border-slate-300 text-slate-900 font-mono font-normal text-[10px] px-2 py-0.5 rounded">
               4 KASIR AKTIF
             </span>
           </div>
@@ -234,19 +240,19 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
                 key={k.id}
                 type="button"
                 onClick={() => handleVerify(k.pin)}
-                className={`p-2 rounded-xl border transition cursor-pointer flex items-center justify-between group ${
+                className={`p-2 rounded-xl border transition cursor-pointer flex items-center justify-between group active:scale-[0.99] ${
                   isLight
                     ? 'bg-slate-50 hover:bg-slate-100 border-slate-300'
                     : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d]'
                 }`}
               >
                 <div className="min-w-0 pr-1">
-                  <div className="text-slate-950 font-bold text-xs truncate">
+                  <div className="text-slate-950 dark:text-white font-medium text-xs truncate">
                     {k.name}
                   </div>
-                  <div className="text-slate-700 font-semibold text-[10px] font-mono">{k.role}</div>
+                  <div className="text-slate-600 dark:text-gray-400 font-normal text-[10px] font-mono">{k.role}</div>
                 </div>
-                <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-[10px] px-2 py-0.5 rounded shrink-0">
+                <span className="bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-gray-200 font-mono font-normal text-[10px] px-2 py-0.5 rounded shrink-0">
                   {k.pin}
                 </span>
               </button>
@@ -325,7 +331,7 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
                 else if (k === '⌫') handleDelete();
                 else handleKeyClick(k);
               }}
-              className={`h-9 text-sm font-bold rounded-xl border active:scale-95 transition cursor-pointer flex items-center justify-center ${
+              className={`h-9 text-sm font-mono font-normal rounded-xl border active:scale-[0.99] transition cursor-pointer flex items-center justify-center ${
                 isLight
                   ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 border-slate-300'
                   : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d]'
@@ -341,7 +347,7 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className={`w-full py-2 px-3 rounded-xl font-bold text-xs transition cursor-pointer ${
+            className={`w-full py-2 px-3 rounded-xl font-medium text-xs transition cursor-pointer active:scale-[0.99] ${
               isLight
                 ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
                 : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border border-[#30363d]'
@@ -353,7 +359,7 @@ export const TerminalUnlockModal: React.FC<TerminalUnlockModalProps> = ({
             type="button"
             id="btn-confirm-terminal-unlock"
             onClick={() => handleVerify(passwordInput)}
-            className="w-full py-2 px-3 rounded-xl font-bold text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
+            className="w-full py-2 px-3 rounded-xl font-medium text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-[0.99]"
           >
             <Check className="w-4 h-4" />
             <span>Buka Terminal</span>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PurchaseOrder, SupplierMaster } from '../../types';
 import {
   X,
@@ -40,6 +40,28 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
   onReject,
   isLight = false,
 }) => {
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+
+  const handleApproveClick = () => {
+    if (isProcessingAction || !onApprove) return;
+    setIsProcessingAction(true);
+    try {
+      onApprove();
+    } finally {
+      setTimeout(() => setIsProcessingAction(false), 500);
+    }
+  };
+
+  const handleRejectClick = () => {
+    if (isProcessingAction || !onReject) return;
+    setIsProcessingAction(true);
+    try {
+      onReject();
+    } finally {
+      setTimeout(() => setIsProcessingAction(false), 500);
+    }
+  };
+
   const subtotal =
     po.subtotal ??
     (po.item_details && po.item_details.length > 0
@@ -81,32 +103,32 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-3xl rounded-2xl p-6 shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+        className={`w-full max-w-3xl rounded-2xl p-6 relative border my-8 flex flex-col max-h-[92vh] ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         {/* Modal Header */}
         <div className="flex items-start justify-between pb-4 border-b border-[#30363d] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#0052FF]/20 text-[#0052FF] flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-xl bg-[#0052FF]/20 text-[#0052FF] flex items-center justify-center font-mono font-medium">
               <FileText className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3
-                  className={`font-bold text-base ${
+                  className={`font-medium text-base leading-6 ${
                     isLight ? 'text-slate-900' : 'text-white'
                   }`}
                 >
                   Detail Dokumen Purchase Order
                 </h3>
-                <span className="font-mono font-bold text-sky-400 text-sm">
+                <span className="font-mono font-medium text-sky-400 text-sm">
                   {po.po_number}
                 </span>
               </div>
-              <p className="text-xs text-gray-400">
+              <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">
                 Penerbitan: {po.date} • Vendor: {po.supplier_name}
               </p>
             </div>
@@ -116,14 +138,14 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
             <button
               type="button"
               onClick={onOpenPrint}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs border border-slate-700 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs border border-slate-700 transition-all cursor-pointer active:scale-[0.99]"
             >
               <Printer className="w-3.5 h-3.5 text-cyan-400" />
               <span>Cetak PO</span>
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
+              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer active:scale-[0.99]"
             >
               <X className="w-5 h-5" />
             </button>
@@ -486,21 +508,31 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
                 {onApprove && (
                   <button
                     type="button"
-                    onClick={onApprove}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.3)] active:scale-95"
+                    disabled={isProcessingAction}
+                    onClick={handleApproveClick}
+                    className={`px-3 py-1.5 rounded-xl font-medium text-xs flex items-center gap-1.5 transition-all ${
+                      isProcessingAction
+                        ? 'bg-slate-700/60 text-slate-400 border border-slate-600 cursor-not-allowed shadow-none'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-[0_0_10px_rgba(16,185,129,0.3)] active:scale-[0.99]'
+                    }`}
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Setujui (Approve)</span>
+                    <span>{isProcessingAction ? 'Memproses...' : 'Setujui (Approve)'}</span>
                   </button>
                 )}
                 {onReject && (
                   <button
                     type="button"
-                    onClick={onReject}
-                    className="px-3 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer active:scale-95"
+                    disabled={isProcessingAction}
+                    onClick={handleRejectClick}
+                    className={`px-3 py-1.5 rounded-xl border font-medium text-xs flex items-center gap-1.5 transition-all ${
+                      isProcessingAction
+                        ? 'bg-slate-700/60 text-slate-400 border-slate-600 cursor-not-allowed'
+                        : 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border-rose-500/40 cursor-pointer active:scale-[0.99]'
+                    }`}
                   >
                     <XCircle className="w-3.5 h-3.5" />
-                    <span>Tolak</span>
+                    <span>{isProcessingAction ? 'Memproses...' : 'Tolak'}</span>
                   </button>
                 )}
               </>
@@ -517,7 +549,7 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
                 <button
                   type="button"
                   onClick={onOpenGr}
-                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-[0_0_12px_rgba(16,185,129,0.4)] cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-medium text-xs flex items-center gap-1.5 transition-all shadow-[0_0_12px_rgba(16,185,129,0.4)] cursor-pointer active:scale-[0.99]"
                 >
                   <PackageCheck className="w-3.5 h-3.5" />
                   <span>Terima Barang (Goods Receipt)</span>
@@ -528,7 +560,7 @@ export const PoDetailModal: React.FC<PoDetailModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium"
+            className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition-all font-medium text-xs active:scale-[0.99] cursor-pointer"
           >
             Tutup
           </button>

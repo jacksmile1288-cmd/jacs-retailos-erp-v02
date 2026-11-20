@@ -2,18 +2,92 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --surface-card: #ffffff;
+  --surface-card-subtle: #f8fafc;
+  --surface-border: #cbd5e1;
+  --surface-border-strong: #94a3b8;
+  --bar-header-bg: #f1f5f9;
+  --bar-accent-bg: #e2e8f0;
+  
+  --text-headline: #0f172a;       /* Hitam pekat tajam untuk judul & bar */
+  --text-body: #1e293b;           /* Teks konten & tabel */
+  --text-muted: #475569;          /* Sub-label & helper text - dilarang pudar */
+  --text-danger: #b91c1c;         /* Angka macet / peringatan tajam */
+}
+
+html:not(.light) {
+  --surface-card: #161b22;
+  --surface-card-subtle: #0d1117;
+  --surface-border: #30363d;
+  --surface-border-strong: #484f58;
+  --bar-header-bg: #161b22;
+  --bar-accent-bg: #21262d;
+  
+  --text-headline: #f0f6fc;
+  --text-body: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-danger: #f87171;
+}
+
+/* Semantic Design Tokens Utility Classes */
+.app-card {
+  background-color: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.app-card-subtle {
+  background-color: var(--surface-card-subtle);
+  border: 1px solid var(--surface-border);
+  border-radius: 0.75rem;
+}
+
+.app-bar-header {
+  background-color: var(--bar-header-bg);
+  border: 1px solid var(--surface-border);
+  color: var(--text-headline);
+  font-weight: 700;
+}
+
+.app-text-title {
+  color: var(--text-headline) !important;
+  font-weight: 700;
+}
+
+.app-text-body {
+  color: var(--text-body) !important;
+  font-weight: 600;
+}
+
+.app-text-sub {
+  color: var(--text-muted) !important;
+  font-weight: 500;
+}
+
 @layer base {
-  html, body {
-    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  html {
+    font-size: 14px;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
     overflow-x: hidden;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Plus Jakarta Sans', 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-weight: 600;
     letter-spacing: -0.01em;
   }
@@ -24,23 +98,79 @@
     color: #e6edf3;
   }
 
-  /* Anti-Blur High-Contrast Light Mode */
+  /* Soft Daylight Light Mode */
   html.light, html.light body, body:not(.dark) {
-    background-color: #F1F5F9 !important;
+    background-color: #E8EDF4 !important;
     color: #0F172A !important;
     font-weight: 500;
   }
 
-  html.light h1,
-  html.light h2,
-  html.light h3,
-  html.light h4,
-  html.light h5,
-  html.light h6,
-  html.light th {
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  html.light h1:not(.font-medium):not(.font-normal),
+  html.light h2:not(.font-medium):not(.font-normal),
+  html.light h3:not(.font-medium):not(.font-normal),
+  html.light h4:not(.font-medium):not(.font-normal),
+  html.light h5:not(.font-medium):not(.font-normal),
+  html.light h6:not(.font-medium):not(.font-normal) {
     color: #0F172A !important;
-    font-weight: 600 !important;
-    letter-spacing: -0.01em;
+    font-weight: 700 !important;
+    letter-spacing: -0.015em;
+  }
+
+  html.light h1.font-medium,
+  html.light h2.font-medium,
+  html.light h3.font-medium,
+  html.light h4.font-medium,
+  html.light h5.font-medium,
+  html.light h6.font-medium {
+    color: #0F172A !important;
+    font-weight: 500 !important;
+  }
+
+  html.light h1.font-normal,
+  html.light h2.font-normal,
+  html.light h3.font-normal,
+  html.light h4.font-normal,
+  html.light h5.font-normal,
+  html.light h6.font-normal {
+    color: #0F172A !important;
+    font-weight: 400 !important;
+  }
+
+  html.light .superadmin-console table thead th,
+  html.light #warehouse-module table thead th,
+  html.light .warehouse-modal table thead th,
+  html.light #hr-module-container table thead th {
+    font-weight: 400 !important;
+  }
+
+  html.light #warehouse-module table thead th,
+  html.light .warehouse-modal table thead th,
+  html.light #hr-module-container table thead th {
+    font-size: 11px !important;
+  }
+
+  html.light #warehouse-module table tbody td,
+  html.light #warehouse-module table tbody td .font-mono,
+  html.light .warehouse-modal table tbody td,
+  html.light .warehouse-modal table tbody td .font-mono,
+  html.light #hr-module-container table tbody td,
+  html.light #hr-module-container table tbody td .font-mono {
+    font-weight: 400 !important;
+  }
+
+  html.light #warehouse-module input,
+  html.light #warehouse-module select,
+  html.light .warehouse-modal input,
+  html.light .warehouse-modal select,
+  html.light #hr-module-container input,
+  html.light #hr-module-container select,
+  html.light #hr-module-container textarea {
+    font-weight: 400 !important;
   }
 
   /* Targeted rules for Sidebar About System & Dev button */
@@ -53,7 +183,7 @@
   }
   body:not(.dark) #btn-sidebar-about-system span:last-child,
   html.light #btn-sidebar-about-system span:last-child {
-    color: #475569 !important;
+    color: #334155 !important;
   }
   html.dark #btn-sidebar-about-system span:last-child {
     color: #cbd5e1 !important;
@@ -71,88 +201,156 @@
   transform: translateY(-2px);
 }
 
-/* Light Mode Overrides for UI Cards and Panels */
-html.light .bg-\[\#0d1117\] {
-  background-color: #F1F5F9 !important;
-}
+/* =========================================================================
+   COMPREHENSIVE HIGH-CONTRAST LIGHT MODE REFACTOR SYSTEM
+   ========================================================================= */
 
-html.light .bg-\[\#161b22\] {
-  background-color: #FFFFFF !important;
-  border-color: #CBD5E1 !important;
-  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
-}
-
-html.light .bg-\[\#12161c\] {
-  background-color: #F8FAFC !important;
-  border-color: #CBD5E1 !important;
-}
-
-html.light .bg-\[\#1c2128\] {
-  background-color: #F8FAFC !important;
-  border-color: #CBD5E1 !important;
-}
-
-html.light .bg-\[\#21262d\] {
-  background-color: #E2E8F0 !important;
-  border-color: #CBD5E1 !important;
-  color: #0F172A !important;
-}
-
-html.light .border-\[\#30363d\] {
-  border-color: #CBD5E1 !important;
-}
-
-html.light .border-\[\#21262d\] {
-  border-color: #CBD5E1 !important;
-}
-
-html.light .text-\[\#e6edf3\] {
-  color: #0F172A !important;
-}
-
+/* 1. High-Contrast Typography & Anti-Faint Rules */
+html.light .text-slate-400,
+html.light .text-gray-400,
+html.light .text-zinc-400,
+html.light .text-neutral-400,
 html.light .text-\[\#8b949e\] {
-  color: #475569 !important;
-  font-weight: 500 !important;
+  color: #475569 !important; /* text-slate-600 */
+  font-weight: 500;
 }
 
-html.light .text-gray-400 {
-  color: #475569 !important;
+html.light .text-slate-300,
+html.light .text-gray-300,
+html.light .text-zinc-300,
+html.light .text-neutral-300 {
+  color: #334155 !important; /* text-slate-700 */
+  font-weight: 500;
 }
 
-html.light .text-gray-300 {
-  color: #334155 !important;
+html.light .text-slate-500,
+html.light .text-gray-500 {
+  color: #475569 !important; /* text-slate-600 */
+  font-weight: 500;
 }
 
+html.light .text-\[\#e6edf3\],
 html.light .text-gray-200 {
   color: #0F172A !important;
 }
 
-/* Status Green Accent (#059669) in Light Mode */
+/* Status Green Accent in Light Mode */
 html.light .text-\[\#10B981\] {
   color: #059669 !important;
 }
 html.light .text-emerald-400 {
-  color: #059669 !important;
+  color: #047857 !important;
 }
 html.light .text-emerald-500 {
   color: #059669 !important;
 }
 
-/* Ensure buttons and badges with dark/saturated backgrounds keep crisp white text */
-html.light button.bg-\[\#0052FF\],
-html.light button.bg-\[\#0052FF\] *,
-html.light .bg-\[\#0052FF\] {
-  color: #FFFFFF !important;
+/* Preserve bright high-contrast text inside dark Visual Log Terminal in Light Mode */
+html.light #visual-log-terminal-box {
+  background-color: rgba(30, 41, 59, 0.95) !important;
+  color: #e2e8f0 !important;
+}
+html.light #visual-log-terminal-box .text-slate-200 {
+  color: #e2e8f0 !important;
+}
+html.light #visual-log-terminal-box .text-emerald-400 {
+  color: #34d399 !important;
+}
+html.light #visual-log-terminal-box .text-amber-300 {
+  color: #fcd34d !important;
+}
+html.light #visual-log-terminal-box .text-rose-400 {
+  color: #fb7185 !important;
+}
+html.light #visual-log-terminal-box .text-cyan-300 {
+  color: #67e8f9 !important;
+}
+html.light #visual-log-terminal-box .text-sky-300 {
+  color: #7dd3fc !important;
 }
 
-html.light button.bg-emerald-600,
-html.light button.bg-emerald-600 *,
-html.light button.bg-\[\#059669\],
-html.light button.bg-\[\#059669\] * {
-  color: #FFFFFF !important;
+/* 2. Top Bars, Navbar & Navigation Submenus */
+html.light #app-topbar,
+html.light header {
+  background-color: #F6F8FB !important;
+  border-bottom: 1px solid #CBD5E1 !important;
+  color: #0F172A !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05);
 }
 
-/* Light mode specific input styling */
+html.light aside {
+  background-color: #F6F8FB !important;
+  border-right: 1px solid #CBD5E1 !important;
+}
+
+/* 3. Metric Cards, Content Panels & Data Containers */
+html.light .bg-\[\#161b22\] {
+  background-color: #F6F8FB !important;
+  border-color: #CBD5E1 !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
+  color: #0F172A !important;
+}
+
+html.light .bg-\[\#0d1117\] {
+  background-color: #F8FAFC !important;
+  border-color: #CBD5E1 !important;
+}
+
+html.light .bg-\[\#12161c\],
+html.light .bg-\[\#1c2128\] {
+  background-color: #F8FAFC !important;
+  border-color: #E2E8F0 !important;
+}
+
+html.light .bg-\[\#21262d\] {
+  background-color: #F1F5F9 !important;
+  border-color: #CBD5E1 !important;
+  color: #1E293B !important;
+}
+
+html.light .border-\[\#30363d\],
+html.light .border-\[\#21262d\] {
+  border-color: #CBD5E1 !important;
+}
+
+/* 4. Table Headers, Rows and Cells */
+html.light table thead {
+  background-color: #F1F5F9 !important;
+  color: #0F172A !important;
+  border-bottom: 2px solid #CBD5E1 !important;
+}
+
+html.light table thead th {
+  color: #0F172A !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #CBD5E1 !important;
+}
+
+html.light table tbody tr {
+  background-color: #FFFFFF;
+  border-bottom: 1px solid #E2E8F0 !important;
+  color: #1E293B !important;
+  font-weight: 500;
+}
+
+html.light table tbody tr:nth-child(even) {
+  background-color: #F8FAFC;
+}
+
+html.light table tbody td {
+  color: #1E293B !important;
+  font-weight: 500;
+}
+
+html.light table tbody td .font-mono {
+  color: #0F172A !important;
+  font-weight: 600;
+}
+
+/* 5. Inputs, Selects & Search Bars */
 html.light input,
 html.light select,
 html.light textarea {
@@ -162,9 +360,117 @@ html.light textarea {
   font-weight: 500;
 }
 
+html.light input:focus,
+html.light select:focus,
+html.light textarea:focus {
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 1px #2563EB !important;
+  outline: none !important;
+}
+
 html.light input::placeholder,
 html.light textarea::placeholder {
   color: #64748B !important;
+}
+
+/* 6. High-Contrast Status Badges & Tags */
+html.light .bg-emerald-500\/10,
+html.light .bg-emerald-500\/15,
+html.light .bg-emerald-500\/20,
+html.light .bg-emerald-500\/25,
+html.light .bg-emerald-500\/30 {
+  background-color: #D1FAE5 !important;
+  color: #065F46 !important;
+  border-color: #6EE7B7 !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-rose-500\/10,
+html.light .bg-rose-500\/15,
+html.light .bg-rose-500\/20,
+html.light .bg-rose-500\/25,
+html.light .bg-rose-500\/30 {
+  background-color: #FFE4E6 !important;
+  color: #9F1239 !important;
+  border-color: #FDA4AF !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-amber-500\/10,
+html.light .bg-amber-500\/15,
+html.light .bg-amber-500\/20,
+html.light .bg-amber-500\/25,
+html.light .bg-amber-500\/30 {
+  background-color: #FEF3C7 !important;
+  color: #92400E !important;
+  border-color: #FCD34D !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-blue-500\/10,
+html.light .bg-blue-500\/15,
+html.light .bg-blue-500\/20,
+html.light .bg-blue-500\/25,
+html.light .bg-blue-500\/30 {
+  background-color: #DBEAFE !important;
+  color: #1E40AF !important;
+  border-color: #93C5FD !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-purple-500\/10,
+html.light .bg-purple-500\/15,
+html.light .bg-purple-500\/20,
+html.light .bg-purple-500\/25,
+html.light .bg-purple-500\/30 {
+  background-color: #F3E8FF !important;
+  color: #6B21A8 !important;
+  border-color: #D8B4FE !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-teal-500\/10,
+html.light .bg-teal-500\/15,
+html.light .bg-teal-500\/20,
+html.light .bg-teal-500\/25,
+html.light .bg-teal-500\/30 {
+  background-color: #CCFBF1 !important;
+  color: #115E59 !important;
+  border-color: #5EEAD4 !important;
+  font-weight: 700 !important;
+}
+
+html.light .bg-cyan-500\/10,
+html.light .bg-cyan-500\/15,
+html.light .bg-cyan-500\/20,
+html.light .bg-cyan-500\/25,
+html.light .bg-cyan-500\/30 {
+  background-color: #CFFAFE !important;
+  color: #155E75 !important;
+  border-color: #67E8F9 !important;
+  font-weight: 700 !important;
+}
+
+/* 7. Solid Vibrant Action Buttons Keep Crisp White Text in Light Mode */
+html.light button.bg-blue-600,
+html.light button.bg-blue-600 *,
+html.light button.bg-\[\#0052FF\],
+html.light button.bg-\[\#0052FF\] *,
+html.light button.bg-emerald-600,
+html.light button.bg-emerald-600 *,
+html.light button.bg-rose-600,
+html.light button.bg-rose-600 *,
+html.light button.bg-amber-600,
+html.light button.bg-amber-600 *,
+html.light button.bg-purple-600,
+html.light button.bg-purple-600 *,
+html.light button.bg-teal-600,
+html.light button.bg-teal-600 *,
+html.light button.bg-cyan-600,
+html.light button.bg-cyan-600 *,
+html.light button.bg-indigo-600,
+html.light button.bg-indigo-600 * {
+  color: #FFFFFF !important;
 }
 
 /* Custom scrollbars */

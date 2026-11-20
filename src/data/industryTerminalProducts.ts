@@ -1,4 +1,4 @@
-import { Product, CartItem } from '../types';
+import { Product, CartItem, FashionVariantCell } from '../types';
 
 export type TerminalIndustry =
   | 'retail'        // KASIR 01, 03 (Modern Retail & Wholesale)
@@ -8,7 +8,8 @@ export type TerminalIndustry =
   | 'building'      // KASIR 06 (Building Materials & Hardware) & KASIR 09 (Building & Hardware Depot)
   | 'electronics'   // KASIR 07 (Electronics & Gadgets)
   | 'workshop'      // KASIR 08 (Automotive & Workshop)
-  | 'salon';        // KASIR 10 (Salon & Barbershop)
+  | 'salon'         // KASIR 10 (Salon & Barbershop)
+  | 'laundry';      // POS Laundry Multi-Satuan
 
 /**
  * Mendeteksi jenis industri dari terminal kasir yang sedang aktif.
@@ -37,6 +38,7 @@ export function getTerminalIndustry(terminal?: {
   if (modelType === 'building') return 'building';
   if (modelType === 'electronics' || modelType === 'gadget') return 'electronics';
   if (modelType === 'workshop' || modelType === 'automotive') return 'workshop';
+  if (modelType === 'laundry') return 'laundry';
   if (modelType === 'salon' || modelType === 'service' || modelType === 'services') return 'salon';
 
   // 0b. Prioritaskan businessModel jika secara eksplisit didefinisikan
@@ -97,6 +99,13 @@ export function getTerminalIndustry(terminal?: {
     businessModel.includes('automotive')
   ) {
     return 'workshop';
+  }
+  if (
+    businessModel.includes('laundry') ||
+    businessModel.includes('binatu') ||
+    businessModel.includes('kiloan')
+  ) {
+    return 'laundry';
   }
   if (
     businessModel.includes('salon') ||
@@ -333,14 +342,14 @@ export const RETAIL_WHOLESALE_PRODUCTS: Product[] = [
   },
 ];
 
-// 2. KASIR 02 (Food & Beverage / F&B)
+// 2. KASIR 02 (Food & Beverage / F&B - 18 Menu Lengkap Resto, Kafe & Bakery)
 export const FNB_RESTAURANT_PRODUCTS: Product[] = [
   {
     id: 'FNB-KOP-AREN',
     plu: 'FNB-KOP-AREN',
     barcode: '899200200001',
     name: 'Kopi Susu Gula Aren Signature',
-    category: 'Minuman Kopi',
+    category: 'Kopi',
     brand: 'Resto Cafe',
     sell_price: 22000,
     cost_price: 8500,
@@ -354,14 +363,28 @@ export const FNB_RESTAURANT_PRODUCTS: Product[] = [
     itemType: 'MENU_FB',
     image: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?w=400&auto=format&fit=crop&q=80',
     description: 'Perpaduan espresso arabica, fresh milk cream, dan sirup gula aren murni.',
-    recipeSummary: 'Espresso Blend, Susu Segar Pasteurisasi, Sirup Gula Aren Asli',
+    recipeSummary: 'Biji Kopi Espresso Blend 18gr, Susu Fresh Milk UHT 150ml, Gula Aren Cair 25ml, Paper Cup 16oz 1pcs',
+    costing: {
+      rawMaterialCost: 8500,
+      operationalCost: 0,
+      targetMarginPercent: 61,
+      recommendedPrice: 22000,
+      actualPrice: 22000,
+      totalCost: 8500,
+    },
+    recipe: [
+      { ingredientId: 'RM-FNB-012', name: 'Biji Kopi Espresso Blend', qty: 18, unit: 'gr', costPerUnit: 200 },
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 150, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 25, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
   },
   {
     id: 'FNB-ESP-SHOT',
     plu: 'FNB-ESP-SHOT',
     barcode: '899200200002',
     name: 'Espresso Roast Single / Double Shot',
-    category: 'Minuman Kopi',
+    category: 'Kopi',
     brand: 'Resto Cafe',
     sell_price: 18000,
     cost_price: 5000,
@@ -375,7 +398,19 @@ export const FNB_RESTAURANT_PRODUCTS: Product[] = [
     itemType: 'MENU_FB',
     image: 'https://images.unsplash.com/photo-1510707577719-ae7c14805e3a?w=400&auto=format&fit=crop&q=80',
     description: 'Ekstraksi kopi murni dengan crema emas tebal, pilihan Single / Double Shot.',
-    recipeSummary: 'Biji Kopi Arabica Gayo & Robusta 30g',
+    recipeSummary: 'Biji Kopi Espresso Blend 19gr, Paper Cup 16oz 1pcs',
+    costing: {
+      rawMaterialCost: 5000,
+      operationalCost: 0,
+      targetMarginPercent: 72,
+      recommendedPrice: 18000,
+      actualPrice: 18000,
+      totalCost: 5000,
+    },
+    recipe: [
+      { ingredientId: 'RM-FNB-012', name: 'Biji Kopi Espresso Blend', qty: 19, unit: 'gr', costPerUnit: 200 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
   },
   {
     id: 'FNB-NASGOR-SP',
@@ -398,7 +433,23 @@ export const FNB_RESTAURANT_PRODUCTS: Product[] = [
     spicyOption: true,
     toppingOption: true,
     description: 'Nasi goreng bumbu racik khas nusantara dengan suwiran ayam, acar, dan telur ceplok.',
-    recipeSummary: 'Beras Pulen, Telur Ayam, Daging Ayam Suwir, Bumbu Rempah Spesial',
+    recipeSummary: 'Beras Pulen 160gr, Daging Ayam 100gr, Telur Ayam 1pcs, Bumbu Rempah 45gr',
+    costing: {
+      rawMaterialCost: 15000,
+      operationalCost: 0,
+      targetMarginPercent: 53,
+      recommendedPrice: 32000,
+      actualPrice: 32000,
+      totalCost: 15000,
+    },
+    recipe: [
+      { ingredientId: 'RM-FNB-001', name: 'Beras Putih Pandan Wangi', qty: 160, unit: 'gr', costPerUnit: 15 },
+      { ingredientId: 'RM-FNB-003', name: 'Daging Ayam Fillet Segar', qty: 100, unit: 'gr', costPerUnit: 55 },
+      { ingredientId: 'RM-FNB-004', name: 'Telur Ayam Negeri Pilihan', qty: 1, unit: 'pcs', costPerUnit: 2000 },
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 45, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 25, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
   },
   {
     id: 'FNB-CRS-BTR',
@@ -419,14 +470,28 @@ export const FNB_RESTAURANT_PRODUCTS: Product[] = [
     itemType: 'MENU_FB',
     image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400&auto=format&fit=crop&q=80',
     description: 'Roti croissant renyah berlapis dengan aroma mentega Prancis yang gurih.',
-    recipeSummary: 'Tepung Terigu Import, French Butter 82%, Ragi & Gula',
+    recipeSummary: 'Pastry Butter Dough 1pcs, Keju Cheddar 1pcs, Fresh Milk 95ml, Box Eco 1pcs',
+    costing: {
+      rawMaterialCost: 11000,
+      operationalCost: 0,
+      targetMarginPercent: 56,
+      recommendedPrice: 25000,
+      actualPrice: 25000,
+      totalCost: 11000,
+    },
+    recipe: [
+      { ingredientId: 'RM-FNB-010', name: 'Roti Burger & Pastry Butter Dough', qty: 1, unit: 'pcs', costPerUnit: 5000 },
+      { ingredientId: 'RM-FNB-011', name: 'Keju Slice Melt Cheddar', qty: 1, unit: 'pcs', costPerUnit: 3000 },
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 95, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
   },
   {
     id: 'FNB-TEA-JUMBO',
     plu: 'FNB-TEA-JUMBO',
     barcode: '899200200005',
     name: 'Es Teh Manis Jumbo Segar',
-    category: 'Minuman Segar',
+    category: 'Non-Kopi / Segar',
     brand: 'Resto Kitchen',
     sell_price: 8000,
     cost_price: 2200,
@@ -440,7 +505,459 @@ export const FNB_RESTAURANT_PRODUCTS: Product[] = [
     itemType: 'MENU_FB',
     image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400&auto=format&fit=crop&q=80',
     description: 'Es teh seduh melati segar porsi jumbo 22oz pelepas dahaga.',
-    recipeSummary: 'Daun Teh Melati Pilihan, Gula Tebu Alami, Es Kristal Higienis',
+    recipeSummary: 'Daun Teh Melati Pilihan 2gr, Gula Cair 8ml, Paper Cup 16oz 1pcs',
+    costing: {
+      rawMaterialCost: 2200,
+      operationalCost: 0,
+      targetMarginPercent: 72,
+      recommendedPrice: 8000,
+      actualPrice: 8000,
+      totalCost: 2200,
+    },
+    recipe: [
+      { ingredientId: 'RM-FNB-015', name: 'Bubuk Matcha Jepang & Teh Melati', qty: 2, unit: 'gr', costPerUnit: 300 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 8, unit: 'ml', costPerUnit: 50 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+  },
+  {
+    id: 'FNB-001',
+    plu: 'FNB-001',
+    name: 'Nasi Goreng Spesial Wagyu',
+    itemType: 'MENU_FB',
+    category: 'Makanan Utama',
+    brand: 'Resto Kitchen',
+    sell_price: 45000,
+    cost_price: 25230,
+    unit: 'Porsi',
+    spicyOption: true,
+    toppingOption: true,
+    costing: {
+      rawMaterialCost: 24100,
+      operationalCost: 1500,
+      targetMarginPercent: 45,
+      recommendedPrice: 46500,
+      actualPrice: 45000,
+      totalCost: 25230,
+    },
+    stock: 50,
+    status: 'Active',
+    barcode: '899200100101',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1500,
+    recipeSummary: 'Beras Pandan Wangi 150gr, Wagyu Slice 80gr, Telur 1pcs, Bumbu Rempah 50gr',
+    recipe: [
+      { ingredientId: 'RM-FNB-001', name: 'Beras Putih Pandan Wangi', qty: 150, unit: 'gr', costPerUnit: 15 },
+      { ingredientId: 'RM-FNB-002', name: 'Daging Sapi Wagyu Slice', qty: 80, unit: 'gr', costPerUnit: 180 },
+      { ingredientId: 'RM-FNB-004', name: 'Telur Ayam Negeri Pilihan', qty: 1, unit: 'pcs', costPerUnit: 2000 },
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 50, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 25, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-002',
+    plu: 'FNB-002',
+    name: 'Ayam Bakar Madu Pedas Manis',
+    itemType: 'MENU_FB',
+    category: 'Makanan Utama',
+    brand: 'Resto Kitchen',
+    sell_price: 38000,
+    cost_price: 17148,
+    unit: 'Porsi',
+    spicyOption: true,
+    toppingOption: true,
+    costing: {
+      rawMaterialCost: 16360,
+      operationalCost: 1500,
+      targetMarginPercent: 45,
+      recommendedPrice: 36600,
+      actualPrice: 38000,
+      totalCost: 17148,
+    },
+    stock: 45,
+    status: 'Active',
+    barcode: '8992001002',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1500,
+    recipeSummary: 'Ayam Fillet Segar 200gr, Bumbu Rempah Madu 50gr, Minyak 20ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-003', name: 'Daging Ayam Fillet Segar', qty: 200, unit: 'gr', costPerUnit: 55 },
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 50, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 20, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-003',
+    plu: 'FNB-003',
+    name: 'Mie Goreng Seafood Hokkien',
+    itemType: 'MENU_FB',
+    category: 'Makanan Utama',
+    brand: 'Resto Kitchen',
+    sell_price: 42000,
+    cost_price: 19800,
+    unit: 'Porsi',
+    spicyOption: true,
+    toppingOption: true,
+    costing: {
+      rawMaterialCost: 16850,
+      operationalCost: 1500,
+      targetMarginPercent: 45,
+      recommendedPrice: 41800,
+      actualPrice: 42000,
+      totalCost: 19800,
+    },
+    stock: 40,
+    status: 'Active',
+    barcode: '8992001003',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1500,
+    recipeSummary: 'Mie Hokkien 180gr, Udang & Cumi 90gr, Telur 1pcs, Paper Bowl 1pcs',
+    recipe: [
+      { ingredientId: 'RM-FNB-007', name: 'Mie Telur Hokkien Segar', qty: 180, unit: 'gr', costPerUnit: 25 },
+      { ingredientId: 'RM-FNB-008', name: 'Udang & Cumi Seafood Segar', qty: 90, unit: 'gr', costPerUnit: 90 },
+      { ingredientId: 'RM-FNB-004', name: 'Telur Ayam Negeri Pilihan', qty: 1, unit: 'pcs', costPerUnit: 2000 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 25, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-019', name: 'Paper Bowl & Tutup 650ml', qty: 1, unit: 'pcs', costPerUnit: 1800 },
+    ],
+    image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-004',
+    plu: 'FNB-004',
+    name: 'Beef Burger Deluxe Double Cheese',
+    itemType: 'MENU_FB',
+    category: 'Makanan Utama',
+    brand: 'Cafe Kitchen',
+    sell_price: 55000,
+    cost_price: 28034,
+    unit: 'Porsi',
+    toppingOption: true,
+    costing: {
+      rawMaterialCost: 26770,
+      operationalCost: 1500,
+      targetMarginPercent: 40,
+      recommendedPrice: 52500,
+      actualPrice: 55000,
+      totalCost: 28034,
+    },
+    stock: 35,
+    status: 'Active',
+    barcode: '8992001004',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1500,
+    recipeSummary: 'Beef Patty 120g 1pcs, Brioche Bun 1pcs, Keju Cheddar 2pcs',
+    recipe: [
+      { ingredientId: 'RM-FNB-009', name: 'Beef Patty Gourmet 120g', qty: 1, unit: 'pcs', costPerUnit: 14000 },
+      { ingredientId: 'RM-FNB-010', name: 'Roti Burger & Pastry Butter Dough', qty: 1, unit: 'pcs', costPerUnit: 5000 },
+      { ingredientId: 'RM-FNB-011', name: 'Keju Slice Melt Cheddar', qty: 2, unit: 'pcs', costPerUnit: 3000 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 15, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-005',
+    plu: 'FNB-005',
+    name: 'Iced Caramel Macchiato',
+    itemType: 'MENU_FB',
+    category: 'Kopi',
+    brand: 'Barista Corner',
+    sell_price: 28000,
+    cost_price: 12068,
+    unit: 'Cup',
+    costing: {
+      rawMaterialCost: 9240,
+      operationalCost: 1200,
+      targetMarginPercent: 45,
+      recommendedPrice: 26500,
+      actualPrice: 28000,
+      totalCost: 12068,
+    },
+    stock: 80,
+    status: 'Active',
+    barcode: '8992001005',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1200,
+    recipeSummary: 'Espresso Blend 18gr, Fresh Milk 180ml, Karamel & Gula Aren 30ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-012', name: 'Biji Kopi Espresso Blend', qty: 18, unit: 'gr', costPerUnit: 200 },
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 180, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 30, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-006',
+    plu: 'FNB-006',
+    name: 'Signature Brown Sugar Boba Fresh Milk',
+    itemType: 'MENU_FB',
+    category: 'Non-Kopi / Segar',
+    brand: 'Barista Corner',
+    sell_price: 25000,
+    cost_price: 9800,
+    unit: 'Cup',
+    costing: {
+      rawMaterialCost: 6800,
+      operationalCost: 1200,
+      targetMarginPercent: 50,
+      recommendedPrice: 24000,
+      actualPrice: 25000,
+      totalCost: 9800,
+    },
+    stock: 90,
+    status: 'Active',
+    barcode: '8992001006',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1200,
+    recipeSummary: 'Fresh Milk UHT 220ml, Brown Sugar Aren 40ml, Paper Cup 16oz',
+    recipe: [
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 220, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 40, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1558857563-b37fe84234d3?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-007',
+    plu: 'FNB-007',
+    name: 'Es Matcha Latte Cream Cheese',
+    itemType: 'MENU_FB',
+    category: 'Non-Kopi / Segar',
+    brand: 'Barista Corner',
+    sell_price: 30000,
+    cost_price: 13065,
+    unit: 'Cup',
+    costing: {
+      rawMaterialCost: 9940,
+      operationalCost: 1200,
+      targetMarginPercent: 45,
+      recommendedPrice: 28300,
+      actualPrice: 30000,
+      totalCost: 13065,
+    },
+    stock: 60,
+    status: 'Active',
+    barcode: '8992001007',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1200,
+    recipeSummary: 'Bubuk Matcha Jepang 15gr, Fresh Milk 200ml, Gula Cair 20ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-015', name: 'Bubuk Matcha Jepang & Teh Melati', qty: 15, unit: 'gr', costPerUnit: 300 },
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 200, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 20, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1536256263959-770b48d82b0a?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-008',
+    plu: 'FNB-008',
+    name: 'Es Lemon Tea Mint Segar',
+    itemType: 'MENU_FB',
+    category: 'Non-Kopi / Segar',
+    brand: 'Barista Corner',
+    sell_price: 18000,
+    cost_price: 5200,
+    unit: 'Cup',
+    costing: {
+      rawMaterialCost: 4220,
+      operationalCost: 1000,
+      targetMarginPercent: 60,
+      recommendedPrice: 17500,
+      actualPrice: 18000,
+      totalCost: 5200,
+    },
+    stock: 100,
+    status: 'Active',
+    barcode: '8992001008',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1200,
+    recipeSummary: 'Daun Teh Melati 4gr, Sirup Gula Lemon 35ml, Paper Cup 16oz',
+    recipe: [
+      { ingredientId: 'RM-FNB-015', name: 'Bubuk Matcha Jepang & Teh Melati', qty: 4, unit: 'gr', costPerUnit: 300 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 35, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-009',
+    plu: 'FNB-009',
+    name: 'Crispy French Fries Truffle Mayo',
+    itemType: 'MENU_FB',
+    category: 'Pastry & Bakery',
+    brand: 'Cafe Kitchen',
+    sell_price: 24000,
+    cost_price: 12090,
+    unit: 'Porsi',
+    costing: {
+      rawMaterialCost: 10300,
+      operationalCost: 1200,
+      targetMarginPercent: 40,
+      recommendedPrice: 23500,
+      actualPrice: 24000,
+      totalCost: 12090,
+    },
+    stock: 70,
+    status: 'Active',
+    barcode: '8992001009',
+    businessModel: 'fnb',
+    wastePercent: 5,
+    packagingCost: 1200,
+    recipeSummary: 'Kentang Shoestring 160gr, Minyak Truffle & Mayo 10ml, Minyak 50ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-016', name: 'Kentang Beku Shoestring', qty: 160, unit: 'gr', costPerUnit: 40 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 50, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-017', name: 'Minyak Truffle & Saus Mayo', qty: 10, unit: 'ml', costPerUnit: 150 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-010',
+    plu: 'FNB-010',
+    name: 'Dimsum Ayam Udang Kukus (4 pcs)',
+    itemType: 'MENU_FB',
+    category: 'Pastry & Bakery',
+    brand: 'Resto Kitchen',
+    sell_price: 26000,
+    cost_price: 13000,
+    unit: 'Porsi',
+    businessModel: 'fnb',
+    costing: {
+      rawMaterialCost: 11800,
+      operationalCost: 1200,
+      targetMarginPercent: 40,
+      recommendedPrice: 25000,
+      actualPrice: 26000,
+      totalCost: 13000,
+    },
+    stock: 55,
+    status: 'Active',
+    barcode: '8992001010',
+    recipeSummary: 'Ayam Fillet 80gr, Udang Segar 50gr, Bumbu Rempah 20gr, Box Eco 1pcs',
+    recipe: [
+      { ingredientId: 'RM-FNB-003', name: 'Daging Ayam Fillet Segar', qty: 80, unit: 'gr', costPerUnit: 55 },
+      { ingredientId: 'RM-FNB-008', name: 'Udang & Cumi Seafood Segar', qty: 50, unit: 'gr', costPerUnit: 90 },
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 20, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1496116218417-1a781b1c416c?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-011',
+    plu: 'FNB-011',
+    name: 'Tahu Cabe Garam Crispy Gurih',
+    itemType: 'MENU_FB',
+    category: 'Pastry & Bakery',
+    brand: 'Resto Kitchen',
+    sell_price: 20000,
+    cost_price: 8000,
+    unit: 'Porsi',
+    businessModel: 'fnb',
+    spicyOption: true,
+    costing: {
+      rawMaterialCost: 7200,
+      operationalCost: 1000,
+      targetMarginPercent: 50,
+      recommendedPrice: 19600,
+      actualPrice: 20000,
+      totalCost: 8000,
+    },
+    stock: 65,
+    status: 'Active',
+    barcode: '8992001011',
+    recipeSummary: 'Bumbu Cabe Garam 50gr, Minyak Sawit 50ml, Saus Mayo 8ml, Box Eco 1pcs',
+    recipe: [
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 50, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-006', name: 'Minyak Goreng Sawit Chef', qty: 50, unit: 'ml', costPerUnit: 18 },
+      { ingredientId: 'RM-FNB-017', name: 'Minyak Truffle & Saus Mayo', qty: 8, unit: 'ml', costPerUnit: 150 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+    ],
+    image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-012',
+    plu: 'FNB-012',
+    name: 'Paket Hemat: Nasi Ayam Bakar + Es Lemon Tea',
+    itemType: 'MENU_FB',
+    category: 'Paket Hemat',
+    brand: 'Resto Kitchen',
+    sell_price: 48000,
+    cost_price: 24000,
+    unit: 'Paket',
+    businessModel: 'fnb',
+    spicyOption: true,
+    costing: {
+      rawMaterialCost: 22350,
+      operationalCost: 1500,
+      targetMarginPercent: 40,
+      recommendedPrice: 45800,
+      actualPrice: 48000,
+      totalCost: 24000,
+    },
+    stock: 30,
+    status: 'Active',
+    barcode: '8992001012',
+    recipeSummary: 'Beras 150gr, Ayam Fillet 200gr, Bumbu 50gr, Teh Melati 4gr, Gula 30ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-001', name: 'Beras Putih Pandan Wangi', qty: 150, unit: 'gr', costPerUnit: 15 },
+      { ingredientId: 'RM-FNB-003', name: 'Daging Ayam Fillet Segar', qty: 200, unit: 'gr', costPerUnit: 55 },
+      { ingredientId: 'RM-FNB-005', name: 'Bumbu Racik Rempah Spesial', qty: 50, unit: 'gr', costPerUnit: 70 },
+      { ingredientId: 'RM-FNB-015', name: 'Bubuk Matcha Jepang & Teh Melati', qty: 4, unit: 'gr', costPerUnit: 300 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 30, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=400&auto=format&fit=crop&q=80',
+  },
+  {
+    id: 'FNB-013',
+    plu: 'FNB-013',
+    name: 'Paket Komplit: Wagyu + Boba Milk + Fries',
+    itemType: 'MENU_FB',
+    category: 'Paket Hemat',
+    brand: 'Resto Kitchen',
+    sell_price: 82000,
+    cost_price: 42000,
+    unit: 'Paket',
+    businessModel: 'fnb',
+    spicyOption: true,
+    costing: {
+      rawMaterialCost: 39250,
+      operationalCost: 2500,
+      targetMarginPercent: 40,
+      recommendedPrice: 78300,
+      actualPrice: 82000,
+      totalCost: 42000,
+    },
+    stock: 25,
+    status: 'Active',
+    barcode: '8992001013',
+    recipeSummary: 'Beras 150gr, Wagyu 80gr, Kentang 150gr, Fresh Milk 200ml, Gula Aren 35ml',
+    recipe: [
+      { ingredientId: 'RM-FNB-001', name: 'Beras Putih Pandan Wangi', qty: 150, unit: 'gr', costPerUnit: 15 },
+      { ingredientId: 'RM-FNB-002', name: 'Daging Sapi Wagyu Slice', qty: 80, unit: 'gr', costPerUnit: 180 },
+      { ingredientId: 'RM-FNB-016', name: 'Kentang Beku Shoestring', qty: 150, unit: 'gr', costPerUnit: 40 },
+      { ingredientId: 'RM-FNB-014', name: 'Susu Fresh Milk UHT', qty: 200, unit: 'ml', costPerUnit: 16 },
+      { ingredientId: 'RM-FNB-013', name: 'Gula Aren Cair', qty: 35, unit: 'ml', costPerUnit: 52 },
+      { ingredientId: 'RM-FNB-018', name: 'Lunch Box Food Grade Eco', qty: 1, unit: 'pcs', costPerUnit: 1500 },
+      { ingredientId: 'RM-FNB-020', name: 'Paper Cup 16oz', qty: 1, unit: 'pcs', costPerUnit: 1200 },
+    ],
+    image: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400&auto=format&fit=crop&q=80',
   },
 ];
 
@@ -659,24 +1176,275 @@ export const PHARMACY_HEALTHCARE_PRODUCTS: Product[] = [
   },
 ];
 
-// 4. KASIR 05 (Fashion & Apparel)
+// 4. KASIR 05 (Fashion & Apparel / Butik)
+export const FASHION_STANDARD_SIZES = ['S', 'M', 'L', 'XL', 'XXL'] as const;
+export const FASHION_STANDARD_COLORS = ['Sage', 'Maroon', 'Hitam', 'Cream'] as const;
+
+export const FASHION_CATEGORY_SEEDS = [
+  { id: 'CAT-FASH-01', code: 'FASH-GMS', name: 'Gamis & Dress', department: 'Butik Muslimah' },
+  { id: 'CAT-FASH-02', code: 'FASH-KML', name: 'Kemeja & Atasan', department: 'Apparel Pria & Wanita' },
+  { id: 'CAT-FASH-03', code: 'FASH-HJB', name: 'Hijab & Scarf', department: 'Aksesori Muslimah' },
+  { id: 'CAT-FASH-04', code: 'FASH-KLT', name: 'Celana & Kulot', department: 'Bawahan & Tailoring' },
+  { id: 'CAT-FASH-05', code: 'FASH-OUT', name: 'Jaket & Outerwear', department: 'Outerwear & Koleksi' },
+];
+
+export function buildFashionVariantMatrix(
+  sizes: readonly string[] = FASHION_STANDARD_SIZES,
+  colors: readonly string[] = FASHION_STANDARD_COLORS,
+  skuPrefix: string = 'FASH',
+  stockPattern: number[] = [4, 6, 5, 4, 3]
+): FashionVariantCell[] {
+  const cells: FashionVariantCell[] = [];
+  sizes.forEach((size, sIdx) => {
+    colors.forEach((color, cIdx) => {
+      const baseQty = stockPattern[(sIdx + cIdx) % stockPattern.length] ?? 4;
+      const cleanSize = size.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const cleanColor = color.replace(/[^A-Za-z0-9]/g, '').slice(0, 4).toUpperCase();
+      cells.push({
+        size,
+        color,
+        stock: baseQty,
+        skuVariant: `${skuPrefix}-${cleanSize}-${cleanColor}`,
+      });
+    });
+  });
+  return cells;
+}
+
+export function sumVariantMatrixStock(matrix?: FashionVariantCell[] | null): number {
+  if (!Array.isArray(matrix) || matrix.length === 0) return 0;
+  return matrix.reduce((acc, cell) => acc + Math.max(0, Number(cell.stock) || 0), 0);
+}
+
+const GAMIS_HUMAIRA_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'GMS-HUM',
+  [5, 8, 7, 4, 3]
+);
+const KEMEJA_LINEN_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'KML-PRI',
+  [4, 7, 8, 5, 3]
+);
+const HIJAB_VOAL_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'HJB-VOAL',
+  [8, 12, 10, 8, 6]
+);
+const KULOT_HIGHWAIST_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'KLT-HW',
+  [5, 7, 6, 4, 2]
+);
+const KAOS_COMBED_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'TSH-C30',
+  [7, 9, 10, 8, 5]
+);
+const KEMEJA_OXFORD_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'KEM-OXF',
+  [3, 5, 6, 4, 2]
+);
+const DENIM_JACKET_MATRIX = buildFashionVariantMatrix(
+  FASHION_STANDARD_SIZES,
+  FASHION_STANDARD_COLORS,
+  'DNM-JKT',
+  [2, 3, 4, 3, 2]
+);
+
 export const FASHION_APPAREL_PRODUCTS: Product[] = [
+  {
+    id: 'FASH-GMS-HUM',
+    plu: 'GMS-SILK-HUM',
+    sku: 'FASH-GMS-HUM',
+    barcode: '899500100101',
+    name: 'Gamis Silk Humaira',
+    category: 'Gamis & Dress',
+    brand: 'Humaira Atelier',
+    sell_price: 289000,
+    cost_price: 165000,
+    price_retail: 289000,
+    price_member: 265000,
+    price_wholesale: 235000,
+    stock: sumVariantMatrixStock(GAMIS_HUMAIRA_MATRIX),
+    minStock: 15,
+    min_stock: 15,
+    unit: 'Pcs',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: GAMIS_HUMAIRA_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
+    fashionPromo: {
+      clearanceActive: true,
+      clearanceType: 'PERCENT',
+      clearanceValue: 15,
+      clearanceLabel: 'Clearance Sale Koleksi Silk 15%',
+      bundleActive: false,
+      bundleMinQty: 2,
+      bundleDiscountType: 'NOMINAL',
+      bundleDiscountValue: 30000,
+      bundleScope: 'MIX_MATCH_FASHION',
+      bundleLabel: 'Beli 2 Koleksi Hemat Rp 30rb',
+    },
+    status: 'Active',
+    businessModel: 'fashion',
+    itemType: 'RETAIL',
+    description: 'Gamis Silk premium berpotongan A-line flowy, ramah wudhu & busui friendly.',
+  },
+  {
+    id: 'FASH-KML-PR',
+    plu: 'KML-LINEN-PR',
+    sku: 'FASH-KML-PR',
+    barcode: '899500100102',
+    name: 'Kemeja Linen Pria',
+    category: 'Kemeja & Atasan',
+    brand: 'Nusa Linen Studio',
+    sell_price: 195000,
+    cost_price: 110000,
+    price_retail: 195000,
+    price_member: 179000,
+    price_wholesale: 155000,
+    stock: sumVariantMatrixStock(KEMEJA_LINEN_MATRIX),
+    minStock: 15,
+    min_stock: 15,
+    unit: 'Pcs',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: KEMEJA_LINEN_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
+    fashionPromo: {
+      clearanceActive: false,
+      clearanceType: 'PERCENT',
+      clearanceValue: 10,
+      clearanceLabel: 'Clearance Linen 10%',
+      bundleActive: true,
+      bundleMinQty: 2,
+      bundleDiscountType: 'NOMINAL',
+      bundleDiscountValue: 20000,
+      bundleScope: 'MIX_MATCH_FASHION',
+      bundleLabel: 'Beli 2 Lebih Hemat Rp 20rb/pcs',
+    },
+    status: 'Active',
+    businessModel: 'fashion',
+    itemType: 'RETAIL',
+    description: 'Kemeja Linen Rami adem breathable cutting relaxed-fit dengan kerah mandarin/classic.',
+  },
+  {
+    id: 'FASH-HJB-VOAL',
+    plu: 'HJB-VOAL-PRM',
+    sku: 'FASH-HJB-VOAL',
+    barcode: '899500100103',
+    name: 'Hijab Voal Premium',
+    category: 'Hijab & Scarf',
+    brand: 'Humaira Atelier',
+    sell_price: 75000,
+    cost_price: 38000,
+    price_retail: 75000,
+    price_member: 68000,
+    price_wholesale: 58000,
+    stock: sumVariantMatrixStock(HIJAB_VOAL_MATRIX),
+    minStock: 25,
+    min_stock: 25,
+    unit: 'Pcs',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: HIJAB_VOAL_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
+    fashionPromo: {
+      clearanceActive: false,
+      clearanceType: 'NOMINAL',
+      clearanceValue: 10000,
+      clearanceLabel: 'Clearance Hijab Rp 10rb',
+      bundleActive: true,
+      bundleMinQty: 2,
+      bundleDiscountType: 'NOMINAL',
+      bundleDiscountValue: 10000,
+      bundleScope: 'MIX_MATCH_FASHION',
+      bundleLabel: 'Mix & Match Hijab Hemat Rp 10rb/pcs',
+    },
+    status: 'Active',
+    businessModel: 'fashion',
+    itemType: 'RETAIL',
+    description: 'Hijab Voal Ultrafine lasercut tegak di dahi, lembut tidak mudah kusut.',
+  },
+  {
+    id: 'FASH-KLT-HW',
+    plu: 'KLT-HIGH-CRK',
+    sku: 'FASH-KLT-HW',
+    barcode: '899500100104',
+    name: 'Kulot Highwaist',
+    category: 'Celana & Kulot',
+    brand: 'Studio Linea',
+    sell_price: 159000,
+    cost_price: 88000,
+    price_retail: 159000,
+    price_member: 145000,
+    price_wholesale: 125000,
+    stock: sumVariantMatrixStock(KULOT_HIGHWAIST_MATRIX),
+    minStock: 15,
+    min_stock: 15,
+    unit: 'Pcs',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: KULOT_HIGHWAIST_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
+    fashionPromo: {
+      clearanceActive: false,
+      clearanceType: 'PERCENT',
+      clearanceValue: 10,
+      clearanceLabel: 'Clearance Kulot 10%',
+      bundleActive: true,
+      bundleMinQty: 2,
+      bundleDiscountType: 'PERCENT',
+      bundleDiscountValue: 10,
+      bundleScope: 'MIX_MATCH_FASHION',
+      bundleLabel: 'Potongan Paket Koleksi 10% (Min. 2)',
+    },
+    status: 'Active',
+    businessModel: 'fashion',
+    itemType: 'RETAIL',
+    description: 'Celana kulot highwaist bahan crinkle airflow jatuh, pinggang elastis & saku samping.',
+  },
   {
     id: 'FASH-TSHIRT-C30',
     plu: 'TSHIRT-C30S',
+    sku: 'FASH-TSHIRT-C30',
     barcode: '899500100001',
-    name: 'Kaos Polos Cotton Combed 30s (S/M/L/XL)',
-    category: 'Atasan & T-Shirt',
+    name: 'Kaos Polos Cotton Combed 30s',
+    category: 'Kemeja & Atasan',
     brand: 'JacS Apparel',
     sell_price: 55000,
     cost_price: 32000,
     price_retail: 55000,
     price_member: 50000,
     price_wholesale: 42000,
-    stock: 150,
+    stock: sumVariantMatrixStock(KAOS_COMBED_MATRIX),
+    minStock: 20,
+    min_stock: 20,
     unit: 'Pcs',
-    variantSize: 'S, M, L, XL',
-    variantColor: 'Hitam, Putih, Navy, Sage',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: KAOS_COMBED_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
+    fashionPromo: {
+      clearanceActive: false,
+      clearanceType: 'PERCENT',
+      clearanceValue: 10,
+      clearanceLabel: 'Clearance Kaos 10%',
+      bundleActive: true,
+      bundleMinQty: 3,
+      bundleDiscountType: 'NOMINAL',
+      bundleDiscountValue: 8000,
+      bundleScope: 'SAME_SKU',
+      bundleLabel: 'Beli 3 Hemat Rp 8rb/pcs',
+    },
     status: 'Active',
     businessModel: 'fashion',
     itemType: 'RETAIL',
@@ -685,48 +1453,33 @@ export const FASHION_APPAREL_PRODUCTS: Product[] = [
   {
     id: 'FASH-KEM-OXF',
     plu: 'KEM-OXF-SLIM',
+    sku: 'FASH-KEM-OXF',
     barcode: '899500100002',
     name: 'Kemeja Oxford Slim Fit Lengan Panjang',
-    category: 'Kemeja Formal & Casual',
+    category: 'Kemeja & Atasan',
     brand: 'JacS Tailor',
     sell_price: 165000,
     cost_price: 95000,
     price_retail: 165000,
     price_member: 150000,
     price_wholesale: 130000,
-    stock: 65,
+    stock: sumVariantMatrixStock(KEMEJA_OXFORD_MATRIX),
+    minStock: 12,
+    min_stock: 12,
     unit: 'Pcs',
-    variantSize: 'M, L, XL',
-    variantColor: 'Putih Bersih, Biru Muda, Abu Misty',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: KEMEJA_OXFORD_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 },
     status: 'Active',
     businessModel: 'fashion',
     itemType: 'RETAIL',
     description: 'Kemeja kerja kasual bahan Oxford tebal nyaman dengan kerah button-down berkelas.',
   },
   {
-    id: 'FASH-CHN-PNT',
-    plu: 'CHN-PNT-STR',
-    barcode: '899500100003',
-    name: 'Celana Panjang Chino Stretch Pria',
-    category: 'Celana Pria',
-    brand: 'JacS Denim & Co',
-    sell_price: 185000,
-    cost_price: 110000,
-    price_retail: 185000,
-    price_member: 170000,
-    price_wholesale: 145000,
-    stock: 50,
-    unit: 'Pcs',
-    variantSize: '28, 30, 32, 34',
-    variantColor: 'Khaki, Hitam, Dark Grey, Mocca',
-    status: 'Active',
-    businessModel: 'fashion',
-    itemType: 'RETAIL',
-    description: 'Celana chino katun twill stretch elastis, potongan slim-fit modern cocok untuk kerja & santai.',
-  },
-  {
     id: 'FASH-DNM-JKT',
     plu: 'DNM-JKT-14OZ',
+    sku: 'FASH-DNM-JKT',
     barcode: '899500100004',
     name: 'Denim Jacket Casual Vintage Wash 14oz',
     category: 'Jaket & Outerwear',
@@ -736,35 +1489,29 @@ export const FASHION_APPAREL_PRODUCTS: Product[] = [
     price_retail: 280000,
     price_member: 255000,
     price_wholesale: 220000,
-    stock: 35,
+    stock: sumVariantMatrixStock(DENIM_JACKET_MATRIX),
+    minStock: 10,
+    min_stock: 10,
     unit: 'Pcs',
-    variantSize: 'M, L, XL, XXL',
-    variantColor: 'Biowash Blue, Black Indigo',
+    variantSize: 'S, M, L, XL, XXL',
+    variantColor: 'Sage, Maroon, Hitam, Cream',
+    variantMatrix: DENIM_JACKET_MATRIX,
+    sizeUpcharges: { S: 0, M: 0, L: 0, XL: 12000, XXL: 20000 },
+    fashionPromo: {
+      clearanceActive: true,
+      clearanceType: 'NOMINAL',
+      clearanceValue: 35000,
+      clearanceLabel: 'Clearance Outerwear -Rp 35rb',
+      bundleActive: false,
+      bundleMinQty: 2,
+      bundleDiscountType: 'PERCENT',
+      bundleDiscountValue: 10,
+      bundleScope: 'MIX_MATCH_FASHION',
+    },
     status: 'Active',
     businessModel: 'fashion',
     itemType: 'RETAIL',
     description: 'Jaket jeans tebal 14oz non-stretch dengan efek washing vintage klasik dan kancing tembaga.',
-  },
-  {
-    id: 'FASH-BAG-KNV',
-    plu: 'BAG-KNV-ZIP',
-    barcode: '899500100005',
-    name: 'Totebag Kanvas Heavy Canvas Resleting',
-    category: 'Tas & Aksesori Fashion',
-    brand: 'JacS Goods',
-    sell_price: 65000,
-    cost_price: 35000,
-    price_retail: 65000,
-    price_member: 58000,
-    price_wholesale: 48000,
-    stock: 80,
-    unit: 'Pcs',
-    variantSize: 'All Size (40x35cm)',
-    variantColor: 'Broken White, Hitam, Army Green',
-    status: 'Active',
-    businessModel: 'fashion',
-    itemType: 'RETAIL',
-    description: 'Tas totebag bahan kanvas tebal dengan kantong laptop dan penutup ritsleting kuat.',
   },
 ];
 
@@ -1003,15 +1750,26 @@ export const BUILDING_HARDWARE_PRODUCTS: Product[] = [
     plu: 'SMN-50KG-PCC',
     barcode: '899900100001',
     name: 'Semen Portland 50kg SNI',
-    category: 'Semen & Pengikat',
+    category: 'PASIR_BATU_SEMEN',
     brand: 'Semen Tonasa / Gresik',
+    supplier: 'PT Semen Tonasa / Tiga Roda',
+    supplierId: 'SUP-BLD-01',
     sell_price: 68000,
     cost_price: 56000,
     price_retail: 68000,
     price_member: 65000,
     price_wholesale: 61000,
+    tier2Price: 65000,
+    tier2MinQty: 10,
+    tier3Price: 61000,
+    tier3MinQty: 40,
     stock: 250,
+    minStock: 100,
+    min_stock: 100,
     unit: 'Zak',
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'INCLUDE_ONGKIR',
+    defaultLoadingFee: 1000,
     supportDecimal: false,
     status: 'Active',
     businessModel: 'building',
@@ -1019,41 +1777,131 @@ export const BUILDING_HARDWARE_PRODUCTS: Product[] = [
     description: 'Semen Portland PCC berkualitas tinggi untuk plesteran, acian, dan cor beton kokoh.',
   },
   {
-    id: 'MAT-CAT-INT5',
-    plu: 'CAT-INT-5KG',
-    barcode: '899900100002',
-    name: 'Cat Tembok Interior 5kg Anti-Jamur',
-    category: 'Cat & Pelapis Tembok',
-    brand: 'Dulux Catylac',
-    sell_price: 135000,
-    cost_price: 94000,
-    price_retail: 135000,
-    price_member: 125000,
-    price_wholesale: 112000,
-    stock: 65,
-    unit: 'Galon 5kg',
+    id: 'MAT-PSR-1M3',
+    plu: 'PSR-PSG-1M3',
+    barcode: '899900100006',
+    name: 'Pasir Pasang Curah (Quarry Merapi)',
+    category: 'PASIR_BATU_SEMEN',
+    brand: 'Merapi Quarry',
+    supplier: 'CV Quarry Merapi & Alam',
+    supplierId: 'SUP-BLD-02',
+    sell_price: 280000,
+    cost_price: 220000,
+    price_retail: 280000,
+    price_member: 265000,
+    price_wholesale: 245000,
+    tier2Price: 265000,
+    tier2MinQty: 3,
+    tier3Price: 245000,
+    tier3MinQty: 6,
+    stock: 100,
+    minStock: 35,
+    min_stock: 35,
+    unit: 'm³',
+    materialNature: 'BULK_CURAH',
+    bulkUnitType: 'KUBIK_M3',
+    deliveryPricingPolicy: 'INCLUDE_ONGKIR',
+    defaultLoadingFee: 25000,
+    bulkFleetTiers: [
+      { id: 'PICKUP_RET', name: 'Ret Pick-up (±1.2 m³)', volumeM3: 1.2, suffix: '-PKP', price: 340000, costPrice: 264000, isActive: true },
+      { id: 'TRUCK_ENGKEL', name: 'Ret Truk Engkel (±3.0 m³)', volumeM3: 3.0, suffix: '-ENG', price: 820000, costPrice: 660000, isActive: true },
+      { id: 'DUMP_TRUCK', name: 'Ret Dump Truck Besar (±6.5 m³)', volumeM3: 6.5, suffix: '-TRK', price: 1680000, costPrice: 1380000, isActive: true },
+      { id: 'SAK_KARUNG', name: 'Eceran Karung / Sak (±0.03 m³)', volumeM3: 0.03, suffix: '-SAK', price: 18000, costPrice: 12000, isActive: true },
+    ],
+    supportDecimal: true,
     status: 'Active',
     businessModel: 'building',
     itemType: 'RETAIL',
-    description: 'Cat dinding interior formula khusus anti-bakteri dan jamur dengan daya tutup luas.',
+    description: 'Pasir pasang halus curah m³/ret berkualitas untuk adukan beton dan pondasi.',
+  },
+  {
+    id: 'MAT-BSI-10MM',
+    plu: 'BSI-POL-10MM',
+    barcode: '899900100007',
+    name: 'Besi Beton Polos 10mm SNI (12m)',
+    category: 'BESI_BAJA',
+    brand: 'KS Krakatau Steel',
+    supplier: 'PT Krakatau Steel / Distributor Besi',
+    supplierId: 'SUP-BLD-03',
+    sell_price: 85000,
+    cost_price: 72000,
+    price_retail: 85000,
+    price_member: 81000,
+    price_wholesale: 77000,
+    tier2Price: 81000,
+    tier2MinQty: 15,
+    tier3Price: 77000,
+    tier3MinQty: 50,
+    stock: 150,
+    minStock: 60,
+    min_stock: 60,
+    unit: 'Batang',
+    unitSecondary: 'Lonjor',
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'INCLUDE_ONGKIR',
+    defaultLoadingFee: 1500,
+    status: 'Active',
+    businessModel: 'building',
+    itemType: 'RETAIL',
+    description: 'Besi beton polos SNI diameter 10mm panjang 12 meter standar konstruksi tahan gempa.',
+  },
+  {
+    id: 'MAT-PIP-PVC4',
+    plu: 'PIP-PVC-4AW',
+    barcode: '899900100008',
+    name: 'Pipa PVC AW 4 Inch Saluran Air',
+    category: 'PERPIPAAN',
+    brand: 'Wavin / Rucika',
+    supplier: 'PT Dulux / Jotun Paint Indonesia',
+    supplierId: 'SUP-BLD-04',
+    sell_price: 145000,
+    cost_price: 110000,
+    price_retail: 145000,
+    price_member: 138000,
+    price_wholesale: 128000,
+    tier2Price: 138000,
+    tier2MinQty: 10,
+    tier3Price: 128000,
+    tier3MinQty: 30,
+    stock: 80,
+    minStock: 40,
+    min_stock: 40,
+    unit: 'Batang (4m)',
+    unitSecondary: 'Meter',
+    priceSecondary: 39000,
+    conversionRate: 4,
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'EXCLUDE_ONGKIR',
+    status: 'Active',
+    businessModel: 'building',
+    itemType: 'RETAIL',
+    description: 'Pipa PVC tipe AW tebal ukuran 4 inch untuk saluran air bersih dan pembuangan.',
   },
   {
     id: 'MAT-PKU-3INC',
     plu: 'PKU-BAJA-3IN',
     barcode: '899900100003',
     name: 'Paku Baja 3 Inch (Kg)',
-    category: 'Paku, Baut & Kawat',
+    category: 'PAKU_KAWAT_BAUT',
     brand: 'Baja SNI',
+    supplier: 'PT Krakatau Steel / Distributor Besi',
+    supplierId: 'SUP-BLD-03',
     sell_price: 22000,
     cost_price: 14000,
     price_retail: 22000,
     price_member: 20000,
     price_wholesale: 17500,
+    tier2Price: 20000,
+    tier2MinQty: 10,
+    tier3Price: 17500,
+    tier3MinQty: 25,
     stock: 180,
+    minStock: 40,
+    min_stock: 40,
     unit: 'Kg',
-    unitSecondary: 'Dus (10kg)',
-    priceSecondary: 175000,
-    conversionRate: 10,
+    materialNature: 'MANUFACTURED',
+    isWeightFraction: true,
+    deliveryPricingPolicy: 'EXCLUDE_ONGKIR',
     supportDecimal: true,
     status: 'Active',
     businessModel: 'building',
@@ -1061,42 +1909,160 @@ export const BUILDING_HARDWARE_PRODUCTS: Product[] = [
     description: 'Paku beton & kayu baja 3 inch ekstra kuat. Dijual eceran per Kg atau dus isi 10kg.',
   },
   {
-    id: 'MAT-THN-SUP1',
-    plu: 'THN-SUP-1L',
-    barcode: '899900100004',
-    name: 'Thinner Super 1L High-Gloss',
-    category: 'Pelarut & Thinner',
-    brand: 'Cobra High Gloss',
-    sell_price: 28000,
-    cost_price: 19500,
-    price_retail: 28000,
-    price_member: 26000,
-    price_wholesale: 23000,
-    stock: 90,
-    unit: 'Kaleng 1L',
+    id: 'MAT-KYU-MRNT',
+    plu: 'KYU-KSO-57',
+    barcode: '899900100009',
+    name: 'Kayu Balok & Kaso Meranti 5x7 x 4 Meter',
+    category: 'KAYU_PAPAN',
+    brand: 'Borneo Kayu Asli',
+    supplier: 'CV Quarry Merapi & Alam',
+    supplierId: 'SUP-BLD-02',
+    sell_price: 45000,
+    cost_price: 35000,
+    price_retail: 45000,
+    price_member: 42000,
+    price_wholesale: 38000,
+    tier2Price: 42000,
+    tier2MinQty: 20,
+    tier3Price: 38000,
+    tier3MinQty: 60,
+    stock: 120,
+    minStock: 50,
+    min_stock: 50,
+    unit: 'Batang',
+    materialNature: 'DIMENSION_CUSTOM',
+    customDimension: { lengthCm: 400, widthCm: 7, thicknessMm: 50 },
+    deliveryPricingPolicy: 'EXCLUDE_ONGKIR',
     status: 'Active',
     businessModel: 'building',
     itemType: 'RETAIL',
-    description: 'Thinner pengencer cat minyak dan pernis kayu menghasilkan kilap maksimal dan cepat kering.',
+    description: 'Kayu balok & kaso meranti keras ukuran 5x7 panjang 4 meter untuk bekisting dan atap.',
+  },
+  {
+    id: 'MAT-CAT-INT5',
+    plu: 'CAT-INT-5KG',
+    barcode: '899900100002',
+    name: 'Cat Tembok Interior 5kg Anti-Jamur',
+    category: 'CAT_FINISHING',
+    brand: 'Dulux Catylac',
+    supplier: 'PT Dulux / Jotun Paint Indonesia',
+    supplierId: 'SUP-BLD-04',
+    sell_price: 135000,
+    cost_price: 94000,
+    price_retail: 135000,
+    price_member: 125000,
+    price_wholesale: 115000,
+    tier2Price: 125000,
+    tier2MinQty: 5,
+    tier3Price: 115000,
+    tier3MinQty: 15,
+    stock: 65,
+    minStock: 80,
+    min_stock: 80,
+    unit: 'Pail',
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'EXCLUDE_ONGKIR',
+    status: 'Low Stock',
+    businessModel: 'building',
+    itemType: 'RETAIL',
+    description: 'Cat dinding interior formula khusus anti-bakteri dan jamur dengan daya tutup luas.',
   },
   {
     id: 'MAT-TOL-KPS',
     plu: 'TOL-KPS-8-24',
     barcode: '899900100005',
     name: 'Kunci Pas Set 8-24mm Chrome Vanadium',
-    category: 'Perkakas & Alat Tukang',
+    category: 'ALAT_PERTUKANGAN',
     brand: 'Tekiro SNI',
+    supplier: 'PT Krakatau Steel / Distributor Besi',
+    supplierId: 'SUP-BLD-03',
     sell_price: 165000,
     cost_price: 105000,
     price_retail: 165000,
-    price_member: 150000,
-    price_wholesale: 132000,
+    price_member: 152000,
+    price_wholesale: 138000,
+    tier2Price: 152000,
+    tier2MinQty: 3,
+    tier3Price: 138000,
+    tier3MinQty: 10,
     stock: 40,
+    minStock: 50,
+    min_stock: 50,
     unit: 'Set',
-    status: 'Active',
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'EXCLUDE_ONGKIR',
+    status: 'Low Stock',
     businessModel: 'building',
     itemType: 'RETAIL',
     description: 'Set kunci pas ring kombinasi 14 pcs ukuran 8mm sampai 24mm material baja CR-V tahan karat.',
+  },
+  {
+    id: 'MAT-SPL-1M3',
+    plu: 'BTM-SPL-1M3',
+    barcode: '899900100010',
+    name: 'Batu Split 1/2 Cor Beton Curah',
+    category: 'PASIR_BATU_SEMEN',
+    brand: 'Quarry Andalas',
+    supplier: 'CV Quarry Merapi & Alam',
+    supplierId: 'SUP-BLD-02',
+    sell_price: 310000,
+    cost_price: 245000,
+    price_retail: 310000,
+    price_member: 295000,
+    price_wholesale: 275000,
+    tier2Price: 295000,
+    tier2MinQty: 3,
+    tier3Price: 275000,
+    tier3MinQty: 6,
+    stock: 85,
+    minStock: 30,
+    min_stock: 30,
+    unit: 'm³',
+    materialNature: 'BULK_CURAH',
+    bulkUnitType: 'KUBIK_M3',
+    deliveryPricingPolicy: 'INCLUDE_ONGKIR',
+    defaultLoadingFee: 30000,
+    bulkFleetTiers: [
+      { id: 'PICKUP_RET', name: 'Ret Pick-up (±1.2 m³)', volumeM3: 1.2, suffix: '-PKP', price: 375000, costPrice: 295000, isActive: true },
+      { id: 'TRUCK_ENGKEL', name: 'Ret Truk Engkel (±3.0 m³)', volumeM3: 3.0, suffix: '-ENG', price: 910000, costPrice: 735000, isActive: true },
+      { id: 'DUMP_TRUCK', name: 'Ret Dump Truck Besar (±6.5 m³)', volumeM3: 6.5, suffix: '-TRK', price: 1850000, costPrice: 1520000, isActive: true },
+      { id: 'SAK_KARUNG', name: 'Eceran Karung / Sak (±0.03 m³)', volumeM3: 0.03, suffix: '-SAK', price: 20000, costPrice: 14000, isActive: true },
+    ],
+    supportDecimal: true,
+    status: 'Active',
+    businessModel: 'building',
+    itemType: 'RETAIL',
+    description: 'Batu pecah split ukuran 1/2 cm bersih untuk pengecoran dak dan struktur pondasi.',
+  },
+  {
+    id: 'MAT-BJR-C75',
+    plu: 'BJR-KNL-C75',
+    barcode: '899900100011',
+    name: 'Baja Ringan Kanal C 75mm SNI (6m)',
+    category: 'BESI_BAJA',
+    brand: 'Taso / BlueScope',
+    supplier: 'PT Krakatau Steel / Distributor Besi',
+    supplierId: 'SUP-BLD-03',
+    sell_price: 98000,
+    cost_price: 80000,
+    price_retail: 98000,
+    price_member: 93000,
+    price_wholesale: 87000,
+    tier2Price: 93000,
+    tier2MinQty: 15,
+    tier3Price: 87000,
+    tier3MinQty: 50,
+    stock: 200,
+    minStock: 75,
+    min_stock: 75,
+    unit: 'Batang',
+    materialNature: 'MANUFACTURED',
+    deliveryPricingPolicy: 'INCLUDE_ONGKIR',
+    defaultLoadingFee: 1000,
+    status: 'Active',
+    businessModel: 'building',
+    itemType: 'RETAIL',
+    description: 'Rangka atap baja ringan profil Kanal C75 ketebalan 0.75mm panjang 6 meter standar SNI.',
   },
 ];
 
@@ -1202,6 +2168,320 @@ export const SALON_BARBERSHOP_PRODUCTS: Product[] = [
   },
 ];
 
+// 9. LAUNDRY MULTI-SATUAN (Kiloan kg, Satuan pcs/stel, Pasang, Luas m2)
+export const LAUNDRY_SLA_OPTIONS = [
+  { label: 'Reguler 48 Jam', hours: 48 },
+  { label: 'Kilat 24 Jam', hours: 24 },
+  { label: 'Express 6 Jam', hours: 6 },
+] as const;
+
+export const LAUNDRY_SERVICE_CATEGORIES = [
+  { id: 'LND-CAT-KILOAN', code: '901', name: 'Laundry Kiloan (kg)', department: 'Laundry Services' },
+  { id: 'LND-CAT-SATUAN', code: '902', name: 'Laundry Satuan (Pcs/Stel)', department: 'Laundry Services' },
+  { id: 'LND-CAT-PASANG', code: '903', name: 'Laundry Pasang (Sepatu/Tas)', department: 'Laundry Services' },
+  { id: 'LND-CAT-LUAS', code: '904', name: 'Laundry Luas (Karpet/m2)', department: 'Laundry Services' },
+] as const;
+
+export const LAUNDRY_SERVICE_PRODUCTS: Product[] = [
+  {
+    id: 'LND-KG-REG',
+    plu: 'LND-KG-REG',
+    barcode: '899102000001',
+    name: 'Cuci Komplit Reguler (Cuci + Kering + Setrika)',
+    category: 'Laundry Kiloan (kg)',
+    brand: 'JacS Laundry',
+    sell_price: 8000,
+    cost_price: 3200,
+    price_retail: 8000,
+    price_member: 7200,
+    price_wholesale: 6500,
+    stock: 999,
+    unit: 'kg',
+    laundryUnitType: 'KILOAN',
+    supportDecimal: true,
+    isWeighable: true,
+    minOrderWeightKg: 2,
+    minOrderQty: 2,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Layanan cuci komplit lipat & setrika uap kiloan standar (min. 2 kg).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-KG-KLT',
+    plu: 'LND-KG-KLT',
+    barcode: '899102000002',
+    name: 'Cuci Komplit Kilat 24 Jam',
+    category: 'Laundry Kiloan (kg)',
+    brand: 'JacS Laundry',
+    sell_price: 12000,
+    cost_price: 4500,
+    price_retail: 12000,
+    price_member: 11000,
+    price_wholesale: 10000,
+    stock: 999,
+    unit: 'kg',
+    laundryUnitType: 'KILOAN',
+    supportDecimal: true,
+    isWeighable: true,
+    minOrderWeightKg: 2,
+    minOrderQty: 2,
+    slaDuration: 'Kilat 24 Jam',
+    slaHours: 24,
+    serviceDuration: 'Kilat 24 Jam',
+    description: 'Layanan cuci + pengering + setrika selesai maksimal 24 jam (min. 2 kg).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-KG-EXP',
+    plu: 'LND-KG-EXP',
+    barcode: '899102000003',
+    name: 'Cuci Komplit Express 6 Jam',
+    category: 'Laundry Kiloan (kg)',
+    brand: 'JacS Laundry',
+    sell_price: 18000,
+    cost_price: 6500,
+    price_retail: 18000,
+    price_member: 16500,
+    price_wholesale: 15000,
+    stock: 999,
+    unit: 'kg',
+    laundryUnitType: 'KILOAN',
+    supportDecimal: true,
+    isWeighable: true,
+    minOrderWeightKg: 2,
+    minOrderQty: 2,
+    slaDuration: 'Express 6 Jam',
+    slaHours: 6,
+    serviceDuration: 'Express 6 Jam',
+    description: 'Layanan prioritas selesai dalam 6 jam siap pakai (min. 2 kg).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-KG-STR',
+    plu: 'LND-KG-STR',
+    barcode: '899102000004',
+    name: 'Setrika Saja (Uap & Pewangi)',
+    category: 'Laundry Kiloan (kg)',
+    brand: 'JacS Laundry',
+    sell_price: 5500,
+    cost_price: 2000,
+    price_retail: 5500,
+    price_member: 5000,
+    price_wholesale: 4500,
+    stock: 999,
+    unit: 'kg',
+    laundryUnitType: 'KILOAN',
+    supportDecimal: true,
+    isWeighable: true,
+    minOrderWeightKg: 2,
+    minOrderQty: 2,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Jasa setrika uap rapi & parfum linen tahan lama per kg (min. 2 kg).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-PCS-JAS',
+    plu: 'LND-PCS-JAS',
+    barcode: '899102000005',
+    name: 'Dry Clean Jas / Blazer Formal',
+    category: 'Laundry Satuan (Pcs/Stel)',
+    brand: 'JacS Laundry',
+    sell_price: 35000,
+    cost_price: 12000,
+    price_retail: 35000,
+    price_member: 32000,
+    price_wholesale: 28000,
+    stock: 999,
+    unit: 'stel',
+    laundryUnitType: 'SATUAN',
+    supportDecimal: false,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Cuci dry clean khusus jas / blazer formal lengkap dengan hanger & cover.',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-PCS-KBY',
+    plu: 'LND-PCS-KBY',
+    barcode: '899102000006',
+    name: 'Perawatan Kebaya / Gaun Pesta Payet',
+    category: 'Laundry Satuan (Pcs/Stel)',
+    brand: 'JacS Laundry',
+    sell_price: 45000,
+    cost_price: 15000,
+    price_retail: 45000,
+    price_member: 40000,
+    price_wholesale: 36000,
+    stock: 999,
+    unit: 'pcs',
+    laundryUnitType: 'SATUAN',
+    supportDecimal: false,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Kilat 24 Jam',
+    slaHours: 24,
+    serviceDuration: 'Kilat 24 Jam',
+    description: 'Pencucian manual lembut khusus kebaya berpayet & gaun pesta.',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-PCS-BDC',
+    plu: 'LND-PCS-BDC',
+    barcode: '899102000007',
+    name: 'Cuci Bedcover Tebal (King / Queen)',
+    category: 'Laundry Satuan (Pcs/Stel)',
+    brand: 'JacS Laundry',
+    sell_price: 38000,
+    cost_price: 13000,
+    price_retail: 38000,
+    price_member: 34000,
+    price_wholesale: 30000,
+    stock: 999,
+    unit: 'pcs',
+    laundryUnitType: 'SATUAN',
+    supportDecimal: false,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Cuci higienis anti-tungau + pengeringan optimal & vakum bedcover.',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-PSG-SHOE',
+    plu: 'LND-PSG-SHOE',
+    barcode: '899102000008',
+    name: 'Cuci Sepatu Deep Clean (Sneakers / Canvas)',
+    category: 'Laundry Pasang (Sepatu/Tas)',
+    brand: 'JacS Laundry',
+    sell_price: 45000,
+    cost_price: 14000,
+    price_retail: 45000,
+    price_member: 40000,
+    price_wholesale: 35000,
+    stock: 999,
+    unit: 'pasang',
+    laundryUnitType: 'PASANG',
+    supportDecimal: false,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Pembersihan menyeluruh upper, midsole, outsole & insole per pasang.',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-PSG-WHT',
+    plu: 'LND-PSG-WHT',
+    barcode: '899102000009',
+    name: 'Cuci Sepatu Express Whitening & Odor Care',
+    category: 'Laundry Pasang (Sepatu/Tas)',
+    brand: 'JacS Laundry',
+    sell_price: 65000,
+    cost_price: 20000,
+    price_retail: 65000,
+    price_member: 58000,
+    price_wholesale: 52000,
+    stock: 999,
+    unit: 'pasang',
+    laundryUnitType: 'PASANG',
+    supportDecimal: false,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Express 6 Jam',
+    slaHours: 6,
+    serviceDuration: 'Express 6 Jam',
+    description: 'Cuci sepatu kilat dengan anti-bacterial UV & unyellowing ringan.',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-M2-KRP',
+    plu: 'LND-M2-KRP',
+    barcode: '899102000010',
+    name: 'Cuci Karpet Tebal / Karpet Kantor (P × L)',
+    category: 'Laundry Luas (Karpet/m2)',
+    brand: 'JacS Laundry',
+    sell_price: 25000,
+    cost_price: 9000,
+    price_retail: 25000,
+    price_member: 22500,
+    price_wholesale: 20000,
+    stock: 999,
+    unit: 'm2',
+    laundryUnitType: 'LUAS',
+    supportDecimal: true,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Reguler 48 Jam',
+    slaHours: 48,
+    serviceDuration: 'Reguler 48 Jam',
+    description: 'Cuci bilas extractor karpet dihitung per meter persegi (Panjang × Lebar).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+  {
+    id: 'LND-M2-PRM',
+    plu: 'LND-M2-PRM',
+    barcode: '899102000011',
+    name: 'Cuci Karpet Permadani / Wool Premium (P × L)',
+    category: 'Laundry Luas (Karpet/m2)',
+    brand: 'JacS Laundry',
+    sell_price: 35000,
+    cost_price: 13000,
+    price_retail: 35000,
+    price_member: 31500,
+    price_wholesale: 28000,
+    stock: 999,
+    unit: 'm2',
+    laundryUnitType: 'LUAS',
+    supportDecimal: true,
+    isWeighable: false,
+    minOrderWeightKg: 1,
+    minOrderQty: 1,
+    slaDuration: 'Kilat 24 Jam',
+    slaHours: 24,
+    serviceDuration: 'Kilat 24 Jam',
+    description: 'Treatment khusus serat permadani & wool premium per m2 (Panjang × Lebar).',
+    status: 'Active',
+    businessModel: 'laundry',
+    itemType: 'SERVICE',
+  },
+];
+
 // Gabungan seluruh produk dummy resmi seluruh industri
 export const ALL_INDUSTRY_PRODUCTS: Product[] = [
   ...RETAIL_WHOLESALE_PRODUCTS,
@@ -1212,6 +2492,7 @@ export const ALL_INDUSTRY_PRODUCTS: Product[] = [
   ...AUTOMOTIVE_WORKSHOP_PRODUCTS,
   ...BUILDING_HARDWARE_PRODUCTS,
   ...SALON_BARBERSHOP_PRODUCTS,
+  ...LAUNDRY_SERVICE_PRODUCTS,
 ];
 
 // =========================================================================
@@ -1305,21 +2586,39 @@ export const INDUSTRY_DEMO_CARTS: Record<TerminalIndustry, CartItem[]> = {
   ],
   fashion: [
     {
-      product: FASHION_APPAREL_PRODUCTS[0], // Kaos Polos Combed 30s
-      quantity: 2,
-      subtotal: 110000,
-      itemDiscount: 0,
+      product: FASHION_APPAREL_PRODUCTS[0], // Gamis Silk Humaira (Clearance 15%)
+      quantity: 1,
+      subtotal: 245650,
+      itemDiscount: 43350,
+      promoSavings: 43350,
+      promoName: 'Clearance Sale Koleksi Silk 15%',
+      promoSourceType: 'STORE_DISC',
+      selectedFashionSize: 'M',
+      selectedFashionColor: 'Sage',
       modifiers: {
-        variant: 'Ukuran L • Hitam',
+        variant: 'M • Sage',
       },
     },
     {
-      product: FASHION_APPAREL_PRODUCTS[1], // Kemeja Oxford
+      product: FASHION_APPAREL_PRODUCTS[1], // Kemeja Linen Pria (Mix & Match)
       quantity: 1,
-      subtotal: 165000,
+      subtotal: 195000,
       itemDiscount: 0,
+      selectedFashionSize: 'L',
+      selectedFashionColor: 'Hitam',
       modifiers: {
-        variant: 'Ukuran M • Biru Muda',
+        variant: 'L • Hitam',
+      },
+    },
+    {
+      product: FASHION_APPAREL_PRODUCTS[2], // Hijab Voal Premium (Mix & Match)
+      quantity: 1,
+      subtotal: 75000,
+      itemDiscount: 0,
+      selectedFashionSize: 'M',
+      selectedFashionColor: 'Cream',
+      modifiers: {
+        variant: 'M • Cream',
       },
     },
   ],
@@ -1387,6 +2686,27 @@ export const INDUSTRY_DEMO_CARTS: Record<TerminalIndustry, CartItem[]> = {
       itemDiscount: 0,
     },
   ],
+  laundry: [
+    {
+      product: LAUNDRY_SERVICE_PRODUCTS[0], // Cuci Komplit Reguler (kg)
+      quantity: 3.25,
+      subtotal: 26000,
+      itemDiscount: 0,
+      selectedUnit: 'kg',
+      grossWeightKg: 3.75,
+      tareWeightKg: 0.5,
+      actualNetWeightKg: 3.25,
+      isMinWeightAdjusted: false,
+      minWeightAppliedKg: 2,
+    },
+    {
+      product: LAUNDRY_SERVICE_PRODUCTS[7], // Cuci Sepatu Deep Clean (pasang)
+      quantity: 1,
+      subtotal: 45000,
+      itemDiscount: 0,
+      selectedUnit: 'pasang',
+    },
+  ],
 };
 
 /**
@@ -1402,9 +2722,8 @@ export function filterProductsByTerminal(
     businessModel?: string;
     location?: string;
   } | null,
-  showAllCategories = false
+  showAllCategories?: boolean
 ): Product[] {
-  // Jika toggle 'Semua Kategori' aktif, tampilkan seluruh produk ritel/katalog aktif (kecuali bahan mentah & discontinued)
   if (showAllCategories) {
     return allProducts.filter((p) => {
       if (String(p.status).toUpperCase() === 'DISCONTINUED') return false;
@@ -1416,7 +2735,6 @@ export function filterProductsByTerminal(
       return true;
     });
   }
-
   const industry = getTerminalIndustry(terminal);
 
   // Buat lookup ID produk yang secara eksplisit masuk ke industri ini
@@ -1429,6 +2747,7 @@ export function filterProductsByTerminal(
     workshop: AUTOMOTIVE_WORKSHOP_PRODUCTS,
     building: BUILDING_HARDWARE_PRODUCTS,
     salon: SALON_BARBERSHOP_PRODUCTS,
+    laundry: LAUNDRY_SERVICE_PRODUCTS,
   };
 
   const specificIndustryProducts = industryMap[industry] || RETAIL_WHOLESALE_PRODUCTS;
@@ -1540,36 +2859,24 @@ export function filterProductsByTerminal(
       }
 
       case 'building': {
-        // KASIR 05 (Building Materials & Hardware): menampilkan Material, Cat, dan Perkakas Bangunan
-        const isMaterial =
-          catLower.includes('material') ||
-          catLower.includes('bangunan') ||
-          catLower.includes('semen') ||
-          catLower.includes('pasir') ||
-          catLower.includes('batu') ||
-          catLower.includes('bata') ||
-          catLower.includes('besi') ||
-          catLower.includes('pipa') ||
-          catLower.includes('kayu') ||
-          (p.id || '').startsWith('MAT-');
-        const isCat =
-          catLower.includes('cat') ||
-          catLower.includes('paint') ||
-          catLower.includes('thinner') ||
-          catLower.includes('pelapis') ||
-          catLower.includes('pernis');
-        const isPerkakas =
-          catLower.includes('perkakas') ||
-          catLower.includes('alat tukang') ||
-          catLower.includes('tools') ||
-          catLower.includes('hardware') ||
-          catLower.includes('paku') ||
-          catLower.includes('baut') ||
-          catLower.includes('kuas') ||
-          catLower.includes('palu') ||
-          catLower.includes('meteran');
-
-        return isMaterial || isCat || isPerkakas || bm === 'building';
+        // KASIR 05 / T-05 (Building Materials & Hardware): kunci filter hanya untuk kategori material:
+        // Semen, Pasir/Batu, Besi/Baja, Perpipaan, Paku/Kawat, Kayu, Cat/Thinner, Perkakas
+        const allowedBuildingCategories = [
+          'semen',
+          'pasir/batu',
+          'besi/baja',
+          'perpipaan',
+          'paku/kawat',
+          'kayu',
+          'cat/thinner',
+          'perkakas',
+        ];
+        const matchCat = allowedBuildingCategories.some(
+          (allowed) => catLower === allowed || catLower.includes(allowed)
+        );
+        const isMatId = idLower.startsWith('mat-');
+        const isBuildingModel = bm === 'building' || (p.businessModel || '').toLowerCase() === 'building';
+        return matchCat || isMatId || isBuildingModel;
       }
 
       case 'fashion':
@@ -1607,28 +2914,49 @@ export function filterProductsByTerminal(
           it === 'SERVICE'
         );
 
+      case 'laundry':
+        if (String(p.status || 'Active').toUpperCase() === 'INACTIVE' || String(p.status || '').toUpperCase() === 'NONAKTIF') {
+          return false;
+        }
+        return (
+          bm === 'laundry' ||
+          idLower.startsWith('lnd-') ||
+          idLower.startsWith('svc-lnd-') ||
+          Boolean(p.laundryUnitType) ||
+          catLower.includes('laundry') ||
+          catLower.includes('dry clean') ||
+          catLower.includes('binatu') ||
+          catLower.includes('kiloan') ||
+          catLower.includes('karpet')
+        );
+
       case 'salon':
+        if (String(p.status || 'Active').toUpperCase() === 'INACTIVE' || String(p.status || '').toUpperCase() === 'NONAKTIF') {
+          return false;
+        }
         return (
           bm === 'salon' ||
-          bm === 'service' ||
+          idLower.startsWith('svc-brb-') ||
+          idLower.startsWith('prd-brb-') ||
+          idLower.startsWith('sln-') ||
           catLower.includes('salon') ||
           catLower.includes('barber') ||
           catLower.includes('rambut') ||
           catLower.includes('grooming') ||
           catLower.includes('kapster') ||
           catLower.includes('pangkas') ||
+          catLower.includes('hair care') ||
+          catLower.includes('coloring') ||
           nameLower.includes('haircut') ||
           nameLower.includes('pomade') ||
           nameLower.includes('creambath') ||
           nameLower.includes('shampoo') ||
-          nameLower.includes('potong') ||
-          (it === 'SERVICE' && (idLower.startsWith('sln-') || idLower.startsWith('brb-'))) ||
-          idLower.startsWith('sln-')
+          nameLower.includes('potong')
         );
 
       case 'retail':
       default:
-        // Terminal Ritel Umum (Kasir 01): menampilkan seluruh produk ritel umum
+        // Terminal Ritel Umum (Kasir 01): menampilkan seluruh produk ritel umum (sembako/minimarket) tanpa item material bangunan / jasa laundry / barbershop
         return (
           it === 'RETAIL' &&
           bm !== 'building' &&
@@ -1636,12 +2964,25 @@ export function filterProductsByTerminal(
           bm !== 'workshop' &&
           bm !== 'fashion' &&
           bm !== 'salon' &&
+          bm !== 'laundry' &&
           !Boolean(p.pharmacyClass) &&
+          !Boolean(p.laundryUnitType) &&
+          p.materialNature !== 'BULK_CURAH' &&
+          p.materialNature !== 'DIMENSION_CUSTOM' &&
+          !catLower.includes('bangunan') &&
+          !catLower.includes('perkakas') &&
+          !catLower.includes('material') &&
+          !catLower.includes('laundry') &&
+          !catLower.includes('salon') &&
+          !catLower.includes('barber') &&
           !idLower.startsWith('mat-') &&
           !idLower.startsWith('gad-') &&
           !idLower.startsWith('oto-') &&
           !idLower.startsWith('fash-') &&
           !idLower.startsWith('sln-') &&
+          !idLower.startsWith('lnd-') &&
+          !idLower.startsWith('svc-') &&
+          !idLower.startsWith('prd-brb-') &&
           !idLower.startsWith('pet-')
         );
     }

@@ -5,7 +5,16 @@ export type UserRole =
   | 'Inventory Staff'
   | 'Finance Staff'
   | 'HR Staff'
-  | 'Purchasing Staff';
+  | 'Purchasing Staff'
+  | 'Security Staff'
+  | 'Security Guard'
+  | 'Security'
+  | 'EXECUTIVE'
+  | 'FINANCE_MANAGER'
+  | 'CASHIER_LEAD'
+  | 'WAREHOUSE_HEAD'
+  | 'PURCHASING_OFFICER'
+  | 'HR_MANAGER';
 
 export interface User {
   user_id: string;
@@ -16,6 +25,7 @@ export interface User {
   role: UserRole;
   status: 'Active' | 'Inactive';
   pin: string;
+  assignedTerminalId?: string; // Terminal yang dikunci tetap untuk akun kasir ini
   avatar?: string | null;
   avatarUrl?: string | null;
 }
@@ -52,6 +62,38 @@ export interface FBMenuCosting {
 
 export type FBRecipeCosting = FBMenuCosting;
 
+export type FnbToppingCategory = 'MAIN_FOOD' | 'DRINK' | 'PASTRY_SNACK';
+
+export interface FnbToppingMaster {
+  id: string;
+  sku: string; // Kode SKU otomatis format TOP-FNB-XXX (misal: TOP-FNB-001)
+  name: string;
+  category: FnbToppingCategory;
+  price: number;
+  isActive: boolean;
+  rawMaterialId?: string;
+  rawMaterialName?: string;
+  rawMaterialQty?: number;
+  rawMaterialUnit?: string;
+  hppCost?: number;
+  notes?: string;
+}
+
+export type FnbToppingOption = FnbToppingMaster;
+
+// Master Stylist / Kapster / Petugas Layanan (Sektor SERVICE: Barbershop & Salon / Laundry)
+export interface ServiceStylistMaster {
+  id: string; // Format: STL-001, STL-002, dst.
+  name: string;
+  role: string; // e.g. 'Senior Barber', 'Junior Barber', 'Hair Spa & Coloring'
+  specialty?: string;
+  commissionRate: number; // Persentase komisi jasa layanan (%)
+  retailCommissionRate?: number; // Opsional komisi penjualan produk retail salon (default 0%)
+  isActive: boolean;
+  phone?: string;
+  notes?: string;
+}
+
 // Multi-Armada Material Curah (Pick-up, Truk Engkel, Dump Truck, Sak)
 export interface BulkFleetTier {
   id: 'PICKUP_RET' | 'TRUCK_ENGKEL' | 'DUMP_TRUCK' | 'SAK_KARUNG';
@@ -80,6 +122,12 @@ export interface WeightFractionConfig {
   fractions: WeightFractionTier[];
 }
 
+export type ServiceItemFormat =
+  | 'LAYANAN_SATUAN'
+  | 'PAKET_BUNDLING'
+  | 'LAYANAN_ADDON'
+  | 'PRODUK_RETAIL_SALON';
+
 export interface Product {
   id: string; // Format standar APS POS 1: BRxxxxxx (contoh: BR000001)
   barcode?: string;
@@ -93,12 +141,15 @@ export interface Product {
   buy_price?: number; // Alias kompatibilitas Harga Beli / Modal (HPP)
   sellingPrice?: number; // Standar APS POS 1 untuk Harga Jual
   sell_price: number;
+  retailPrice?: number;
+  price?: number;
   stock: number;
   minStock?: number; // Standar APS POS 1 untuk Batas Min Stok
   min_stock?: number;
   status: 'Active' | 'Low Stock' | 'Out of Stock' | 'Discontinued' | 'ACTIVE' | 'DISCONTINUED' | string;
   itemType?: 'MENU_FB' | 'RETAIL' | 'RAW_MATERIAL' | 'SERVICE';
   costing?: FBMenuCosting; // Rincian kalkulasi biaya & HPP Menu F&B
+  hpp?: number; // Alias HPP / Modal
   description?: string; // Deskripsi varian & kemasan produk ERP
   categoryCode?: string | number; // Kode Kategori resmi ERP: 2, 3, 4, 5, 8, 13, 21, 26, dst.
   manufacturer?: string; // Vendor pemasok / Principal
@@ -117,6 +168,8 @@ export interface Product {
   price_distributor?: number; // Tier Distributor / Agen Partai Besar
   initialStock?: number; // Kapasitas awal tercatat untuk kalkulasi ambang batas alert %
   plu?: string; // Kode unik PLU produk internal
+  pluShortcode?: string; // Quick PLU shortcode (3-4 digits)
+  isWeighable?: boolean; // Status Barang Timbang / Item Timbangan (Fresh & Curah)
   image?: string;
   size?: string;
   minAlert?: number;
@@ -140,6 +193,8 @@ export interface Product {
   toppings?: Array<{ id: string; name: string; price: number }>;
   spicyEnabled?: boolean;
   temperatureSugarEnabled?: boolean;
+  ppnEnabled?: boolean;
+  ppnRate?: number;
   // Apotek / Farmasi specific
   drugClass?: string; // Golongan
   batchNo?: string; // No Batch
@@ -159,6 +214,9 @@ export interface Product {
   variantSize?: string; // Varian Ukuran (S/M/L/XL)
   variantColor?: string; // Pilihan Warna
   tagPrice?: number; // Harga Tag
+  variantMatrix?: FashionVariantCell[]; // Matriks stok kombinasi Ukuran x Warna
+  sizeUpcharges?: Record<string, number>; // Konfigurasi tambahan harga per ukuran (misal S/M/L: +0, XL: +10000, XXL: +15000)
+  fashionPromo?: FashionArticlePromo; // Promo per artikel Fashion (Clearance Sale & Bundle/Mix & Match)
   // Gadget specific
   deviceType?: string; // Kode Tipe
   imeiSerial?: string; // No IMEI/Serial
@@ -169,6 +227,8 @@ export interface Product {
   serviceCode?: string; // Kode Jasa
   serviceDuration?: string | number; // Durasi Layanan (Menit)
   staffCommission?: number; // Komisi Staf
+  serviceFormat?: ServiceItemFormat; // Klasifikasi layanan: Satuan, Paket Bundling, Add-on, atau Produk Retail Salon
+  packageDetails?: string; // Rincian isi paket (opsional, misal: "Cukur Reguler + Cuci Rambut + Tonic")
   // Building Materials Depot specific (KASIR 09 & Master Data)
   supportDecimal?: boolean;
   unitSecondary?: string; // Satuan Eceran (e.g. Meter)
@@ -183,7 +243,41 @@ export interface Product {
   bulkFleetTiers?: BulkFleetTier[]; // Skema Multi-Armada Material Curah (Pick-up, Engkel, Dump Truck, Sak)
   isWeightFraction?: boolean; // Produk Satuan Timbang / Fraksi Berat (Paku, Kawat, Baut)
   weightFractionConfig?: WeightFractionConfig;
-  businessModel?: 'retail' | 'fnb' | 'pharmacy' | 'fashion' | 'gadget' | 'services' | 'building' | string;
+  // 3-Tier Harga Otomatis Material Bangunan (Eceran, Tukang, Kontraktor)
+  tier2Price?: number;
+  tier2MinQty?: number;
+  tier3Price?: number;
+  tier3MinQty?: number;
+  businessModel?: 'retail' | 'fnb' | 'pharmacy' | 'fashion' | 'gadget' | 'services' | 'building' | 'laundry' | string;
+  // Laundry Multi-Satuan & SLA
+  laundryUnitType?: 'KILOAN' | 'SATUAN' | 'PASANG' | 'LUAS';
+  minOrderWeightKg?: number;
+  slaDuration?: string;
+  slaHours?: number;
+  branchId?: string;
+  isPackage?: boolean;
+  componentSkus?: Array<{ skuId: string; skuName: string; qty: number; unitCost: number }>;
+}
+
+export interface FashionVariantCell {
+  size: string;
+  color: string;
+  stock: number;
+  skuVariant?: string;
+  barcodeVariant?: string;
+}
+
+export interface FashionArticlePromo {
+  clearanceActive?: boolean;
+  clearanceType?: 'PERCENT' | 'NOMINAL';
+  clearanceValue?: number;
+  clearanceLabel?: string;
+  bundleActive?: boolean;
+  bundleMinQty?: number;
+  bundleDiscountType?: 'PERCENT' | 'NOMINAL';
+  bundleDiscountValue?: number;
+  bundleScope?: 'SAME_SKU' | 'MIX_MATCH_FASHION';
+  bundleLabel?: string;
 }
 
 // Model Menu F&B dengan costing BOM terintegrasi
@@ -212,20 +306,81 @@ export interface CartItem {
   selectedPriceTier?: PriceTier | string; // Tier harga aktif saat item dimasukkan (RETAIL/MEMBER/WHOLESALE)
   customPrice?: number;
   itemDiscount?: number;
-  signa?: string; // Signa / Aturan pakai khusus baris obat di kasir
+  promoCode?: string | null;
+  promoName?: string;
+  promoSourceType?: 'FEFO_EXP' | 'SUPPLIER_TPR' | 'SEASONAL' | 'STORE_DISC' | 'STORE_BND';
+  promoBadge?: string;
+  promoMechanic?: 'STANDARD' | 'PWP_TEBUS_MURAH' | 'BUY_X_GET_Y' | 'BUNDLE';
+  promoQtyCapped?: number;
+  maxQtyPerReceipt?: number | null;
+  isUnlimitedFefo?: boolean;
+  freeBonusQty?: number;
+  freeBonusLabel?: string;
+  pwpMinCartSubtotal?: number;
+  pwpQualified?: boolean;
+  promoHint?: string;
+  originalUnitPrice?: number;
+  promoSavings?: number;
+  overriddenPromosCount?: number;
+  selectedFashionSize?: string;
+  selectedFashionColor?: string;
+  manualDiscountReason?: string;
+  manualDiscountAuthorizedBy?: string;
+  supplierName?: string;
+  isPackage?: boolean;
+  componentSkus?: Array<{ skuId: string; skuName: string; qty: number; unitCost: number }>;
+  signa?: string; // Opsional catatan aturan pakai
   selectedUnit?: string; // Satuan aktif (e.g. Sak, Batang, Meter, Roll)
   isRetailUnit?: boolean; // Mode eceran (e.g. Meteran vs Batangan/Roll)
   deliveryMethod?: 'DIRECT' | 'FLEET_DELIVERY'; // Bawa Langsung vs Armada Toko
+  buildingTierName?: 'ECERAN' | 'TUKANG' | 'KONTRAKTOR' | string;
+  buildingTierBadge?: string;
+  buildingTierLabel?: string;
+  buildingTierSavings?: number;
+  cubicConversionFactorM3?: number;
+  cubicDeductionM3?: number;
+  grossMarginPercent?: number;
+  isMarginBelowFloor?: boolean;
+  // Laundry scale & area metadata
+  laundryLengthM?: number;
+  laundryWidthM?: number;
+  grossWeightKg?: number;
+  tareWeightKg?: number;
+  actualNetWeightKg?: number;
+  isMinWeightAdjusted?: boolean;
+  minWeightAppliedKg?: number;
   modifiers?: {
     tableNumber?: string;
-    orderType?: 'Dine-In' | 'Take-Away';
+    orderType?: 'Dine-In' | 'Take-Away' | 'Takeaway' | 'Delivery';
     spicyLevel?: number;
+    spicyLabel?: string;
     toppings?: string[];
+    toppingDetails?: Array<{
+      id?: string;
+      sku?: string;
+      name: string;
+      price: number;
+      rawMaterialId?: string;
+      rawMaterialQty?: number;
+      rawMaterialUnit?: string;
+      hppCost?: number;
+    }>;
+    toppingExtraPrice?: number;
     temperature?: string;
     sugarLevel?: string;
+    sugarIceLabel?: string;
     notes?: string;
     variant?: string;
+    ticketNumber?: string;
+    petName?: string;
+    deliveryNotes?: string;
   };
+  kotSent?: boolean;
+  kotSentQty?: number;
+  // Service sector per-item Stylist / Kapster assignment
+  stylistId?: string;
+  stylistName?: string;
+  stylistCommissionRate?: number;
 }
 
 // POS Payment Integration Payload (APS POS5)
@@ -237,11 +392,163 @@ export interface PaymentPayload {
   changeDue?: number;
   shiftId?: string;
   customerId?: string;
+  customerName?: string;
   timestamp?: string;
   terminalId?: string;
   businessType?: string;
   receiptNumber?: string;
+  stationCode?: string;
   cashierName?: string;
+  discount?: number;
+  promoSavingsTotal?: number;
+  subtotalBeforeDiscount?: number;
+  cartVoucherDiscount?: number;
+  fnbOrderMode?: string;
+  fnbTableNo?: string;
+  vehiclePlate?: string;
+  mechanicName?: string;
+  stylistId?: string;
+  stylistName?: string;
+  stylistCommissionRate?: number;
+  serviceCommissionTotal?: number;
+  petOrClientName?: string;
+  deliveryFleetActive?: boolean;
+  deliveryPolicy?: 'FRANGKO' | 'LOCO';
+  fleetType?: 'PICKUP_RET' | 'TRUCK_ENGKEL' | 'DUMP_TRUCK';
+  fleetVehicleName?: string;
+  deliveryDestination?: string;
+  shippingFee?: number;
+  dpAmount?: number;
+  tempoDays?: number;
+  dueDate?: string;
+  remainingBalance?: number;
+  priceTier?: string;
+  isContractorMode?: boolean;
+  loadingFee?: number;
+  materialRevenue?: number;
+  fleetDeliveryCost?: number;
+  netProfitAfterShipping?: number;
+  // Laundry Order, Bag Tag & Flexible Payment
+  customerPhone?: string;
+  isLaundryOrder?: boolean;
+  laundryTotalPieces?: number;
+  laundryConditionNotes?: string;
+  laundryEstimatedDoneAt?: string;
+  laundrySlaLabel?: string;
+  laundrySlaHours?: number;
+  laundryPaymentStatus?: LaundryPaymentStatus;
+  laundryBagTagCode?: string;
+  laundryRackNumber?: string;
+  laundryWasherId?: string;
+  laundryWasherName?: string;
+  laundryIronerId?: string;
+  laundryIronerName?: string;
+  laundrySpecialistId?: string;
+  laundrySpecialistName?: string;
+  // Fashion & Butik POS (Pramuniaga/Advisor, Otorisasi Diskon & Tukar Ukuran)
+  fashionAdvisorId?: string;
+  fashionAdvisorName?: string;
+  fashionAdvisorCommission?: number;
+  manualDiscountReason?: string;
+  manualDiscountAuthorizedBy?: string;
+  isFashionExchange?: boolean;
+  exchangeRefReceipt?: string;
+  exchangeSummary?: string;
+  splitCashAmount?: number;
+  splitNonCashAmount?: number;
+  splitNonCashMethod?: 'QRIS' | 'DEBIT' | 'TRANSFER' | string;
+}
+
+export interface FashionExchangePayload {
+  originalSaleId?: string;
+  originalReceiptNumber: string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  returnedProductId: string;
+  returnedProductName: string;
+  returnedSize: string;
+  returnedColor: string;
+  returnedUnitPrice: number;
+  replacementProductId: string;
+  replacementProductName: string;
+  replacementSize: string;
+  replacementColor: string;
+  replacementUnitPrice: number;
+  qty?: number;
+  priceDifference: number;
+  paymentMethod?: string;
+  fashionAdvisorId?: string;
+  fashionAdvisorName?: string;
+  reason?: string;
+  stationCode?: string;
+  terminalId?: string;
+  shiftId?: string;
+}
+
+export type BuildingDeliveryStatus = 'MENUNGGU_MUAT' | 'DALAM_PENGIRIMAN' | 'TERKIRIM_PROYEK';
+export type BuildingFleetType = 'PICKUP_RET' | 'TRUCK_ENGKEL' | 'DUMP_TRUCK';
+
+export interface BuildingDeliveryOrder {
+  id: string;
+  doNumber: string;
+  transactionId?: string;
+  receiptNumber?: string;
+  date: string;
+  customerId?: string;
+  customerName: string;
+  destination: string;
+  deliveryPolicy: 'FRANGKO' | 'LOCO';
+  fleetType: BuildingFleetType;
+  fleetVehicleName?: string;
+  estimatedVolumeM3: number;
+  itemsSummary: string;
+  shippingFee: number;
+  totalOrderValue: number;
+  status: BuildingDeliveryStatus;
+  driverName?: string;
+  vehiclePlate?: string;
+  notes?: string;
+  updatedAt: string;
+}
+
+export interface BulkShrinkageLog {
+  id: string;
+  date: string;
+  productId: string;
+  productName: string;
+  sku?: string;
+  unit: string;
+  systemQty: number;
+  physicalQty: number;
+  shrinkageQty: number;
+  costValueLoss: number;
+  reason: string;
+  recordedBy: string;
+  warehouse?: string;
+}
+
+export interface BuildingAuthRequest {
+  id: string;
+  requestNumber: string;
+  type: 'PLAFON_KREDIT_KONTRAKTOR' | 'DISKON_BORONGAN_FRANGKO';
+  createdAt: string;
+  customerId?: string;
+  contractorName: string;
+  projectTitle: string;
+  requestedBy: string;
+  currentCreditLimit?: number;
+  requestedCreditLimit?: number;
+  outstandingBalance?: number;
+  orderSubtotal?: number;
+  requestedDiscountPercent?: number;
+  requestedDiscountAmount?: number;
+  frangkoFeeWaived?: number;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 }
 
 // Double-Entry Bookkeeping Journal Line & Entry (APS POS5 General Ledger & COGS)
@@ -266,6 +573,39 @@ export interface JournalEntry {
   totalDebit?: number;
   totalCredit?: number;
   created_at?: string;
+  voucherNumber?: string;
+  debitAccount?: string;
+  creditAccount?: string;
+  status?: string;
+  createdBy?: string;
+  amount?: number;
+  promoSourceType?: 'FEFO_EXP' | 'SUPPLIER_TPR' | 'SEASONAL' | 'STORE_BND' | 'STORE_DISC' | string;
+  supplierName?: string;
+  promoCode?: string;
+  fefoSalvageRevenue?: number;
+  fefoQtySaved?: number;
+  businessSector?: CanonicalBusinessSector;
+  businessName?: string;
+  isDemoSeed?: boolean;
+}
+
+export interface SupplierRebateClaim {
+  id: string;
+  transactionId: string;
+  receiptNumber: string;
+  date: string;
+  supplierName: string;
+  promoCode: string;
+  promoName: string;
+  productNames: string[];
+  qtyUnits: number;
+  claimAmount: number;
+  status: 'CLAIMABLE' | 'DEDUCTED_AP' | 'SETTLED';
+  deductedInvoiceId?: string;
+  deductedInvoiceNumber?: string;
+  deductedAt?: string;
+  journalRef: string;
+  notes?: string;
 }
 
 export type PaymentMethod =
@@ -276,7 +616,9 @@ export type PaymentMethod =
   | 'TRANSFER'
   | 'KREDIT'
   | 'AR_CREDIT'
-  | 'KREDIT / TEMPO (AR)';
+  | 'KREDIT / TEMPO (AR)'
+  | 'SPLIT'
+  | 'KASBON';
 
 export type PriceTier = 'RETAIL' | 'MEMBER' | 'WHOLESALE';
 
@@ -288,7 +630,10 @@ export type SaleStatus =
   | 'Partially Returned'
   | 'Returned'
   | 'PARTIALLY_RETURNED'
-  | 'RETURNED';
+  | 'RETURNED'
+  | 'VOIDED'
+  | 'CANCELLED'
+  | 'VOID';
 
 export type SalesReturnCondition = 'GOOD' | 'DAMAGED';
 
@@ -342,8 +687,12 @@ export interface Sale {
   terminal_name: string;
   terminalId?: string;
   terminal_id?: string;
+  stationCode?: string;
   businessType?: string;
   business_type?: string;
+  businessSector?: CanonicalBusinessSector;
+  businessName?: string;
+  isDemoSeed?: boolean;
   items_summary: string;
   subtotal: number;
   discount: number;
@@ -364,7 +713,131 @@ export interface Sale {
   returned_amount?: number;
   sales_returns?: SalesReturn[];
   isOffline?: boolean;
-  syncStatus?: 'PENDING' | 'SYNCED' | 'FAILED';
+  syncStatus?: 'PENDING' | 'SYNCED' | 'FAILED' | 'PENDING_SYNC';
+  void_approved_by?: string;
+  void_reason?: string;
+  branchId?: string;
+  fnbOrderMode?: string;
+  fnbTableNo?: string;
+  vehiclePlate?: string;
+  mechanicName?: string;
+  stylistId?: string;
+  stylistName?: string;
+  stylistCommissionRate?: number;
+  serviceCommissionTotal?: number;
+  petOrClientName?: string;
+  deliveryFleetActive?: boolean;
+  deliveryPolicy?: 'FRANGKO' | 'LOCO';
+  fleetType?: BuildingFleetType;
+  fleetVehicleName?: string;
+  deliveryOrderNumber?: string;
+  deliveryDestination?: string;
+  shippingFee?: number;
+  dpAmount?: number;
+  tempoDays?: number;
+  dueDate?: string;
+  remainingBalance?: number;
+  promoSavingsTotal?: number;
+  cartVoucherDiscount?: number;
+  isContractorMode?: boolean;
+  loadingFee?: number;
+  materialRevenue?: number;
+  fleetDeliveryCost?: number;
+  netProfitAfterShipping?: number;
+  // Laundry Order, Bag Tag & Tracking metadata
+  isLaundryOrder?: boolean;
+  laundryTotalPieces?: number;
+  laundryConditionNotes?: string;
+  laundryEstimatedDoneAt?: string;
+  laundrySlaLabel?: string;
+  laundrySlaHours?: number;
+  laundryPaymentStatus?: LaundryPaymentStatus;
+  laundryBagTagCode?: string;
+  laundryRackNumber?: string;
+  laundryWasherId?: string;
+  laundryWasherName?: string;
+  laundryIronerId?: string;
+  laundryIronerName?: string;
+  laundrySpecialistId?: string;
+  laundrySpecialistName?: string;
+  // Fashion & Butik metadata
+  fashionAdvisorId?: string;
+  fashionAdvisorName?: string;
+  fashionAdvisorCommission?: number;
+  manualDiscountReason?: string;
+  manualDiscountAuthorizedBy?: string;
+  isFashionExchange?: boolean;
+  exchangeRefReceipt?: string;
+  exchangeSummary?: string;
+  splitCashAmount?: number;
+  splitNonCashAmount?: number;
+  splitNonCashMethod?: 'QRIS' | 'DEBIT' | 'TRANSFER' | string;
+}
+
+export type LaundryProductionStatus = 'DITERIMA' | 'CUCI' | 'SETRIKA' | 'SIAP_AMBIL' | 'DIAMBIL';
+export type LaundryPaymentStatus = 'LUNAS_AWAL' | 'DP' | 'BAYAR_AMBIL';
+
+export interface LaundryStageOperatorLog {
+  stage: LaundryProductionStatus;
+  roleType: 'CUCI' | 'SETRIKA' | 'TEKNISI_KHUSUS';
+  employeeId?: string;
+  employeeName: string;
+  timestamp: string;
+}
+
+export interface LaundryOrderRecord {
+  id: string;
+  orderNumber: string;
+  tagCode: string;
+  transactionId?: string;
+  createdAt: string;
+  customerName: string;
+  customerPhone: string;
+  totalPieces: number;
+  conditionNotes: string;
+  slaLabel: string;
+  slaHours: number;
+  estimatedDoneAt: string;
+  itemsSummary: string;
+  items: CartItem[];
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  paymentStatus: LaundryPaymentStatus;
+  paymentMethod: string;
+  productionStatus: LaundryProductionStatus;
+  rackNumber?: string;
+  handledBy?: string;
+  stationCode?: string;
+  washerEmployeeId?: string;
+  washerEmployeeName?: string;
+  ironerEmployeeId?: string;
+  ironerEmployeeName?: string;
+  specialistEmployeeId?: string;
+  specialistEmployeeName?: string;
+  stageOperatorLogs?: LaundryStageOperatorLog[];
+  pickedUpAt?: string;
+  updatedAt: string;
+}
+
+export interface LaundryStaffCommissionSummary {
+  employeeId: string;
+  employeeName: string;
+  nip: string;
+  role: string;
+  department: string;
+  ordersHandledCount: number;
+  washCount: number;
+  ironCount: number;
+  specialistCount: number;
+  kiloanKgProcessed: number;
+  satuanPcsProcessed: number;
+  pasangProcessed: number;
+  areaM2Processed: number;
+  ratePerKg: number;
+  ratePerItem: number;
+  rateSpecialist: number;
+  totalIncentive: number;
 }
 
 export type SalesHistory = Sale;
@@ -387,16 +860,20 @@ export interface CashierShift {
   cashierName: string;
   terminalId: string;
   terminalName: string;
+  stationCode?: string;
   startTime: string;
   endTime?: string;
   status: 'OPEN' | 'CLOSED';
+  isPaused?: boolean;
+  pausedAt?: string;
   initialCash: number; // Saldo Kas Awal / Modal Kasir
   totalCashSales: number; // Total Penjualan Tunai Sistem
   totalNonCashSales: number; // Total Non-Tunai (QRIS/EDC)
   totalTransactionsCount: number;
   totalExpenses: number; // Total Kas Keluar (Petty Cash)
+  totalSalesReturnCash?: number; // Total Retur Tunai
   expenses: CashierShiftExpense[];
-  expectedCashInDrawer: number; // Modal Awal + Penjualan Tunai - Kas Keluar
+  expectedCashInDrawer: number; // Modal Awal + Penjualan Tunai - Kas Keluar - Retur Tunai
   actualCashInDrawer?: number; // Hitungan Kas Fisik Riil
   difference?: number; // actual - expected
   notes?: string;
@@ -404,6 +881,11 @@ export interface CashierShift {
   closedAt?: string;
   reconciliationStatus?: 'MATCH' | 'SURPLUS' | 'SHORTAGE';
   denominationBreakdown?: Record<string, number>;
+  shiftName?: string;
+  openedAt?: string;
+  startingCash?: number;
+  expectedCash?: number;
+  actualCash?: number;
 }
 
 export type PurchaseOrderStatus =
@@ -497,6 +979,7 @@ export interface GoodsReceipt {
   receivedByUserId: string;
   status: 'VERIFIED' | 'CANCELLED';
   items: GoodsReceiptItem[];
+  totalAmount?: number;
   notes?: string;
   idempotencyKey: string;
 }
@@ -575,6 +1058,8 @@ export interface PurchaseOrder {
   received_by?: string;
   received_items?: GoodsReceiptItem[];
   receiving_notes?: string;
+  created_by?: string;
+  requiresDirectorApproval?: boolean;
 }
 
 export interface InventoryRecord {
@@ -585,6 +1070,9 @@ export interface InventoryRecord {
   out_qty: number;
   final_stock: number;
   last_update: string;
+  safety_stock?: number;
+  status?: string;
+  unit?: string;
 }
 
 export interface StockMutation {
@@ -614,10 +1102,10 @@ export interface Terminal {
   id: string;
   name: string;
   code: string;
-  colorHex: string;
-  neonBorderClass: string;
-  neonBgClass: string;
-  neonTextClass: string;
+  colorHex?: string;
+  neonBorderClass?: string;
+  neonBgClass?: string;
+  neonTextClass?: string;
   location: string;
   isActive: boolean;
   activeOrdersToday: number;
@@ -625,10 +1113,12 @@ export interface Terminal {
   businessType?: string;
   subLabel?: string;
   isLocked?: boolean;
-  modelType?: 'retail' | 'fnb' | 'supermarket' | 'pharmacy' | 'fashion' | 'warung' | 'electronics' | 'workshop' | 'building' | 'service' | 'salon' | 'services';
+  modelType?: 'retail' | 'fnb' | 'supermarket' | 'pharmacy' | 'fashion' | 'warung' | 'electronics' | 'workshop' | 'building' | 'service' | 'salon' | 'services' | 'laundry';
   allowAllCategories?: boolean;
   terminalType?: 'FRONT_END' | 'BACK_END';
   role?: 'FRONT_END_ONLY' | 'HYBRID_BACKEND';
+  stationCode?: string;
+  posType?: ActivePosType;
 }
 
 export interface FinanceEntry {
@@ -642,12 +1132,18 @@ export interface FinanceEntry {
   payment_method: string;
   account_target?: string;
   created_at?: string;
+  businessSector?: CanonicalBusinessSector;
+  businessName?: string;
+  isDemoSeed?: boolean;
 }
 
 export interface AuditLog {
   id: string;
   timestamp: string;
   user: string;
+  division?: string;
+  amount?: number;
+  category?: string;
   action: string;
   details: string;
   module: string;
@@ -696,6 +1192,7 @@ export interface CustomerMaster {
   customer_code?: string;
   name: string;
   memberTier?: 'Platinum' | 'Gold' | 'Silver' | 'Reguler' | string;
+  tier?: PriceTier | string;
   phone: string;
   email?: string;
   points?: number;
@@ -797,6 +1294,7 @@ export interface MigrationBatchRecord {
 }
 
 export interface PurchaseRequest {
+  id?: string;
   pr_number: string;
   date: string;
   department: string;
@@ -806,6 +1304,7 @@ export interface PurchaseRequest {
   estimated_cost: number;
   status:
     | 'Pending Approval'
+    | 'PENDING_APPROVAL'
     | 'PENDING'
     | 'Approved'
     | 'APPROVED'
@@ -817,6 +1316,7 @@ export interface PurchaseRequest {
     | 'Ditolak'
     | 'Cancelled';
   urgency: 'Low' | 'Medium' | 'High';
+  branchId?: string;
 }
 
 export interface ApprovalItem {
@@ -861,6 +1361,7 @@ export interface ContextualProfile {
   employeeId?: string;
   email?: string;
   avatarUrl?: string | null;
+  activeRoleLabel?: string;
 }
 
 export type ActiveNavModule =
@@ -873,10 +1374,12 @@ export type ActiveNavModule =
   | 'hr'
   | 'pos'
   | 'master-data'
-  | 'admin';
+  | 'admin'
+  | 'security';
 
 export type HrDepartment =
   | 'POS & Kasir'
+  | 'Produksi & Operator Laundry'
   | 'Warehouse & Logistik'
   | 'Purchasing'
   | 'Pengadaan & Purchasing'
@@ -916,6 +1419,10 @@ export interface Employee {
   dailyAllowance?: number;
   absenceDeduction?: number;
   cashierCommissionRate?: number;
+  fashionCommissionRate?: number;
+  laundryRatePerKg?: number;
+  laundryRatePerItem?: number;
+  laundryRateSpecialist?: number;
   bpjsEnabled?: boolean;
   payrollStatus?: 'PENDING' | 'PAID';
   payrollPaidAt?: string;
@@ -1025,7 +1532,7 @@ export interface PromotionProgram {
   bundleRequiredSkus?: { sku: string; qty: number; name?: string }[];
   startDate?: string;
   endDate?: string;
-  status: 'ACTIVE' | 'DRAFT' | 'EXPIRED' | 'PENDING' | 'PENDING_APPROVAL';
+  status: 'ACTIVE' | 'DRAFT' | 'EXPIRED' | 'PENDING' | 'PENDING_APPROVAL' | 'INACTIVE';
   minSpend?: number;
   approvedBy?: string;
   description?: string;
@@ -1080,24 +1587,152 @@ export interface TerminalConfigMetadata {
   pinRequired: boolean;
 }
 
+export interface BusinessBranch {
+  id: string; // 'BR-001', 'BR-002', dst.
+  branchCode: string;
+  name: string;
+  industryCategory: string; // 'RETAIL' | 'FNB' | 'PHARMACY' | 'BUILDING_MATERIALS' | 'PETSHOP_CLINIC' | 'SALON_LAUNDRY' | 'WORKSHOP'
+  isHeadquarters: boolean;
+  address: string;
+  phone: string;
+  whatsapp: string;
+  activeCashierCount: number; // 1, 2, atau 3
+  slogan: string;
+  footerNote: string;
+  status: 'ACTIVE' | 'INACTIVE';
+}
+
+export type CanonicalBusinessSector =
+  | 'FNB'
+  | 'FASHION'
+  | 'BUILDING'
+  | 'SERVICE'
+  | 'RETAIL';
+
+export type BusinessMechanismFamily =
+  | 'RETAIL_GENERAL'
+  | 'FNB_CULINARY'
+  | 'BUILDING_BULK'
+  | 'SPECIALTY_SERVICE';
+
+export type ActivePosType =
+  | 'POS_RETAIL'
+  | 'POS_GROSIR_DISTRIBUSI'
+  | 'POS_FNB'
+  | 'POS_BANGUNAN'
+  | 'POS_JASA_LAYANAN';
+
+export type BusinessModelId =
+  | 'TOKO_OBAT_KESEHATAN'
+  | 'TOKO_PROVISION_LARGE'
+  | 'TOKO_PROVISION_SMALL'
+  | 'WARUNG_KELONTONG'
+  | 'MINIMARKET'
+  | 'SUPERMARKET'
+  | 'GROSIR_BESAR'
+  | 'GROSIR_KECIL'
+  | 'DEPO_DISTRIBUTOR'
+  | 'RESTO_CAFE'
+  | 'BAHAN_BANGUNAN_MATERIAL'
+  | 'PET_SHOP'
+  | 'BARBERSHOP_SALON'
+  | 'LAUNDRY'
+  | 'TOKO_KOSMETIK_KECANTIKAN'
+  | 'TOKO_ATK'
+  | 'FASHION_BUTIK';
+
+export interface BusinessDomainSubFeatures {
+  isWholesale: boolean; // MOQ, Tier Grosir & Kredit/Piutang (RETAIL_GENERAL)
+  hasBomRecipe: boolean; // Menu Jadi & BOM Bahan Baku (FNB_CULINARY)
+  hasBulkVolumeDimension: boolean; // Curah m³/Ret & Dimensi PxLxT (BUILDING_BULK)
+  hasVariantMatrix: boolean; // Varian Ukuran & Warna (SPECIALTY_SERVICE)
+  hasSerialImei: boolean; // Serial Number & IMEI (SPECIALTY_SERVICE)
+  hasServiceOrder: boolean; // Jasa Barbershop, Salon & Laundry (SPECIALTY_SERVICE)
+}
+
+export type OperationalTopologyMode =
+  | 'NON_BLOCKING_ERP'
+  | 'PURE_POS'
+  | 'HYBRID_ALL_IN_ONE'
+  | 'ENTERPRISE_MULTI_STATION';
+
+export interface BusinessDomainConfig {
+  primaryBusinessModel: BusinessModelId;
+  mechanismFamily: BusinessMechanismFamily;
+  activePosTypes: ActivePosType[]; // Tipe POS Aktif (checkbox cards di Legalitas Usaha)
+  isHybridMultiUnit: boolean; // Mode Hybrid Multi-Unit (default: false / OFF)
+  subFeatures: BusinessDomainSubFeatures;
+  enabledHybridModels?: BusinessModelId[]; // Unit tambahan bila Mode Hybrid Multi-Unit aktif
+  operationalTopology?: OperationalTopologyMode; // Skala & Mode Request User
+  activeStationCount?: number; // Jumlah Loket / PC Kasir Aktif (1..10)
+}
+
 export interface BusinessEntityProfile {
   name: string;
-  category: string; // 'Ritel Modern' | 'F&B & Restoran' | 'Farmasi & Apotek' | 'Jasa & Servis' | 'Bahan Bangunan & Perkakas' | 'Fashion & Tekstil' | string
+  businessName?: string;
+  category: string; // 'Minimarket' | 'Resto & Cafe' | 'Grosir Besar' | 'Bahan Bangunan & Material' | string
+  businessType?: BusinessModelId | string;
+  activeSector?: CanonicalBusinessSector;
+  sector?: CanonicalBusinessSector | BusinessMechanismFamily | string;
+  posMode?: ActivePosType | string;
+  cashiers?: number;
+  updatedAt?: number;
   address: string;
   licenseNumber?: string; // NIB / Izin Usaha / NPWP (Opsional)
   nib?: string; // Nomor Induk Berusaha (NIB)
   npwp?: string; // Nomor Pokok Wajib Pajak (NPWP)
   phone?: string;
+  whatsapp?: string;
   email?: string;
   logoUrl?: string;
   website?: string;
   headerNote?: string;
   footerNote?: string;
   isConfigured: boolean;
+  // Central Business Domain & Mechanism Configuration
+  domainConfig?: BusinessDomainConfig;
   // POS & Architecture Settings
-  posUnitCount?: number; // Jumlah Unit Kasir Aktif (default 10 atau disesuaikan)
+  posUnitCount?: number; // Jumlah Loket / PC Kasir Aktif (1..10)
+  operationalTopology?: OperationalTopologyMode;
   cashierArchitecture?: 'CENTRALIZED_FRONTEND' | 'HYBRID_FRONT_BACKEND' | 'HYBRID_FRONT_BACK'; // 'Kasir Terpusat (Front-End Only)' | 'Hybrid (Front-End Kasir + Back-End Admin/Gudang)'
   terminalConfigs?: TerminalConfigMetadata[];
 }
 
+export type BusinessProfile = BusinessEntityProfile;
 
+
+export type BusinessRole = 'retail' | 'fnb' | 'building' | 'service';
+
+export interface InventoryBatch {
+  id: string;
+  productId: string;
+  purchaseDate: string; // ISO string
+  unitCost: number;     // Cost price of this batch
+  remainingQty: number; // Current quantity in this batch
+}
+
+export interface VoidItemLog {
+  id: string;
+  timestamp: string;
+  sku: string;
+  productName: string;
+  qty: number;
+  unitPrice: number;
+  cashierId: string;
+  reason: string;
+}
+
+export interface SystemError {
+  id: string;
+  timestamp: string;
+  branchId?: string;
+  module: string;
+  route?: string;
+  message: string;
+  stack?: string;
+  stackSummary?: string;
+  sourceFile?: string;
+  lineNumber?: number;
+  columnNumber?: number;
+  type: 'CRITICAL' | 'WARNING';
+}

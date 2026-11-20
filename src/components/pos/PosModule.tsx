@@ -1,98 +1,106 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Product, CartItem, PaymentMethod, Terminal, PriceTier, CustomerMaster, CashierShift, PaymentPayload, User as UserType, ActiveNavModule } from '../../types';
-import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
-import { calculateMemberTierLevel, LOYALTY_THRESHOLDS } from '../../utils/loyaltyUtils';
-import { FNB_PRODUCTS } from '../../data/fnbData';
+import { Product, CartItem, PaymentMethod, Terminal, PriceTier, CustomerMaster, CashierShift, ActiveNavModule, BuildingFleetType, LaundryPaymentStatus, ServiceItemFormat } from '../../types';
 import {
   filterProductsByTerminal,
-  INDUSTRY_DEMO_CARTS,
   getTerminalIndustry,
   TerminalIndustry,
+  FNB_RESTAURANT_PRODUCTS,
+  LAUNDRY_SERVICE_PRODUCTS,
+  FASHION_APPAREL_PRODUCTS,
 } from '../../data/industryTerminalProducts';
-import { TerminalUnlockModal } from './TerminalUnlockModal';
+import { FNB_MENU_ITEMS } from '../../data/fnbData';
+import {
+  BARBERSHOP_SERVICE_SEEDS,
+  LAUNDRY_SERVICE_SEEDS,
+  getServiceFormatMeta,
+  resolveServiceItemFormat,
+  isBarbershopSalonProduct,
+  isLaundryCatalogProduct,
+  isServiceProductActive,
+} from '../../data/serviceData';
+import { calculateServiceCommissionBreakdown } from '../../utils/sectorCoaMap';
 import { FnbModifierModal } from './FnbModifierModal';
+import { FnbQuickToppingModal, FnbQuickToppingResult } from './FnbQuickToppingModal';
 import { KotTicketModal } from './KotTicketModal';
 import { HeldOrdersModal, HeldOrder } from './HeldOrdersModal';
 import { HoldCartModal } from './HoldCartModal';
 import { SupervisorVoidModal } from './SupervisorVoidModal';
 import { QrisModal } from './QrisModal';
-import { VirtualNumpad } from './VirtualNumpad';
 import { ManualProductSearchModal } from './ManualProductSearchModal';
 import { DiscountVoucherModal } from './DiscountVoucherModal';
 import { EditCartItemModal } from './EditCartItemModal';
+import { FashionVariantPickerModal, FashionVariantSelection } from './FashionVariantPickerModal';
+import { FashionExchangeModal } from './FashionExchangeModal';
 import { OpenShiftModal } from './OpenShiftModal';
 import { CloseShiftModal } from './CloseShiftModal';
+import { QuickZReportModal } from './QuickZReportModal';
 import { PettyCashModal } from './PettyCashModal';
 import { ShiftSummaryReceiptModal } from './ShiftSummaryReceiptModal';
 import { PaymentModal } from './PaymentModal';
+import { LaundryTrackingBoard } from './LaundryTrackingBoard';
+import {
+  DigitalScaleModal,
+  LaundryAreaModal,
+  ScaleMeasurementPayload,
+  LaundryAreaPayload,
+} from './DigitalScaleModal';
 import { triggerCashDrawer } from '../../utils/cashDrawerUtils';
+import {
+  ACTIVE_POS_TYPE_OPTIONS,
+  getActivePosTypeOption,
+  getPosIdentityIdForBusinessModel,
+  getAllowedPosIdentityIds,
+  getBusinessModelDefinition,
+  getPettyCashReasonPresets,
+} from '../../utils/businessDomainConfig';
+import {
+  generatePosStations,
+  getOperationalTopologyOption,
+  normalizeStationCode,
+  peekStationReceiptNumber,
+  commitStationReceiptNumber,
+  PosStationDescriptor,
+  resolveSynchronizedTerminalDisplayName,
+} from '../../utils/terminalConfigUtils';
+import {
+  loadPromoCampaignsForDomain,
+  filterPromotionProgramsByDomain,
+  resolvePackageBarcodePromo,
+  getActivePackageProducts,
+  recalculateCartWithPromos,
+  getAvailablePwpOffers,
+  ResolvedPromoResult,
+} from '../../utils/promoEngine';
 import {
   Search,
   Plus,
-  Minus,
   Trash2,
-  Receipt,
   UserCheck,
   CreditCard,
   QrCode,
-  Banknote,
-  Building2,
-  CheckCircle,
   Tag,
   Package,
-  Layers,
-  Sparkles,
   Lock,
-  Unlock,
-  Percent,
   Barcode,
-  Maximize2,
-  Minimize2,
-  Volume2,
-  SlidersHorizontal,
   RotateCcw,
   ArrowLeft,
-  ChevronRight,
-  Clock,
-  Printer,
   ChefHat,
   UtensilsCrossed,
-  ShieldCheck,
-  ShieldAlert,
-  AlertTriangle,
   ShoppingBag,
   Smartphone,
   X,
-  Languages,
-  LayoutGrid,
-  FileSpreadsheet,
   Sun,
   Moon,
   Store,
-  Monitor,
   Edit3,
   Wallet,
-  Calculator,
-  ChevronUp,
   ChevronDown,
   Pause,
-  PauseCircle,
-  Ban,
   Inbox,
-  Truck,
-  MapPin,
-  User,
-  Users,
-  FileText,
-  CheckCircle2,
-  ArrowUpRight,
-  LogOut,
-  Wifi,
   WifiOff,
   RefreshCw,
   ShoppingCart,
-  Pill,
   Shirt,
   Wrench,
   HardHat,
@@ -101,355 +109,121 @@ import {
   LayoutDashboard,
   Boxes,
   Coins,
-  Shield,
+  Users,
+  Truck,
+  Minus,
+  Clock,
+  Layers,
+  Keyboard,
+  Monitor,
+  Unlock,
+  BarChart3,
+  ClipboardList,
+  Coffee,
+  Play,
+  ArrowLeftRight,
+  CheckCircle2,
   KeyRound,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Scale,
+  Maximize2,
+  Sparkles,
+  Percent,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { isLaundryProductionEmployee } from '../../utils/laundryCommission';
+import {
+  isBuildingMaterialProduct,
+  resolveBuildingItemTierPricing,
+  evaluateTierMarginGuard,
+  getMinSafeSellingPrice,
+  resolveBulkCubicConversionFactor,
+  estimateFleetDeliveryExpense,
+  calculateBuildingLoadingFeeTotal,
+} from '../../utils/buildingTierPricing';
 
-const TERMINAL_BILINGUAL: Record<string, { en: string; id: string }> = {
-  'T-01': { en: 'Retail & Wholesaler Modern', id: 'Retail & Wholesaler Modern' },
-  'T-02': { en: 'Food & Beverage (F&B)', id: 'Food & Beverage (F&B)' },
-  'T-03': { en: 'Pharmacy & Pet Shop', id: 'Pharmacy & Pet Shop' },
-  'T-04': { en: 'Fashion & Apparel', id: 'Fashion & Apparel' },
-  'T-05': { en: 'Building Materials & Hardware', id: 'Building Materials & Hardware' },
-  'T-06': { en: 'Electronics & Gadgets', id: 'Electronics & Gadgets' },
-  'T-07': { en: 'Automotive & Workshop', id: 'Automotive & Workshop' },
-  'T-08': { en: 'Salon & Barbershop', id: 'Salon & Barbershop' },
-  'T-09': { en: 'Building Materials & Hardware', id: 'Building Materials & Hardware' },
-  'T-10': { en: 'Salon & Barbershop', id: 'Salon & Barbershop' },
-};
-
-const TERMINAL_TRANSLATIONS: Record<string, { businessModel: string; subLabel: string }> = {
-  'T-01': { businessModel: 'Retail & Wholesaler Modern', subLabel: 'Master Data' },
-  'T-02': { businessModel: 'Food & Beverage (F&B)', subLabel: 'Master Data' },
-  'T-03': { businessModel: 'Pharmacy & Pet Shop', subLabel: 'Master Data' },
-  'T-04': { businessModel: 'Fashion & Apparel', subLabel: 'Master Data' },
-  'T-05': { businessModel: 'Building Materials & Hardware', subLabel: 'Master Data' },
-  'T-06': { businessModel: 'Electronics & Gadgets', subLabel: 'Master Data' },
-  'T-07': { businessModel: 'Automotive & Workshop', subLabel: 'Master Data' },
-  'T-08': { businessModel: 'Salon & Barbershop', subLabel: 'Master Data' },
-  'T-09': { businessModel: 'Building Materials & Hardware', subLabel: 'Master Data' },
-  'T-10': { businessModel: 'Salon & Barbershop', subLabel: 'Master Data' },
-};
-
-interface PosTerminalCardTheme {
+interface PosIdentityCard {
+  id: string;
+  stationCode: string;
+  receiptPrefixTag: string;
+  code: string;
+  posName: string;
+  posTypeLabel: string;
+  modelType: Terminal['modelType'];
   emoji: string;
   icon: React.ComponentType<{ className?: string }>;
-  iconColor?: string;
-  cardTitleId: string;
-  cardTitleEn: string;
-  subtitle: string;
-  businessModel: string;
-  descId: string;
-  descEn: string;
-  borderClass: string;
-  buttonColor: string;
+  isHybrid?: boolean;
 }
 
-const POS_TERMINAL_CARD_THEMES: Record<string, PosTerminalCardTheme> = {
-  'T-01': {
-    emoji: '🛒',
-    icon: ShoppingCart,
-    iconColor: 'text-cyan-600 dark:text-cyan-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Ritel & Grosir)',
-    businessModel: 'Ritel & Grosir Modern',
-    descId: 'Kasir ritel modern, toko kelontong, minimarket & grosir.',
-    descEn: 'Modern retail checkout, grocery store & wholesale.',
-    borderClass: 'border-cyan-500/40 hover:border-cyan-400',
-    buttonColor: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950',
-  },
-  'T-02': {
-    emoji: '🍳',
-    icon: UtensilsCrossed,
-    iconColor: 'text-amber-600 dark:text-amber-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Makanan & Minuman)',
-    businessModel: 'Makanan & Minuman (F&B)',
-    descId: 'Loket kasir FnB / resto, cetak tiket dapur KOT & meja.',
-    descEn: 'FnB & dining cashier, kitchen KOT tickets & table orders.',
-    borderClass: 'border-amber-500/40 hover:border-amber-400',
-    buttonColor: 'bg-amber-500 hover:bg-amber-400 text-slate-950',
-  },
-  'T-03': {
-    emoji: '💊🐾',
-    icon: Pill,
-    iconColor: 'text-rose-600 dark:text-rose-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Farmasi & Toko Hewan)',
-    businessModel: 'Farmasi & Toko Hewan',
-    descId: 'Apotek, obat resep, pakan & vitamin kebutuhan hewan.',
-    descEn: 'Pharmacy, prescription drugs, pet food & animal vitamins.',
-    borderClass: 'border-rose-500/40 hover:border-rose-400',
-    buttonColor: 'bg-rose-500 hover:bg-rose-400 text-white',
-  },
-  'T-04': {
-    emoji: '👗',
-    icon: Shirt,
-    iconColor: 'text-fuchsia-600 dark:text-fuchsia-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Fashion & Busana)',
-    businessModel: 'Fashion & Busana',
-    descId: 'Loket butik fashion, varian ukuran/warna & barcode.',
-    descEn: 'Fashion boutique, color/size variants & barcode checkout.',
-    borderClass: 'border-fuchsia-500/40 hover:border-fuchsia-400',
-    buttonColor: 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white',
-  },
-  'T-05': {
-    emoji: '🏗️',
-    icon: HardHat,
-    iconColor: 'text-emerald-600 dark:text-emerald-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Bahan Bangunan & Perkakas)',
-    businessModel: 'Bahan Bangunan & Perkakas',
-    descId: 'Penjualan semen, cat, besi, alat teknik & material.',
-    descEn: 'Cement, paint, steel, construction tools & materials.',
-    borderClass: 'border-emerald-500/40 hover:border-emerald-400',
-    buttonColor: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950',
-  },
-  'T-06': {
-    emoji: '📱',
-    icon: Smartphone,
-    iconColor: 'text-violet-600 dark:text-violet-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Elektronik & Gawai)',
-    businessModel: 'Elektronik & Gawai',
-    descId: 'Loket elektronik, scan nomor seri IMEI & kartu garansi.',
-    descEn: 'Electronics checkout, IMEI/SN serial tracking & warranty.',
-    borderClass: 'border-violet-500/40 hover:border-violet-400',
-    buttonColor: 'bg-violet-500 hover:bg-violet-400 text-white',
-  },
-  'T-07': {
-    emoji: '🔧',
-    icon: Wrench,
-    iconColor: 'text-orange-600 dark:text-orange-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Bengkel & Otomotif)',
-    businessModel: 'Bengkel & Otomotif',
-    descId: 'Estimasi servis bengkel, suku cadang & mekanik.',
-    descEn: 'Workshop service estimates, spare parts & mechanics.',
-    borderClass: 'border-orange-500/40 hover:border-orange-400',
-    buttonColor: 'bg-orange-500 hover:bg-orange-400 text-white',
-  },
-  'T-08': {
-    emoji: '💈',
-    icon: Scissors,
-    iconColor: 'text-teal-600 dark:text-teal-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Salon & Barbershop)',
-    businessModel: 'Salon & Barbershop',
-    descId: 'Layanan potong rambut, komisi kapster & perawatan.',
-    descEn: 'Haircuts, queue, barber stylists & grooming products.',
-    borderClass: 'border-teal-500/40 hover:border-teal-400',
-    buttonColor: 'bg-teal-500 hover:bg-teal-400 text-slate-950',
-  },
-  'T-09': {
-    emoji: '🏗️',
-    icon: HardHat,
-    iconColor: 'text-emerald-600 dark:text-emerald-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Bahan Bangunan & Perkakas)',
-    businessModel: 'Bahan Bangunan & Perkakas',
-    descId: 'Penjualan semen, cat, besi, alat teknik & material.',
-    descEn: 'Cement, paint, steel, construction tools & materials.',
-    borderClass: 'border-emerald-500/40 hover:border-emerald-400',
-    buttonColor: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950',
-  },
-  'T-10': {
-    emoji: '💈',
-    icon: Scissors,
-    iconColor: 'text-teal-600 dark:text-teal-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(Salon & Barbershop)',
-    businessModel: 'Salon & Barbershop',
-    descId: 'Layanan potong rambut, komisi kapster & perawatan.',
-    descEn: 'Haircuts, queue, barber stylists & grooming products.',
-    borderClass: 'border-teal-500/40 hover:border-teal-400',
-    buttonColor: 'bg-teal-500 hover:bg-teal-400 text-slate-950',
-  },
-};
-
-const INDUSTRY_CLONE_TEMPLATES: Record<TerminalIndustry, {
-  emoji: string;
-  icon: React.ComponentType<{ className?: string }>;
-  iconColor: string;
-  cardTitleId: string;
-  cardTitleEn: string;
-  subtitle: string;
-  businessModel: string;
-  modelType: Terminal['modelType'];
-  location: string;
-  descId: string;
-  descEn: string;
-  borderClass: string;
-  buttonColor: string;
-  colorHex: string;
-  neonBorderClass: string;
-  neonBgClass: string;
-  neonTextClass: string;
-}> = {
-  retail: {
-    emoji: '🛒',
-    icon: ShoppingCart,
-    iconColor: 'text-cyan-600 dark:text-cyan-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(retail & wholesaler)',
-    businessModel: 'Retail & Wholesaler Modern',
+const POS_NINE_IDENTITIES: Omit<PosIdentityCard, 'stationCode' | 'receiptPrefixTag' | 'posTypeLabel'>[] = [
+  {
+    id: 'T-01',
+    code: 'POS-RETAIL',
+    posName: 'POS Retail',
     modelType: 'retail',
-    location: 'Modern Retail & Wholesale',
-    descId: 'Kasir ritel modern, toko kelontong, minimarket & grosir.',
-    descEn: 'Modern retail checkout, grocery store & wholesale.',
-    borderClass: 'border-cyan-500/40 hover:border-cyan-400',
-    buttonColor: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950',
-    colorHex: '#00F0FF',
-    neonBorderClass: 'border-cyan-500/40',
-    neonBgClass: 'bg-cyan-500/10',
-    neonTextClass: 'text-cyan-400',
+    emoji: '🛒',
+    icon: ShoppingCart,
   },
-  fnb: {
+  {
+    id: 'T-02',
+    code: 'POS-FNB',
+    posName: 'POS F&B (Resto & Cafe)',
+    modelType: 'fnb',
     emoji: '🍳',
     icon: UtensilsCrossed,
-    iconColor: 'text-amber-600 dark:text-amber-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(food & beverage)',
-    businessModel: 'Food & Beverage (F&B)',
-    modelType: 'fnb',
-    location: 'Dining & Kitchen',
-    descId: 'Loket kasir FnB / resto, cetak tiket dapur KOT & meja.',
-    descEn: 'FnB & dining cashier, kitchen KOT tickets & table orders.',
-    borderClass: 'border-amber-500/40 hover:border-amber-400',
-    buttonColor: 'bg-amber-500 hover:bg-amber-400 text-slate-950',
-    colorHex: '#F59E0B',
-    neonBorderClass: 'border-amber-500/40',
-    neonBgClass: 'bg-amber-500/10',
-    neonTextClass: 'text-amber-400',
+    isHybrid: true,
   },
-  pharmacy: {
-    emoji: '💊🐾',
-    icon: Pill,
-    iconColor: 'text-rose-600 dark:text-rose-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(pharmacy & pet shop)',
-    businessModel: 'Pharmacy & Pet Shop',
-    modelType: 'pharmacy',
-    location: 'Dispensary & Pet Store',
-    descId: 'Apotek, obat resep, pakan & vitamin kebutuhan hewan.',
-    descEn: 'Pharmacy, prescription drugs, pet food & animal vitamins.',
-    borderClass: 'border-rose-500/40 hover:border-rose-400',
-    buttonColor: 'bg-rose-500 hover:bg-rose-400 text-white',
-    colorHex: '#F43F5E',
-    neonBorderClass: 'border-rose-500/40',
-    neonBgClass: 'bg-rose-500/10',
-    neonTextClass: 'text-rose-400',
+  {
+    id: 'T-03',
+    code: 'POS-GROSIR',
+    posName: 'POS Grosir & Distribusi',
+    modelType: 'retail',
+    emoji: '📦',
+    icon: Store,
   },
-  fashion: {
+  {
+    id: 'T-04',
+    code: 'POS-FASHION',
+    posName: 'Fashion & Butik',
+    modelType: 'fashion',
     emoji: '👗',
     icon: Shirt,
-    iconColor: 'text-fuchsia-600 dark:text-fuchsia-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(fashion & apparel)',
-    businessModel: 'Fashion & Apparel',
-    modelType: 'fashion',
-    location: 'Boutique & Wardrobe',
-    descId: 'Loket butik fashion, varian ukuran/warna & barcode.',
-    descEn: 'Fashion boutique, color/size variants & barcode checkout.',
-    borderClass: 'border-fuchsia-500/40 hover:border-fuchsia-400',
-    buttonColor: 'bg-fuchsia-500 hover:bg-fuchsia-400 text-white',
-    colorHex: '#D946EF',
-    neonBorderClass: 'border-fuchsia-500/40',
-    neonBgClass: 'bg-fuchsia-500/10',
-    neonTextClass: 'text-fuchsia-400',
   },
-  building: {
+  {
+    id: 'T-05',
+    code: 'POS-BUILD',
+    posName: 'POS Bahan Bangunan & Material',
+    modelType: 'building',
     emoji: '🏗️',
     icon: HardHat,
-    iconColor: 'text-emerald-600 dark:text-emerald-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(building materials & hardware)',
-    businessModel: 'Building Materials & Hardware',
-    modelType: 'building',
-    location: 'Depo Bahan Bangunan',
-    descId: 'Penjualan semen, cat, besi, alat teknik & material.',
-    descEn: 'Cement, paint, steel, construction tools & materials.',
-    borderClass: 'border-emerald-500/40 hover:border-emerald-400',
-    buttonColor: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950',
-    colorHex: '#10B981',
-    neonBorderClass: 'border-emerald-500/40',
-    neonBgClass: 'bg-emerald-500/10',
-    neonTextClass: 'text-emerald-400',
   },
-  electronics: {
+  {
+    id: 'T-06',
+    code: 'POS-GADGET',
+    posName: 'Elektronik & Gadget',
+    modelType: 'electronics',
     emoji: '📱',
     icon: Smartphone,
-    iconColor: 'text-violet-600 dark:text-violet-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(electronics & gadgets)',
-    businessModel: 'Electronics & Gadgets',
-    modelType: 'electronics',
-    location: 'Gadget & Tech Store',
-    descId: 'Loket elektronik, scan nomor seri IMEI & kartu garansi.',
-    descEn: 'Electronics checkout, IMEI/SN serial tracking & warranty.',
-    borderClass: 'border-violet-500/40 hover:border-violet-400',
-    buttonColor: 'bg-violet-500 hover:bg-violet-400 text-white',
-    colorHex: '#8B5CF6',
-    neonBorderClass: 'border-violet-500/40',
-    neonBgClass: 'bg-violet-500/10',
-    neonTextClass: 'text-violet-400',
   },
-  workshop: {
+  {
+    id: 'T-07',
+    code: 'POS-AUTO',
+    posName: 'Bengkel & Otomotif',
+    modelType: 'workshop',
     emoji: '🔧',
     icon: Wrench,
-    iconColor: 'text-orange-600 dark:text-orange-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(automotive & workshop)',
-    businessModel: 'Automotive & Workshop',
-    modelType: 'workshop',
-    location: 'Service Bay & Workshop',
-    descId: 'Estimasi servis bengkel, suku cadang & mekanik.',
-    descEn: 'Workshop service estimates, spare parts & mechanics.',
-    borderClass: 'border-orange-500/40 hover:border-orange-400',
-    buttonColor: 'bg-orange-500 hover:bg-orange-400 text-white',
-    colorHex: '#F97316',
-    neonBorderClass: 'border-orange-500/40',
-    neonBgClass: 'bg-orange-500/10',
-    neonTextClass: 'text-orange-400',
   },
-  salon: {
+  {
+    id: 'T-08',
+    code: 'POS-SERVICE',
+    posName: 'POS Jasa & Layanan',
+    modelType: 'salon',
     emoji: '💈',
     icon: Scissors,
-    iconColor: 'text-teal-600 dark:text-teal-400',
-    cardTitleId: 'JacS Kasir',
-    cardTitleEn: 'Cashier JacS',
-    subtitle: '(salon & barbershop)',
-    businessModel: 'Salon & Barbershop',
-    modelType: 'salon',
-    location: 'Beauty & Grooming Station',
-    descId: 'Layanan potong rambut, komisi kapster & perawatan.',
-    descEn: 'Haircuts, queue, barber stylists & grooming products.',
-    borderClass: 'border-teal-500/40 hover:border-teal-400',
-    buttonColor: 'bg-teal-500 hover:bg-teal-400 text-slate-950',
-    colorHex: '#14B8A6',
-    neonBorderClass: 'border-teal-500/40',
-    neonBgClass: 'bg-teal-500/10',
-    neonTextClass: 'text-teal-400',
   },
-};
+];
 
 interface CashierSlotAccent {
   borderClass: string;
@@ -468,7 +242,6 @@ interface CashierSlotAccent {
 }
 
 const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
-  // Slot 0 -> KASIR 01: Cyan / Biru Ritel
   {
     borderClass: 'border-cyan-500 hover:border-cyan-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(6,182,212,0.35)]',
@@ -484,7 +257,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(6,182,212,0.4)]',
     ringClass: 'ring-2 ring-cyan-400',
   },
-  // Slot 1 -> KASIR 02: Amber / Emas (Hybrid Back-End)
   {
     borderClass: 'border-amber-500 hover:border-amber-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(245,158,11,0.35)]',
@@ -500,7 +272,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
     ringClass: 'ring-2 ring-amber-400',
   },
-  // Slot 2 -> KASIR 03: Emerald / Hijau
   {
     borderClass: 'border-emerald-500 hover:border-emerald-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(16,185,129,0.35)]',
@@ -516,7 +287,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
     ringClass: 'ring-2 ring-emerald-400',
   },
-  // Slot 3 -> KASIR 04: Purple / Violet
   {
     borderClass: 'border-purple-500 hover:border-purple-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(168,85,247,0.35)]',
@@ -532,7 +302,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-purple-500 hover:bg-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]',
     ringClass: 'ring-2 ring-purple-400',
   },
-  // Slot 4 -> KASIR 05: Rose
   {
     borderClass: 'border-rose-500 hover:border-rose-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(244,63,94,0.35)]',
@@ -548,7 +317,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-rose-500 hover:bg-rose-400 text-white shadow-[0_0_12px_rgba(244,63,94,0.4)]',
     ringClass: 'ring-2 ring-rose-400',
   },
-  // Slot 5 -> KASIR 06: Blue / Indigo
   {
     borderClass: 'border-blue-500 hover:border-blue-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(59,130,246,0.35)]',
@@ -564,7 +332,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_12px_rgba(59,130,246,0.4)]',
     ringClass: 'ring-2 ring-blue-400',
   },
-  // Slot 6 -> KASIR 07: Orange
   {
     borderClass: 'border-orange-500 hover:border-orange-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(249,115,22,0.35)]',
@@ -580,23 +347,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-orange-500 hover:bg-orange-400 text-white shadow-[0_0_12px_rgba(249,115,22,0.4)]',
     ringClass: 'ring-2 ring-orange-400',
   },
-  // Slot 7 -> KASIR 08: Indigo
-  {
-    borderClass: 'border-indigo-500 hover:border-indigo-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(99,102,241,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-indigo-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-indigo-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-indigo-100/80',
-    iconBgDark: 'bg-indigo-950/60',
-    iconBorder: 'border-indigo-500/50',
-    iconColor: 'text-indigo-600 dark:text-indigo-400',
-    badgeBg: 'bg-indigo-500/15',
-    badgeText: 'text-indigo-700 dark:text-indigo-300',
-    badgeBorder: 'border-indigo-500/30',
-    buttonColor: 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_12px_rgba(99,102,241,0.4)]',
-    ringClass: 'ring-2 ring-indigo-400',
-  },
-  // Slot 8 -> KASIR 09: Teal
   {
     borderClass: 'border-teal-500 hover:border-teal-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(20,184,166,0.35)]',
@@ -612,7 +362,6 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
     buttonColor: 'bg-teal-500 hover:bg-teal-400 text-slate-950 shadow-[0_0_12px_rgba(20,184,166,0.4)]',
     ringClass: 'ring-2 ring-teal-400',
   },
-  // Slot 9 -> KASIR 10: Pink
   {
     borderClass: 'border-pink-500 hover:border-pink-400',
     glowClass: 'hover:shadow-[0_0_20px_rgba(236,72,153,0.35)]',
@@ -630,65 +379,499 @@ const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
   },
 ];
 
-export const PosModule: React.FC = () => {
+export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
+  returnToRegisterSignal = 0,
+}) => {
   const {
     terminals,
-    activeTerminal,
+    activeTerminal: contextActiveTerminal,
     setActiveTerminal,
-    addTerminal,
-    toggleTerminalLock,
-    setAllTerminalsLock,
     activeUser,
     currentUser,
-    setCurrentUser,
-    setActiveUser,
-    isSuperAdminAuthenticated,
-    openPinAuth,
     products,
+    addProduct,
     customers,
-    setCustomers,
-    processSale,
-    processPayment,
     sales,
-    showReceipt,
-    closeReceipt,
+    processPayment,
     isReceiptModalOpen,
     showToast,
     theme,
     toggleTheme,
-    isCashierWorkspaceActive,
     setIsCashierWorkspaceActive,
     addAuditLog,
     users,
     language: globalLanguage,
-    setLanguage: setGlobalLanguage,
-    // POS Cashier Shift & Cash Reconciliation (APS POS4: 32_ShiftKasir)
     activeShift,
-    shiftsHistory,
-    openCashierShift,
-    recordShiftExpense,
-    closeCashierShift,
+    getOpenShiftForStation,
+    toggleStationBreak,
+    verifyManagementAuthPin,
+    boundStation,
+    bindPosStation,
+    unbindPosStation,
     businessProfile,
+    businessDomainConfig,
+    activeSector,
+    isFnb,
+    isFashion,
+    isBuilding,
+    isService,
+    isRetail,
     setActiveNav,
-    updateBusinessProfile,
     isOnline,
     offlineQueue,
-    syncOfflineQueue,
     syncOfflineTransactions,
+    promotions,
+    submitBuildingAuthRequest,
+    laundryOrders,
+    employees,
+    serviceStylists,
+    processFashionExchange,
+    isMasterCatalogWiped,
   } = useApp();
+
+  const isHybridMode = Boolean(businessDomainConfig?.isHybridMultiUnit);
+  const activeBusinessModelDef = useMemo(
+    () => getBusinessModelDefinition(businessDomainConfig.primaryBusinessModel),
+    [businessDomainConfig.primaryBusinessModel]
+  );
+  const activePosTypes = useMemo(
+    () =>
+      businessDomainConfig.activePosTypes && businessDomainConfig.activePosTypes.length > 0
+        ? businessDomainConfig.activePosTypes
+        : [activeBusinessModelDef.defaultPosType],
+    [businessDomainConfig.activePosTypes, activeBusinessModelDef.defaultPosType]
+  );
+  const activeStationCount = Math.max(
+    1,
+    Math.min(
+      10,
+      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1
+    )
+  );
+  const activeStations: PosStationDescriptor[] = useMemo(
+    () =>
+      generatePosStations(
+        activeStationCount,
+        activePosTypes,
+        businessDomainConfig.primaryBusinessModel
+      ),
+    [activeStationCount, activePosTypes, businessDomainConfig.primaryBusinessModel]
+  );
+  const primaryPosIdentityId = useMemo(
+    () =>
+      getPosIdentityIdForBusinessModel(
+        businessDomainConfig.primaryBusinessModel,
+        businessProfile?.category
+      ),
+    [businessDomainConfig.primaryBusinessModel, businessProfile?.category]
+  );
+  const allowedPosIdentityIds = useMemo(
+    () => getAllowedPosIdentityIds(businessDomainConfig, businessProfile?.category),
+    [businessDomainConfig, businessProfile?.category]
+  );
+
+  const visiblePosIdentities = useMemo(() => {
+    const iconByPosType: Record<string, React.ComponentType<{ className?: string }>> = {
+      POS_RETAIL: ShoppingCart,
+      POS_GROSIR_DISTRIBUSI: Store,
+      POS_FNB: UtensilsCrossed,
+      POS_BANGUNAN: HardHat,
+      POS_JASA_LAYANAN: Scissors,
+    };
+
+    const stationCards: PosIdentityCard[] = activeStations.map((st) => ({
+      id: st.stationCode,
+      stationCode: st.stationCode,
+      receiptPrefixTag: st.receiptPrefixTag,
+      code: st.posCode,
+      posName: st.displayName,
+      posTypeLabel: st.posTypeLabel,
+      modelType: st.modelType,
+      emoji: st.emoji,
+      icon: iconByPosType[st.posType] || ShoppingCart,
+      isHybrid: st.posType === 'POS_FNB' && (isHybridMode || activePosTypes.length > 1),
+    }));
+
+    return stationCards;
+  }, [activeStations, isHybridMode, activePosTypes.length]);
+
+  const activeTerminal = contextActiveTerminal || terminals[0];
+  const activeStationCode = normalizeStationCode(
+    activeTerminal?.stationCode ||
+      activeTerminal?.id ||
+      boundStation?.stationCode ||
+      activeStations[0]?.stationCode ||
+      'POS-01'
+  );
+  const activeStationShift = useMemo(
+    () => getOpenShiftForStation(activeStationCode) || null,
+    [getOpenShiftForStation, activeStationCode]
+  );
+
+  useEffect(() => {
+    if (visiblePosIdentities.length === 0) return;
+
+    const boundMatch = boundStation
+      ? visiblePosIdentities.find((st) => st.stationCode === boundStation.stationCode)
+      : undefined;
+
+    if (boundMatch) {
+      if (
+        !contextActiveTerminal ||
+        contextActiveTerminal.id !== boundMatch.stationCode ||
+        contextActiveTerminal.stationCode !== boundMatch.stationCode ||
+        contextActiveTerminal.name !== boundMatch.posName ||
+        contextActiveTerminal.modelType !== boundMatch.modelType ||
+        contextActiveTerminal.businessModel !== boundMatch.posTypeLabel
+      ) {
+        setActiveTerminal({
+          id: boundMatch.stationCode,
+          stationCode: boundMatch.stationCode,
+          name: boundMatch.posName,
+          code: boundMatch.stationCode,
+          location: boundMatch.posTypeLabel,
+          isActive: true,
+          activeOrdersToday: contextActiveTerminal?.activeOrdersToday ?? 0,
+          businessModel: boundMatch.posTypeLabel,
+          businessType: boundMatch.posTypeLabel,
+          modelType: boundMatch.modelType,
+          isLocked: false,
+          role: boundMatch.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
+          terminalType: boundMatch.isHybrid ? 'BACK_END' : 'FRONT_END',
+        });
+      }
+      return;
+    }
+
+    const matchedStation = visiblePosIdentities.find(
+      (item) =>
+        item.stationCode === contextActiveTerminal?.stationCode ||
+        item.id === contextActiveTerminal?.id
+    );
+
+    if (
+      !contextActiveTerminal ||
+      !matchedStation ||
+      contextActiveTerminal.name !== matchedStation.posName ||
+      contextActiveTerminal.modelType !== matchedStation.modelType ||
+      contextActiveTerminal.businessModel !== matchedStation.posTypeLabel
+    ) {
+      const targetStation = matchedStation || visiblePosIdentities[0];
+      setActiveTerminal({
+        id: targetStation.stationCode,
+        stationCode: targetStation.stationCode,
+        name: targetStation.posName,
+        code: targetStation.stationCode,
+        location: targetStation.posTypeLabel,
+        isActive: true,
+        activeOrdersToday: contextActiveTerminal?.activeOrdersToday ?? 0,
+        businessModel: targetStation.posTypeLabel,
+        businessType: targetStation.posTypeLabel,
+        modelType: targetStation.modelType,
+        isLocked: false,
+        role: targetStation.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
+        terminalType: targetStation.isHybrid ? 'BACK_END' : 'FRONT_END',
+      });
+    }
+  }, [boundStation, visiblePosIdentities, contextActiveTerminal, setActiveTerminal, activeSector]);
 
   const isEn = globalLanguage === 'en';
   const language: 'ID' | 'EN' = isEn ? 'EN' : 'ID';
-  const isSuperAdmin = Boolean(
-    isSuperAdminAuthenticated || activeUser?.role === 'Super Admin'
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hasExplicitLobbyReturn, setHasExplicitLobbyReturn] = useState(false);
+  const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(() =>
+    Boolean(activeStationShift && activeStationShift.status === 'OPEN')
+  );
+  const [hoveredTerminalId, setHoveredTerminalId] = useState<string | null>(null);
+  const [isStationPickerOpen, setIsStationPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (returnToRegisterSignal > 0) {
+      setHasExplicitLobbyReturn(false);
+      if (activeStationShift && activeStationShift.status === 'OPEN') {
+        setIsRegisterOpen(true);
+      }
+    }
+  }, [returnToRegisterSignal, activeStationShift]);
+
+  useEffect(() => {
+    if (
+      activeStationShift &&
+      activeStationShift.status === 'OPEN' &&
+      !hasExplicitLobbyReturn &&
+      !isStationPickerOpen &&
+      !isRegisterOpen
+    ) {
+      setIsRegisterOpen(true);
+    }
+  }, [activeStationShift, hasExplicitLobbyReturn, isStationPickerOpen, isRegisterOpen]);
+
+  // Proteksi PIN Otorisasi Manajemen untuk "Ganti Loket PC" & navigasi ke modul manajemen
+  const [pendingPosAuthAction, setPendingPosAuthAction] = useState<
+    | { type: 'SWITCH_STATION' }
+    | { type: 'NAVIGATE_MODULE'; moduleId: ActiveNavModule; label: string }
+    | null
+  >(null);
+  const [posMgmtPinInput, setPosMgmtPinInput] = useState('');
+  const [posMgmtPinError, setPosMgmtPinError] = useState<string | null>(null);
+  const [showPosMgmtPin, setShowPosMgmtPin] = useState(false);
+
+  const openPosMgmtPinPrompt = (
+    action:
+      | { type: 'SWITCH_STATION' }
+      | { type: 'NAVIGATE_MODULE'; moduleId: ActiveNavModule; label: string }
+  ) => {
+    setPosMgmtPinInput('');
+    setPosMgmtPinError(null);
+    setShowPosMgmtPin(false);
+    setPendingPosAuthAction(action);
+  };
+
+  const handleConfirmPosMgmtPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingPosAuthAction) return;
+    if (!verifyManagementAuthPin(posMgmtPinInput)) {
+      setPosMgmtPinError('PIN Otorisasi Manajemen salah! Periksa kembali PIN 6 digit dari SuperAdmin.');
+      addAuditLog(
+        'POS_MANAGEMENT_PIN_FAILED',
+        `Verifikasi PIN gagal saat mencoba aksi ${pendingPosAuthAction.type} di POS.`,
+        'WARNING'
+      );
+      showToast('PIN Otorisasi Manajemen salah! Akses ditolak.', 'error');
+      return;
+    }
+
+    const approved = pendingPosAuthAction;
+    setPendingPosAuthAction(null);
+    setPosMgmtPinInput('');
+    setPosMgmtPinError(null);
+
+    if (approved.type === 'SWITCH_STATION') {
+      setIsStationPickerOpen(true);
+      addAuditLog('POS_STATION_SWITCH_AUTHORIZED', 'PIN Otorisasi Manajemen valid untuk Ganti Loket PC.', 'INFO');
+    } else {
+      setIsCashierWorkspaceActive(false);
+      setActiveNav(approved.moduleId);
+      addAuditLog(
+        'POS_MODULE_SWITCH_AUTHORIZED',
+        `PIN Otorisasi Manajemen valid untuk membuka ${approved.label}.`,
+        'INFO'
+      );
+      showToast(`Otorisasi berhasil. Mengalihkan ke modul ${approved.label}...`, 'success');
+    }
+  };
+
+  const KOT_GRACE_PERIOD_MS = 5 * 60 * 1000;
+  const KOT_EXPIRED_LOCK_MESSAGE =
+    'Batas waktu revisi/pembatalan 5 menit setelah KOT Dapur telah berakhir. Pesanan sudah diproses dapur dan tidak dapat dibatalkan.';
+  const KOT_TOPPING_LOCK_MESSAGE =
+    'Batas waktu revisi 5 menit setelah KOT Dapur telah berakhir. Silakan tambah baris menu baru untuk pesanan dengan topping berbeda.';
+
+  interface StationCartWorkspace {
+    cart: CartItem[];
+    fnbOrderMode: 'Dine-In' | 'Takeaway' | 'Delivery';
+    fnbTableNo: string;
+    hasSentKot: boolean;
+    kotSentAt: number | null;
+    kotVoidedItems: string[];
+    kotRevisedItems?: string[];
+  }
+
+  const DEFAULT_STATION_WORKSPACE: StationCartWorkspace = {
+    cart: [],
+    fnbOrderMode: 'Dine-In',
+    fnbTableNo: 'Meja 01',
+    hasSentKot: false,
+    kotSentAt: null,
+    kotVoidedItems: [],
+    kotRevisedItems: [],
+  };
+
+  const [stationWorkspaces, setStationWorkspaces] = useState<Record<string, StationCartWorkspace>>(() => {
+    try {
+      const saved = localStorage.getItem('jacs_pos_station_carts_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {}
+    return {};
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('jacs_pos_station_carts_v1', JSON.stringify(stationWorkspaces));
+    } catch (e) {}
+  }, [stationWorkspaces]);
+
+  const activeStationWorkspace = stationWorkspaces[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+  const cart = activeStationWorkspace.cart;
+  const fnbOrderMode = activeStationWorkspace.fnbOrderMode;
+  const fnbTableNo = activeStationWorkspace.fnbTableNo;
+  const hasSentKot = activeStationWorkspace.hasSentKot;
+  const kotSentAt = activeStationWorkspace.kotSentAt ?? null;
+  const kotVoidedItems = activeStationWorkspace.kotVoidedItems;
+  const kotRevisedItems = activeStationWorkspace.kotRevisedItems ?? [];
+
+  const setCart: React.Dispatch<React.SetStateAction<CartItem[]>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextCart = typeof updater === 'function' ? updater(current.cart) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            cart: nextCart,
+          },
+        };
+      });
+    },
+    [activeStationCode]
   );
 
-  // Fullscreen & Register State
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
-  const [hoveredTerminalId, setHoveredTerminalId] = useState<string | null>(null);
+  const setFnbOrderMode: React.Dispatch<React.SetStateAction<'Dine-In' | 'Takeaway' | 'Delivery'>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextMode = typeof updater === 'function' ? updater(current.fnbOrderMode) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            fnbOrderMode: nextMode,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
 
-  // Akses Menu ERP / Back-End Khusus KASIR 02 (Hybrid)
+  const setFnbTableNo: React.Dispatch<React.SetStateAction<string>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextTable = typeof updater === 'function' ? updater(current.fnbTableNo) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            fnbTableNo: nextTable,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const setHasSentKot: React.Dispatch<React.SetStateAction<boolean>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextVal = typeof updater === 'function' ? updater(current.hasSentKot) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            hasSentKot: nextVal,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const setKotSentAt: React.Dispatch<React.SetStateAction<number | null>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextVal = typeof updater === 'function' ? updater(current.kotSentAt ?? null) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            kotSentAt: nextVal,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const setKotVoidedItems: React.Dispatch<React.SetStateAction<string[]>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextVal = typeof updater === 'function' ? updater(current.kotVoidedItems) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            kotVoidedItems: nextVal,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const setKotRevisedItems: React.Dispatch<React.SetStateAction<string[]>> = useCallback(
+    (updater) => {
+      setStationWorkspaces((prev) => {
+        const current = prev[activeStationCode] || DEFAULT_STATION_WORKSPACE;
+        const nextVal =
+          typeof updater === 'function' ? updater(current.kotRevisedItems ?? []) : updater;
+        return {
+          ...prev,
+          [activeStationCode]: {
+            ...current,
+            kotRevisedItems: nextVal,
+          },
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const [vehiclePlate, setVehiclePlate] = useState<string>('');
+  const [mechanicName, setMechanicName] = useState<string>('');
+  const [stylistName, setStylistName] = useState<string>('');
+  const [selectedStylistId, setSelectedStylistId] = useState<string>('');
+
+  const activeServiceStylists = useMemo(
+    () => (serviceStylists || []).filter((s) => s.isActive),
+    [serviceStylists]
+  );
+
+  const selectedServiceStylist = useMemo(() => {
+    if (selectedStylistId) {
+      const found = activeServiceStylists.find((s) => s.id === selectedStylistId);
+      if (found) return found;
+    }
+    if (stylistName.trim()) {
+      const foundByName = activeServiceStylists.find(
+        (s) => s.name.trim().toLowerCase() === stylistName.trim().toLowerCase()
+      );
+      if (foundByName) return foundByName;
+    }
+    return activeServiceStylists[0] || null;
+  }, [activeServiceStylists, selectedStylistId, stylistName]);
+
+  useEffect(() => {
+    if (!selectedStylistId && activeServiceStylists.length > 0 && isService) {
+      setSelectedStylistId(activeServiceStylists[0].id);
+      setStylistName(activeServiceStylists[0].name);
+    }
+  }, [activeServiceStylists, selectedStylistId, isService]);
+  const [petOrClientName, setPetOrClientName] = useState<string>('');
+  const [deliveryFleetActive, setDeliveryFleetActive] = useState<boolean>(false);
+  const [deliveryPolicy, setDeliveryPolicy] = useState<'FRANGKO' | 'LOCO'>('LOCO');
+  const [selectedFleetType, setSelectedFleetType] = useState<BuildingFleetType>('PICKUP_RET');
+  const [deliveryDestination, setDeliveryDestination] = useState<string>('');
+  const [shippingFee, setShippingFee] = useState<number>(0);
+
+  // Menu Backend / ERP Khusus Hybrid
   const [isHybridMenuOpen, setIsHybridMenuOpen] = useState(false);
   const hybridMenuRef = useRef<HTMLDivElement>(null);
 
@@ -706,103 +889,26 @@ export const PosModule: React.FC = () => {
     };
   }, [isHybridMenuOpen]);
 
-  // State Verifikasi PIN Akses Backend / Menu ERP untuk Kasir 02 Hybrid
-  const [isHybridPinModalOpen, setIsHybridPinModalOpen] = useState(false);
-  const [pendingHybridModule, setPendingHybridModule] = useState<{ id: ActiveNavModule; label: string } | null>(null);
-  const [hybridPinInput, setHybridPinInput] = useState('');
-  const [hybridPinError, setHybridPinError] = useState<string | null>(null);
-
-  const handleRequestHybridNavigation = (mod: { id: ActiveNavModule; label: string }) => {
-    setPendingHybridModule(mod);
-    setHybridPinInput('');
-    setHybridPinError(null);
+  const handleDirectHybridNavigation = (mod: { id: ActiveNavModule; label: string }) => {
     setIsHybridMenuOpen(false);
-    setIsHybridPinModalOpen(true);
+    openPosMgmtPinPrompt({ type: 'NAVIGATE_MODULE', moduleId: mod.id, label: mod.label });
   };
 
-  const handleVerifyHybridPin = (pinToTest?: string) => {
-    const pin = pinToTest !== undefined ? pinToTest : hybridPinInput;
-    if (!pin || pin.length < 4) {
-      setHybridPinError('PIN minimal 4 digit.');
-      return;
-    }
-
-    // Otorisasi PIN: PIN khusus Kasir 02 ('2222'), default PIN ('1234'), Master Admin ('9999'), atau PIN user yang sedang aktif
-    const validPins = [
-      '2222',
-      '1234',
-      '9999',
-      activeUser?.pin,
-      currentUser?.pin,
-      ...(users || []).map((u) => u.pin).filter(Boolean),
-    ].filter(Boolean);
-
-    const isMatch = validPins.includes(pin);
-
-    if (isMatch) {
-      const target = pendingHybridModule;
-      setIsHybridPinModalOpen(false);
-      setHybridPinInput('');
-      setHybridPinError(null);
-
-      if (target) {
-        setIsCashierWorkspaceActive(false);
-        setActiveNav(target.id);
-        showToast(`PIN terverifikasi! Mengalihkan ke modul ${target.label}...`);
-      }
-    } else {
-      setHybridPinError('PIN Salah! Gunakan PIN Kasir 02 (2222) atau PIN Admin (1234 / 9999)');
-      setHybridPinInput('');
-    }
-  };
-
-  // POS Cashier Shift & Cash Reconciliation States (APS POS4: 32_ShiftKasir)
+  // Shift & Rekonsiliasi Kas
   const [isOpenShiftModalOpen, setIsOpenShiftModalOpen] = useState(false);
   const [isCloseShiftModalOpen, setIsCloseShiftModalOpen] = useState(false);
+  const [isQuickZReportOpen, setIsQuickZReportOpen] = useState(false);
   const [isPettyCashModalOpen, setIsPettyCashModalOpen] = useState(false);
   const [closedShiftForReceipt, setClosedShiftForReceipt] = useState<CashierShift | null>(null);
 
-  // Sync fullscreen cashier workspace state with global App context (auto-collapse sidebar)
   useEffect(() => {
     setIsCashierWorkspaceActive(isRegisterOpen);
-    if (!isRegisterOpen && activeUser?.role === 'Kasir') {
-      setActiveUser(null);
-      setCurrentUser(null);
-    }
     return () => {
       setIsCashierWorkspaceActive(false);
     };
   }, [isRegisterOpen, setIsCashierWorkspaceActive]);
 
-  // Realtime clock (updates every second)
-  const [currentTime, setCurrentTime] = useState<string>('');
-  useEffect(() => {
-    const updateClock = () => {
-      const now = new Date();
-      const dateStr = now.toLocaleDateString('id-ID', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      });
-      const timeStr = now.toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      });
-      setCurrentTime(`${dateStr}, ${timeStr}`);
-    };
-    updateClock();
-    const timer = setInterval(updateClock, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Category filter dropdown for POS register
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-
-  // Toggle 'Semua Kategori': default false (hanya menampilkan kategori spesifik industri terminal aktif)
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
-
-  // Mode View: true = Foto Menu F&B, false = Grid Transaksi SKU Layar Lebar
   const [isFnbPhotoMenuMode, setIsFnbPhotoMenuMode] = useState<boolean>(false);
 
   // Search & Barcode Input
@@ -811,7 +917,6 @@ export const PosModule: React.FC = () => {
   const cashInputRef = useRef<HTMLInputElement>(null);
   const [isCashUnderpaid, setIsCashUnderpaid] = useState<boolean>(false);
 
-  // Helper untuk autofocus & siklus kursor scan barcode [F2]
   const focusBarcodeInput = () => {
     setTimeout(() => {
       if (barcodeInputRef.current) {
@@ -821,7 +926,6 @@ export const PosModule: React.FC = () => {
     }, 25);
   };
 
-  // Helper untuk autofocus & seleksi input nominal Diterima
   const focusCashInput = () => {
     const doFocus = () => {
       if (cashInputRef.current) {
@@ -842,12 +946,6 @@ export const PosModule: React.FC = () => {
   const [fnbSearchQuery, setFnbSearchQuery] = useState('');
   const [selectedFnbCategory, setSelectedFnbCategory] = useState<string>('ALL');
 
-  // Transaksi Demo / Dummy Kasir Resmi Terpusat (Berdasarkan Industri Terminal)
-  const PHARMACY_DEMO_CART: CartItem[] = INDUSTRY_DEMO_CARTS.pharmacy;
-  const ELECTRONICS_DEMO_CART: CartItem[] = INDUSTRY_DEMO_CARTS.electronics;
-  const WORKSHOP_DEMO_CART: CartItem[] = INDUSTRY_DEMO_CARTS.workshop;
-
-  // Preset Armada Standar untuk Material Curah (Pasir, Batu, Split, Tanah)
   const DEFAULT_FLEET_OPTIONS = [
     { id: 'PICKUP_RET', name: 'Ret Pick-up (±1.2 m³)', shortName: 'Ret Pick-up', volumeM3: 1.2, suffix: '-PKP', price: 350000, isActive: true },
     { id: 'TRUCK_ENGKEL', name: 'Ret Truk Engkel (±3.0 m³)', shortName: 'Ret Truk Engkel', volumeM3: 3.0, suffix: '-ENG', price: 850000, isActive: true },
@@ -855,33 +953,64 @@ export const PosModule: React.FC = () => {
     { id: 'SAK_KARUNG', name: 'Eceran Karung / Sak (±0.03 m³)', shortName: 'Sak / Karung', volumeM3: 0.03, suffix: '-SAK', price: 18000, isActive: true },
   ];
 
-  // Transaksi Demo Depo Bahan Bangunan (KASIR 09)
-  const BUILDING_DEMO_CART: CartItem[] = INDUSTRY_DEMO_CARTS.building;
+  const isBusinessLaundryPrimary =
+    isService &&
+    businessDomainConfig.primaryBusinessModel === 'LAUNDRY' &&
+    !isHybridMode;
 
-  // Cart & Pricing State - Terisi default transaksi contoh kasir sesuai industri terminal aktif
-  const [cart, setCart] = useState<CartItem[]>(() => {
-    const ind = getTerminalIndustry(activeTerminal);
-    return INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail;
-  });
-  // Panel Pengiriman Material Bangunan (Bawa Langsung vs Armada Toko DO)
+  const isBusinessFashionPrimary =
+    isFashion &&
+    !isHybridMode;
+
+  const isLaundryCartItem = (item?: CartItem | null): boolean =>
+    Boolean(
+      item?.product?.businessModel === 'laundry' ||
+        item?.product?.laundryUnitType ||
+        String(item?.product?.id || '').toUpperCase().startsWith('LND-')
+    );
+
+  const isFashionCartItem = (item?: CartItem | null): boolean =>
+    Boolean(
+      item?.product?.businessModel === 'fashion' ||
+        String(item?.product?.id || '').toUpperCase().startsWith('FASH-') ||
+        (item?.product?.variantMatrix && item.product.variantMatrix.length > 0)
+    );
+
+  const resolvePosCartIndustry = (term?: Terminal | null): TerminalIndustry => {
+    if (isBusinessLaundryPrimary) return 'laundry';
+    if (isBusinessFashionPrimary) return 'fashion';
+    if (
+      term?.modelType === 'laundry' ||
+      (term?.businessModel || '').toLowerCase().includes('laundry')
+    ) {
+      return 'laundry';
+    }
+    if (
+      term?.modelType === 'fashion' ||
+      term?.id === 'T-04' ||
+      term?.code === 'POS-FASHION' ||
+      (term?.businessModel || '').toLowerCase().includes('fashion') ||
+      (term?.businessModel || '').toLowerCase().includes('butik')
+    ) {
+      return 'fashion';
+    }
+    const detected = getTerminalIndustry(term);
+    if (businessDomainConfig.primaryBusinessModel === 'LAUNDRY' && detected === 'salon') {
+      return 'laundry';
+    }
+    return detected;
+  };
+
+  // Cart & Pricing State (isolated per activeStationCode above; starts empty without demo auto-seeding)
+
   const [deliveryMethod, setDeliveryMethod] = useState<'DIRECT' | 'FLEET_DELIVERY'>('DIRECT');
+  const [workshopPlateNumber] = useState<string>('DD 4589 XY');
+  const [workshopMechanic] = useState<string>('Rudi');
 
-  // Info Kendaraan & Mekanik KASIR 08 (Auto Workshop & Service)
-  const [workshopPlateNumber, setWorkshopPlateNumber] = useState<string>('DD 4589 XY');
-  const [workshopMechanic, setWorkshopMechanic] = useState<string>('Rudi');
+  const [, setIsDoModalOpen] = useState<boolean>(false);
+  const [, setLastCompletedDoItems] = useState<CartItem[]>([]);
+  const [, setLastDoReceiptNumber] = useState<string>('');
 
-  // Modal Penugasan Armada & Surat Jalan (DO)
-  const [isDoModalOpen, setIsDoModalOpen] = useState<boolean>(false);
-  const [isPreviewDoOpen, setIsPreviewDoOpen] = useState<boolean>(false);
-  const [doDriverName, setDoDriverName] = useState<string>('Pak Joko (Driver Toko)');
-  const [doVehiclePlate, setDoVehiclePlate] = useState<string>('B 9281 KBC (Truk Engkel)');
-  const [doProjectAddress, setDoProjectAddress] = useState<string>('Proyek Ruko Sentosa Blok C4, Jl. Pemuda No. 88');
-  const [doForemanName, setDoForemanName] = useState<string>('Mandor Yanto (0812-9988-7766)');
-  const [doDeliveryTime, setDoDeliveryTime] = useState<string>('14:30 WIB');
-  const [doNotes, setDoNotes] = useState<string>('Jalan cor beton, siap bongkar kuli di depan bedeng mandor.');
-  const [lastCompletedDoItems, setLastCompletedDoItems] = useState<CartItem[]>([]);
-  const [lastDoReceiptNumber, setLastDoReceiptNumber] = useState<string>('');
-  // Fast Cart Keyboard Navigation & Selection State ([ArrowUp]/[ArrowDown], [Del], [+/-])
   const [selectedCartIndex, setSelectedCartIndex] = useState<number | null>(null);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
@@ -889,8 +1018,12 @@ export const PosModule: React.FC = () => {
   const [isTaxIncluded, setIsTaxIncluded] = useState<boolean>(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [cashGiven, setCashGiven] = useState<number>(0);
+  const [splitCashAmount, setSplitCashAmount] = useState<number>(0);
+  const [splitNonCashAmount, setSplitNonCashAmount] = useState<number>(0);
+  const [splitNonCashChannel, setSplitNonCashChannel] = useState<'QRIS' | 'DEBIT' | 'TRANSFER'>('QRIS');
+  const [kasbonDpAmount, setKasbonDpAmount] = useState<number>(0);
+  const [posMarginFloorAuthorized, setPosMarginFloorAuthorized] = useState<boolean>(false);
 
-  // Keep selectedCartIndex within valid bounds when cart size changes
   useEffect(() => {
     if (cart.length === 0) {
       setSelectedCartIndex(null);
@@ -899,41 +1032,67 @@ export const PosModule: React.FC = () => {
     }
   }, [cart.length]);
 
-  // 3-Tier Price Matrix & Customer Selection State
   const [selectedPriceTier, setSelectedPriceTier] = useState<PriceTier>('RETAIL');
+  const [isContractorMode, setIsContractorMode] = useState<boolean>(false);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerMaster | null>(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState<boolean>(false);
-  const [isCartCustomerDropdownOpen, setIsCartCustomerDropdownOpen] = useState<boolean>(false);
-  const [isNewCustomerModalOpen, setIsNewCustomerModalOpen] = useState<boolean>(false);
-  const [newCustomerName, setNewCustomerName] = useState<string>('');
-  const [newCustomerPhone, setNewCustomerPhone] = useState<string>('');
-  const [newCustomerNotes, setNewCustomerNotes] = useState<string>('');
-  const [newCustomerHasStore, setNewCustomerHasStore] = useState<boolean>(false);
-  const [newCustomerStoreName, setNewCustomerStoreName] = useState<string>('');
   const [isPaymentConfirmOpen, setIsPaymentConfirmOpen] = useState<boolean>(false);
   const customerDropdownRef = useRef<HTMLDivElement>(null);
-  const cartCustomerDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Auto-Reset Transaction Helper (Pencegahan Salah Pelanggan & Netralisasi Tier)
   const resetToNewTransaction = () => {
     setCart([]);
+    setHasSentKot(false);
+    setKotSentAt(null);
+    setKotVoidedItems([]);
+    setKotRevisedItems([]);
+    setEditingToppingCartIndex(null);
     setSelectedCartIndex(null);
     setDiscountAmount(0);
     setDiscountPercent(0);
+    setPaymentMethod('CASH');
     setCashGiven(0);
+    setSplitCashAmount(0);
+    setSplitNonCashAmount(0);
+    setSplitNonCashChannel('QRIS');
+    setKasbonDpAmount(0);
     setIsCashUnderpaid(false);
     setSelectedCustomer(null);
     setSelectedPriceTier('RETAIL');
+    setIsContractorMode(false);
     setCustomerSearchQuery('');
     setIsCustomerDropdownOpen(false);
-    setIsCartCustomerDropdownOpen(false);
-    const isKasir02Active = activeTerminal?.code === 'KASIR-02' || activeTerminal?.name === 'KASIR 02';
-    setReceiptNumber(isKasir02Active ? `TRX-KASIR02-${Date.now().toString().slice(-6)}` : `TRX-POS-${Date.now().toString().slice(-6)}`);
+    setReceiptNumber(peekStationReceiptNumber(activeStationCode));
+    setDeliveryFleetActive(false);
+    setDeliveryPolicy('LOCO');
+    setDeliveryMethod('DIRECT');
+    setSelectedFleetType('PICKUP_RET');
+    setDeliveryDestination('');
+    setShippingFee(0);
+    setIsDigitalScaleModalOpen(false);
+    setScaleTargetService(null);
+    setAreaModalService(null);
+    setAreaTargetCartIndex(null);
+    setLaundryCustomerName('');
+    setLaundryCustomerPhone('');
+    setLaundryTotalPieces(1);
+    setLaundryConditionNotes('');
+    setLaundrySlaOverrideHours('AUTO');
+    setLaundryPaymentStatus('LUNAS_AWAL');
+    setLaundryDpAmount(0);
+    setLaundryWasherId('');
+    setLaundrySpecialistId('');
+    setFashionAdvisorId('');
+    setManualDiscountReason('');
+    setManualDiscountAuthorizedBy('');
+    setIsQuickFashionDiscOpen(false);
+    setQuickDiscVal(0);
+    setQuickDiscPin('');
+    setQuickDiscSpvName('');
+    setQuickDiscPinError(null);
     focusBarcodeInput();
   };
 
-  // Watch receipt modal close: auto-reset transaction so previous member data does not leak into next queue
   const prevReceiptOpenRef = useRef<boolean>(isReceiptModalOpen);
   useEffect(() => {
     if (prevReceiptOpenRef.current && !isReceiptModalOpen) {
@@ -943,91 +1102,57 @@ export const PosModule: React.FC = () => {
     prevReceiptOpenRef.current = isReceiptModalOpen;
   }, [isReceiptModalOpen]);
 
-  // Autofocus input scan barcode [F2] saat halaman pertama kali dibuka / kasir aktif
   useEffect(() => {
     focusBarcodeInput();
   }, [isRegisterOpen]);
 
-  // Close customer dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const targetNode = event.target as Node;
-      if (
-        customerDropdownRef.current &&
-        !customerDropdownRef.current.contains(targetNode)
-      ) {
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(targetNode)) {
         setIsCustomerDropdownOpen(false);
-      }
-      if (
-        cartCustomerDropdownRef.current &&
-        !cartCustomerDropdownRef.current.contains(targetNode)
-      ) {
-        setIsCartCustomerDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Multi-tier entitlement calculation helper with store qualification
-  // Tombol [ Grosir / Partai ] HANYA dapat diakses jika pelanggan terdaftar memiliki atribut has_store === true.
-  // Member perorangan (meskipun level Platinum) tetap diarahkan ke tier [ Langganan / Member ]
-  // dan tidak dapat mengakses harga Grosir jika tidak terverifikasi memiliki toko.
   const getCustomerAllowedTiers = (customer: CustomerMaster | null): PriceTier[] => {
-    if (!customer) {
-      // Pelanggan Umum / Tentatif (Non-Member): strictly RETAIL
-      return ['RETAIL'];
-    }
-    if (customer.has_store) {
-      return ['RETAIL', 'MEMBER', 'WHOLESALE'];
-    }
+    if (!customer) return ['RETAIL'];
+    if (customer.has_store) return ['RETAIL', 'MEMBER', 'WHOLESALE'];
     return ['RETAIL', 'MEMBER'];
   };
 
   const allowedTiers = useMemo(() => getCustomerAllowedTiers(selectedCustomer), [selectedCustomer]);
 
-  // Normalize phone number for rapid matching (0812..., 62812..., +62812...)
   const normalizePhone = (phoneStr: string): string => {
     if (!phoneStr) return '';
     return phoneStr.replace(/\D/g, '').replace(/^62/, '0');
   };
 
-  // Fast customer search and auto-detect upon full phone number or barcode scan
   const handleCustomerSearchChange = (query: string) => {
     setCustomerSearchQuery(query);
     setIsCustomerDropdownOpen(true);
 
     if (!query.trim()) return;
-
     const normQuery = normalizePhone(query);
     const cleanCode = query.trim().toLowerCase();
 
-    // Fast matching logic:
-    // 1. Phone matching: length >= 9 digits and matches normalized phone
-    // 2. Barcode / Member Code / Customer Code match
-    // 3. Store name exact match
     const matched = customers.find((c) => {
       const normCustPhone = normalizePhone(c.phone);
       const isPhoneMatch = normQuery.length >= 9 && normCustPhone === normQuery;
       const codeStr = (c.code || c.customer_code || '').toLowerCase();
       const idStr = (c.id || '').toLowerCase();
-      const isCodeMatch =
-        cleanCode.length >= 3 &&
-        (codeStr === cleanCode || idStr === cleanCode);
+      const isCodeMatch = cleanCode.length >= 3 && (codeStr === cleanCode || idStr === cleanCode);
       return isPhoneMatch || isCodeMatch;
     });
 
     if (matched) {
       handleSelectCustomer(matched);
-      try {
-        playScannerBeep();
-      } catch {
-        // audio fail-safe
-      }
+      playScannerBeep();
     }
   };
 
-  // Filtered customer list for realtime search dropdown
   const filteredCustomers = useMemo(() => {
     if (!customerSearchQuery.trim()) return customers.slice(0, 6);
     const q = customerSearchQuery.toLowerCase().trim();
@@ -1049,7 +1174,6 @@ export const PosModule: React.FC = () => {
       .slice(0, 8);
   }, [customers, customerSearchQuery]);
 
-  // Price tier resolution helper
   const getProductPriceByTier = (product: Product, tier: PriceTier): number => {
     if (!product) return 0;
     const retail = product.price_retail ?? product.sell_price ?? 0;
@@ -1073,28 +1197,27 @@ export const PosModule: React.FC = () => {
     }
   };
 
-  // Switch tier and automatically recalculate unit price for all items currently in cart
   const handleSelectPriceTier = (newTier: PriceTier) => {
     setSelectedPriceTier(newTier);
-    setCart((prevCart) =>
-      prevCart.map((item) => {
+    const activeCampaigns = loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType);
+    setCart((prevCart) => {
+      const updatedTier = prevCart.map((item) => {
         if (!item?.product) return item;
+        if (item.isPackage || item.product.isPackage) return item;
         const originalProduct =
+          activeProducts.find((p) => p.id === item.product.id) ||
           products.find((p) => p.id === item.product.id) ||
           products.find((p) => (p.name || '').toLowerCase() === (item.product.name || '').toLowerCase()) ||
           item.product;
         const newUnitPrice = getProductPriceByTier(originalProduct, newTier);
-        const effectivePrice = Math.max(0, newUnitPrice - (item.itemDiscount || 0));
         return {
           ...item,
-          product: {
-            ...item.product,
-            sell_price: newUnitPrice,
-          },
-          subtotal: effectivePrice * item.quantity,
+          product: { ...item.product, sell_price: newUnitPrice },
+          originalUnitPrice: newUnitPrice,
         };
-      })
-    );
+      });
+      return recalculatePosCart(updatedTier, activeCampaigns);
+    });
     showToast(`Tingkat harga beralih ke: ${getTierLabel(newTier)}`);
   };
 
@@ -1105,676 +1228,1868 @@ export const PosModule: React.FC = () => {
     }
     setSelectedCustomer(customer);
     setIsCustomerDropdownOpen(false);
-    setIsCartCustomerDropdownOpen(false);
     setCustomerSearchQuery('');
 
     const rawTier = (customer.memberTier || customer.tier_level || '').toUpperCase();
     const hasStore = Boolean(customer.has_store || customer.store_name);
     const pts = (customer.points ?? 0).toLocaleString('id-ID');
 
-    // Terapkan otomatis Tier Harga pelanggan (Retail, Member, atau Grosir) ke keranjang
-    if (rawTier.includes('GROSIR') || rawTier.includes('WHOLESALE') || hasStore) {
+    if (rawTier.includes('GROSIR') || rawTier.includes('WHOLESALE') || rawTier.includes('KONTRAKTOR') || hasStore) {
+      if (isBuildingTerminal) {
+        setIsContractorMode(true);
+        setCart((prev) =>
+          recalculatePosCart(
+            prev,
+            loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType),
+            true
+          )
+        );
+      }
       handleSelectPriceTier('WHOLESALE');
       showToast(
-        language === 'ID'
-          ? `Mitra Grosir: ${customer.name} (${customer.store_name || 'Toko Mitra'}) • ${pts} Pts (Harga Grosir Aktif)`
-          : `Wholesale Partner: ${customer.name} • ${pts} Pts (Wholesale Price Active)`
+        isBuildingTerminal
+          ? `Kontraktor Proyek: ${customer.name} • Mode Kontraktor (Tier 3) Otomatis Aktif`
+          : `Mitra Grosir: ${customer.name} • ${pts} Pts (Harga Grosir Aktif)`
       );
     } else if (rawTier.includes('RETAIL') || rawTier === 'REGULER') {
       handleSelectPriceTier('RETAIL');
-      showToast(
-        language === 'ID'
-          ? `Pelanggan: ${customer.name} • ${pts} Pts (Harga Retail Aktif)`
-          : `Customer: ${customer.name} • ${pts} Pts (Retail Price Active)`
-      );
+      showToast(`Pelanggan: ${customer.name} • ${pts} Pts (Harga Retail Aktif)`);
     } else {
       handleSelectPriceTier('MEMBER');
-      showToast(
-        language === 'ID'
-          ? `Member: ${customer.name} • ${pts} Pts (Harga Member Aktif)`
-          : `Member: ${customer.name} • ${pts} Pts (Member Price Active)`
-      );
+      showToast(`Member: ${customer.name} • ${pts} Pts (Harga Member Aktif)`);
     }
   };
 
   const handleClearCustomer = () => {
     setSelectedCustomer(null);
+    if (isContractorMode) {
+      setIsContractorMode(false);
+      setCart((prev) =>
+        recalculatePosCart(
+          prev,
+          loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType),
+          false
+        )
+      );
+    }
     handleSelectPriceTier('RETAIL');
     setCustomerSearchQuery('');
     setIsCustomerDropdownOpen(false);
-    setIsCartCustomerDropdownOpen(false);
-    showToast(
-      language === 'ID'
-        ? 'Dilepas: Kembali ke Pelanggan Umum / Walk-in (Tier Retail Aktif)'
-        : 'Detached: Reverted to Walk-in Guest (Retail Tier Active)'
-    );
+    showToast('Dilepas: Kembali ke Pelanggan Umum / Walk-in (Tier Retail Aktif)');
   };
 
-  const handleCreateNewCustomer = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCustomerName.trim()) {
-      showToast('Nama lengkap pelanggan wajib diisi!');
-      return;
-    }
-    if (!newCustomerPhone.trim()) {
-      showToast('Nomor HP / WhatsApp wajib diisi!');
-      return;
-    }
-    if (newCustomerHasStore && !newCustomerStoreName.trim()) {
-      showToast(
-        language === 'ID'
-          ? 'Nama toko / usaha wajib diisi untuk mitra grosir!'
-          : 'Store / business name is required for wholesale partner!'
-      );
-      return;
-    }
-
-    const tiers: PriceTier[] = newCustomerHasStore
-      ? ['RETAIL', 'MEMBER', 'WHOLESALE']
-      : ['RETAIL', 'MEMBER'];
-
-    const created: CustomerMaster = {
-      id: `MBR-${String(customers.length + 1).padStart(3, '0')}`,
-      code: newCustomerHasStore
-        ? `STR-${Math.floor(1000 + Math.random() * 9000)}`
-        : `SLV-${Math.floor(1000 + Math.random() * 9000)}`,
-      name: newCustomerName.trim(),
-      phone: newCustomerPhone.trim(),
-      email: `${newCustomerPhone.replace(/\D/g, '')}@member.jacs`,
-      memberTier: 'Silver',
-      tier_level: 'Silver',
-      allowed_tiers: tiers,
-      total_spending_current_period: 0,
-      totalSpent: 0,
-      points: 0,
-      status: 'Active',
-      notes: newCustomerNotes.trim() || undefined,
-      has_store: newCustomerHasStore,
-      store_name: newCustomerHasStore ? newCustomerStoreName.trim() : undefined,
-    };
-
-    setCustomers((prev) => [created, ...prev]);
-    setSelectedCustomer(created);
-
-    addAuditLog(
-      `Registrasi Member Baru POS "${created.name}" (${created.phone}) • Tier: ${created.memberTier}${newCustomerHasStore ? `, Toko: ${created.store_name}` : ''}`,
-      'Customer Loyalty',
-      'INFO'
-    );
-
-    if (newCustomerHasStore) {
-      handleSelectPriceTier('WHOLESALE');
-      showToast(
-        language === 'ID'
-          ? `Mitra Toko "${created.name} • Toko: ${created.store_name}" terdaftar & harga Grosir aktif!`
-          : `Store Partner "${created.name} • Store: ${created.store_name}" registered & Wholesale price active!`
-      );
-    } else {
-      handleSelectPriceTier('MEMBER');
-      showToast(
-        language === 'ID'
-          ? `Member baru "${created.name} • Silver" berhasil didaftarkan & aktif dengan harga Langganan!`
-          : `New member "${created.name} • Silver" registered & activated with Member pricing!`
-      );
-    }
-
-    setIsNewCustomerModalOpen(false);
-    setNewCustomerName('');
-    setNewCustomerPhone('');
-    setNewCustomerNotes('');
-    setNewCustomerHasStore(false);
-    setNewCustomerStoreName('');
-  };
-
-  // Sinkronkan filter 'Semua Kategori' dengan pengaturan hak akses terminal aktif (Super Admin)
   useEffect(() => {
-    setShowAllCategories(Boolean(activeTerminal?.allowAllCategories));
-  }, [activeTerminal?.id, activeTerminal?.name, activeTerminal?.allowAllCategories]);
+    setShowAllCategories(isHybridMode ? Boolean(activeTerminal?.allowAllCategories) : false);
+  }, [activeTerminal?.id, activeTerminal?.name, activeTerminal?.allowAllCategories, isHybridMode]);
 
-  // Filter active products for POS Kasir:
-  // Default: HANYA menampilkan produk yang sesuai dengan industri kasir yang sedang dibuka:
-  // - KASIR 02 (F&B): Makanan, Minuman, Snack
-  // - KASIR 04 (Pharmacy): Obat, Vitamin, Alkes
-  // - KASIR 09 (Building): Material, Cat, Perkakas Bangunan
-  // - Kasir 01/03/06/10: Seluruh Ritel Umum
-  // Jika toggle 'Semua Kategori' aktif: membuka seluruh katalog produk.
-  // Proteksi ketat: item bertipe 'RAW_MATERIAL' atau bahan mentah DILARANG muncul di katalog kasir.
   const activeProducts = useMemo(() => {
-    return filterProductsByTerminal(products, activeTerminal, showAllCategories);
-  }, [products, activeTerminal, showAllCategories]);
+    const lockedModelType: Terminal['modelType'] = isFnb
+      ? 'fnb'
+      : isBuilding
+      ? 'building'
+      : isFashion
+      ? 'fashion'
+      : isService
+      ? businessDomainConfig.primaryBusinessModel === 'LAUNDRY'
+        ? 'laundry'
+        : 'salon'
+      : 'retail';
+    const effectiveTerminal =
+      !isHybridMode && activeTerminal
+        ? { ...activeTerminal, modelType: lockedModelType }
+        : isBusinessLaundryPrimary && activeTerminal
+        ? { ...activeTerminal, modelType: 'laundry' }
+        : isBusinessFashionPrimary && activeTerminal
+        ? { ...activeTerminal, modelType: 'fashion' }
+        : activeTerminal;
+    return filterProductsByTerminal(products, effectiveTerminal, showAllCategories);
+  }, [
+    products,
+    activeTerminal,
+    showAllCategories,
+    isHybridMode,
+    isFnb,
+    isBuilding,
+    isFashion,
+    isService,
+    businessDomainConfig.primaryBusinessModel,
+    isBusinessLaundryPrimary,
+    isBusinessFashionPrimary,
+  ]);
 
-  // Editing cart item state
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
 
-  // Muat Transaksi Demo / Dummy Kasir Resmi sesuai industri register yang aktif (Minimal 5 Produk per Industri)
-  useEffect(() => {
-    setCart((prev) => {
-      if (prev.length > 0) return prev;
-      const ind = getTerminalIndustry(activeTerminal);
-      return INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail;
-    });
-  }, [activeTerminal?.name, activeTerminal?.id, activeTerminal?.modelType]);
-
-  useEffect(() => {
-    if (isRegisterOpen) {
-      setCart((prev) => {
-        if (prev.length > 0) return prev;
-        const ind = getTerminalIndustry(activeTerminal);
-        return INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail;
-      });
-    }
-  }, [isRegisterOpen, activeTerminal?.id, activeTerminal?.name, activeTerminal?.modelType]);
-
-  // Receipt Number
   const [receiptNumber, setReceiptNumber] = useState<string>(
-    () => `TRX-POS-${Date.now().toString().slice(-6)}`
+    () => peekStationReceiptNumber(activeStationCode)
   );
 
-  // Modals
-  const [terminalToUnlock, setTerminalToUnlock] = useState<Terminal | null>(null);
-  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  useEffect(() => {
+    if (sales.length === 0) {
+      setReceiptNumber(peekStationReceiptNumber(activeStationCode));
+    }
+  }, [sales.length, activeStationCode]);
 
   const [selectedFnbProduct, setSelectedFnbProduct] = useState<Product | null>(null);
   const [isFnbModalOpen, setIsFnbModalOpen] = useState(false);
   const [isKotModalOpen, setIsKotModalOpen] = useState(false);
   const [isHeldOrdersModalOpen, setIsHeldOrdersModalOpen] = useState(false);
   const [isHoldCartModalOpen, setIsHoldCartModalOpen] = useState(false);
-  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>(() => {
+  const [heldOrdersByStation, setHeldOrdersByStation] = useState<Record<string, HeldOrder[]>>(() => {
     try {
-      const saved = localStorage.getItem('jacs_pos_held_orders');
-      if (saved) return JSON.parse(saved);
+      const saved = localStorage.getItem('jacs_pos_held_orders_by_station_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
     } catch (e) {}
-    return [];
+    return {};
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem('jacs_pos_held_orders', JSON.stringify(heldOrders));
+      localStorage.setItem('jacs_pos_held_orders_by_station_v1', JSON.stringify(heldOrdersByStation));
     } catch (e) {}
-  }, [heldOrders]);
+  }, [heldOrdersByStation]);
 
-  const [voidingCartItem, setVoidingCartItem] = useState<{ item: CartItem; index: number } | null>(null);
+  const heldOrders = useMemo(
+    () => heldOrdersByStation[activeStationCode] || [],
+    [heldOrdersByStation, activeStationCode]
+  );
+
+  const setHeldOrders: React.Dispatch<React.SetStateAction<HeldOrder[]>> = useCallback(
+    (updater) => {
+      setHeldOrdersByStation((prevMap) => {
+        const currentList = prevMap[activeStationCode] || [];
+        const nextList = typeof updater === 'function' ? updater(currentList) : updater;
+        return {
+          ...prevMap,
+          [activeStationCode]: nextList,
+        };
+      });
+    },
+    [activeStationCode]
+  );
+
+  const [voidingCartItem, setVoidingCartItem] = useState<{
+    item: CartItem;
+    index: number;
+    mode?: 'REMOVE_ITEM' | 'REDUCE_QTY' | 'EDIT_TOPPING';
+    targetQty?: number;
+    pendingToppingUpdate?: FnbQuickToppingResult;
+  } | null>(null);
+  const [editingToppingCartIndex, setEditingToppingCartIndex] = useState<number | null>(null);
   const [isSupervisorVoidModalOpen, setIsSupervisorVoidModalOpen] = useState(false);
   const [isQrisModalOpen, setIsQrisModalOpen] = useState(false);
   const [isVoidConfirmOpen, setIsVoidConfirmOpen] = useState(false);
-  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [isManualSearchOpen, setIsManualSearchOpen] = useState(false);
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false);
-  const [isKeypadModalOpen, setIsKeypadModalOpen] = useState(false);
+  const [isDigitalScaleModalOpen, setIsDigitalScaleModalOpen] = useState(false);
+  const [scaleTargetService, setScaleTargetService] = useState<Product | null>(null);
+  const [scaleLiveState, setScaleLiveState] = useState<{
+    connected: boolean;
+    grossKg: number;
+    tareKg: number;
+    netKg: number;
+  }>({
+    connected: false,
+    grossKg: 0,
+    tareKg: 0,
+    netKg: 0,
+  });
+  const [areaModalService, setAreaModalService] = useState<Product | null>(null);
+  const [areaTargetCartIndex, setAreaTargetCartIndex] = useState<number | null>(null);
+  const [laundryCatalogFilter, setLaundryCatalogFilter] = useState<'ALL' | 'KILOAN' | 'SATUAN' | 'PASANG' | 'LUAS'>('ALL');
+  const [laundryActiveTab, setLaundryActiveTab] = useState<'ORDER' | 'TRACKING'>('ORDER');
+  const [laundryCustomerName, setLaundryCustomerName] = useState<string>('');
+  const [laundryCustomerPhone, setLaundryCustomerPhone] = useState<string>('');
+  const [laundryTotalPieces, setLaundryTotalPieces] = useState<number>(1);
+  const [laundryConditionNotes, setLaundryConditionNotes] = useState<string>('');
+  const [laundrySlaOverrideHours, setLaundrySlaOverrideHours] = useState<number | 'AUTO'>('AUTO');
+  const [laundryPaymentStatus, setLaundryPaymentStatus] = useState<LaundryPaymentStatus>('LUNAS_AWAL');
+  const [laundryDpAmount, setLaundryDpAmount] = useState<number>(0);
+  const [laundryWasherId, setLaundryWasherId] = useState<string>('');
+  const [laundrySpecialistId, setLaundrySpecialistId] = useState<string>('');
 
-  // Collapsible Cart Table / Dropdown Drawer states
-  const [isCartExpanded, setIsCartExpanded] = useState<boolean>(true);
-  const [recentScannedAlert, setRecentScannedAlert] = useState<{
-    name: string;
-    qty: number;
-    subtotal: number;
-    timestamp: number;
-  } | null>(null);
-  const [isCollapsedFlashing, setIsCollapsedFlashing] = useState<boolean>(false);
-  const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const triggerItemScannedEffect = (name: string, qty: number, subtotalVal: number) => {
-    setRecentScannedAlert({
-      name,
-      qty,
-      subtotal: subtotalVal,
-      timestamp: Date.now(),
+  const laundryStaffChoices = useMemo(() => {
+    const activeStaff = (employees || []).filter((e) => e.status !== 'Inactive');
+    return [...activeStaff].sort((a, b) => {
+      const aLnd = isLaundryProductionEmployee(a) ? 0 : 1;
+      const bLnd = isLaundryProductionEmployee(b) ? 0 : 1;
+      if (aLnd !== bLnd) return aLnd - bLnd;
+      return a.name.localeCompare(b.name);
     });
-    setIsCollapsedFlashing(true);
-    if (alertTimeoutRef.current) {
-      clearTimeout(alertTimeoutRef.current);
-    }
-    alertTimeoutRef.current = setTimeout(() => {
-      setIsCollapsedFlashing(false);
-    }, 2800);
-  };
+  }, [employees]);
 
-  // 3 most recently scanned items in cart
-  const latestCartItems = useMemo(() => {
-    return [...cart].slice(-3).reverse();
-  }, [cart]);
+  // Fashion & Butik States
+  const [fashionAdvisorId, setFashionAdvisorId] = useState<string>('');
+  const [variantPickerState, setVariantPickerState] = useState<{
+    product: Product;
+    mode: 'ADD' | 'CHANGE';
+    cartIndex?: number;
+    initialSize?: string;
+    initialColor?: string;
+  } | null>(null);
+  const [isFashionExchangeOpen, setIsFashionExchangeOpen] = useState<boolean>(false);
+  const [manualDiscountReason, setManualDiscountReason] = useState<string>('');
+  const [manualDiscountAuthorizedBy, setManualDiscountAuthorizedBy] = useState<string>('');
+  const [isQuickFashionDiscOpen, setIsQuickFashionDiscOpen] = useState<boolean>(false);
+  const [quickDiscType, setQuickDiscType] = useState<'PERCENT' | 'IDR'>('PERCENT');
+  const [quickDiscVal, setQuickDiscVal] = useState<number>(0);
+  const [quickDiscReason, setQuickDiscReason] = useState<string>('Promo Pelanggan Butik / VIP Member');
+  const [quickDiscPin, setQuickDiscPin] = useState<string>('');
+  const [quickDiscSpvName, setQuickDiscSpvName] = useState<string>('');
+  const [quickDiscPinError, setQuickDiscPinError] = useState<string | null>(null);
 
-  // Hardware Scanner buffer
-  const barcodeBufferRef = useRef<string>('');
-  const lastKeyTimeRef = useRef<number>(0);
+  const fashionAdvisorChoices = useMemo(() => {
+    const activeStaff = (employees || []).filter((e) => e.status !== 'Inactive');
+    return [...activeStaff].sort((a, b) => {
+      const rank = (emp: typeof a) => {
+        const txt = `${emp.role || ''} ${emp.department || ''} ${emp.division || ''}`.toLowerCase();
+        if (txt.includes('fashion') || txt.includes('advisor') || txt.includes('pramuniaga') || txt.includes('stylist')) return 0;
+        if (txt.includes('sales') || txt.includes('butik') || txt.includes('kasir')) return 1;
+        return 2;
+      };
+      const diff = rank(a) - rank(b);
+      return diff !== 0 ? diff : a.name.localeCompare(b.name);
+    });
+  }, [employees]);
 
-  // Audio feedback synthesizer
+  const selectedFashionAdvisor = useMemo(
+    () => fashionAdvisorChoices.find((e) => e.id === fashionAdvisorId) || null,
+    [fashionAdvisorChoices, fashionAdvisorId]
+  );
+
+  const domainPromoCampaigns = useMemo(
+    () => loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType),
+    [businessDomainConfig, activeTerminal?.modelType, cart.length, isDiscountModalOpen, isManualSearchOpen]
+  );
+
+  const domainPromotions = useMemo(
+    () => filterPromotionProgramsByDomain(promotions, businessDomainConfig, activeTerminal?.modelType),
+    [promotions, businessDomainConfig, activeTerminal?.modelType]
+  );
+
   const playScannerBeep = () => {
     try {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
       const now = audioCtx.currentTime;
       const osc1 = audioCtx.createOscillator();
       const gain1 = audioCtx.createGain();
-
       osc1.type = 'sine';
       osc1.frequency.setValueAtTime(1400, now);
       gain1.gain.setValueAtTime(0.22, now);
       gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-
       osc1.connect(gain1);
       gain1.connect(audioCtx.destination);
       osc1.start(now);
       osc1.stop(now + 0.08);
-    } catch {
-      // Audio fallback
-    }
+    } catch {}
   };
 
-  // Is Current Terminal F&B?
+  const isMultiPosSelectorActive = isHybridMode || visiblePosIdentities.length > 1;
+
   const isFnbTerminal = useMemo(() => {
-    if (!activeTerminal) return false;
+    if (!isHybridMode) return isFnb;
+    if (!activeTerminal) return isFnb;
     return (
       activeTerminal.modelType === 'fnb' ||
-      activeTerminal.name === 'KASIR 02' ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('resto') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('f&b') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('cafe') ||
-      (activeTerminal.location || '').toLowerCase().includes('f&b')
+      activeTerminal.code === 'POS-FNB' ||
+      (activeTerminal.businessModel || '').toLowerCase().includes('f&b')
     );
-  }, [activeTerminal]);
+  }, [activeTerminal, isHybridMode, isFnb]);
 
-  // Is Current Terminal Building Materials Depot (KASIR 09)?
   const isBuildingTerminal = useMemo(() => {
-    if (!activeTerminal) return false;
+    if (!isHybridMode) return isBuilding;
+    if (!activeTerminal) return isBuilding;
     return (
       activeTerminal.modelType === 'building' ||
-      activeTerminal.name === 'KASIR 09' ||
-      activeTerminal.code === 'POS-09' ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('bangunan') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('material') ||
-      (activeTerminal.location || '').toLowerCase().includes('bangunan')
+      activeTerminal.code === 'POS-BUILD' ||
+      (activeTerminal.businessModel || '').toLowerCase().includes('bangunan')
     );
-  }, [activeTerminal]);
+  }, [activeTerminal, isHybridMode, isBuilding]);
 
-  // Is Current Terminal Electronics & Gadgets (KASIR 07)?
   const isElectronicsTerminal = useMemo(() => {
-    if (!activeTerminal) return false;
-    return (
-      activeTerminal.name === 'KASIR 07' ||
-      activeTerminal.id === 'T-07' ||
-      activeTerminal.code === 'POS-07' ||
-      activeTerminal.modelType === 'electronics' ||
-      (activeTerminal.location || '').toLowerCase().includes('elektronik') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('elektronik') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('gadget')
-    );
-  }, [activeTerminal]);
-
-  // Is Current Terminal Auto Workshop & Service (KASIR 08)?
-  const isWorkshopTerminal = useMemo(() => {
-    if (!activeTerminal) return false;
-    return (
-      activeTerminal.name === 'KASIR 08' ||
-      activeTerminal.id === 'T-08' ||
-      activeTerminal.code === 'POS-08' ||
-      activeTerminal.modelType === 'workshop' ||
-      (activeTerminal.location || '').toLowerCase().includes('bengkel') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('bengkel') ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('workshop')
-    );
-  }, [activeTerminal]);
-
-  // Is Current Terminal Retail & Wholesaler (KASIR 01, 03, 06)?
-  const isRetailWholesalerTerminal = useMemo(() => {
-    if (!activeTerminal) return false;
-    const name = activeTerminal.name || '';
-    const id = activeTerminal.id || '';
-    const code = activeTerminal.code || '';
-    return (
-      name === 'KASIR 01' ||
-      name === 'KASIR 03' ||
-      name === 'KASIR 06' ||
-      id === 'T-01' ||
-      id === 'T-03' ||
-      id === 'T-06' ||
-      code === 'POS-01' ||
-      code === 'POS-03' ||
-      code === 'POS-06'
-    );
-  }, [activeTerminal]);
-
-  // When active terminal changes or register opens, configure default view mode
-  useEffect(() => {
-    if (isRegisterOpen) {
-      if (isFnbTerminal) {
-        setIsFnbPhotoMenuMode(true);
-      } else {
-        setIsFnbPhotoMenuMode(false);
-      }
-      setReceiptNumber(`TRX-${activeTerminal.code || 'POS'}-${Date.now().toString().slice(-6)}`);
+    if (!isHybridMode) {
+      return isRetail && Boolean(businessDomainConfig.subFeatures?.hasSerialImei);
     }
-  }, [activeTerminal, isRegisterOpen, isFnbTerminal]);
+    if (!activeTerminal) return false;
+    return (
+      activeTerminal.code === 'POS-GADGET' ||
+      activeTerminal.modelType === 'electronics'
+    );
+  }, [activeTerminal, isHybridMode, isRetail, businessDomainConfig.subFeatures?.hasSerialImei]);
 
-  // Add to cart helper
-  const handleAddToCart = (product: Product, scanQty = 1) => {
+  const isWorkshopTerminal = useMemo(() => {
+    if (!isHybridMode) {
+      return false;
+    }
+    if (!activeTerminal) return false;
+    return (
+      activeTerminal.code === 'POS-AUTO' ||
+      activeTerminal.modelType === 'workshop'
+    );
+  }, [activeTerminal, isHybridMode]);
+
+  const isRetailWholesalerTerminal = useMemo(() => {
+    if (!isHybridMode) return isRetail;
+    if (!activeTerminal) return isRetail;
+    return activeTerminal.modelType === 'retail';
+  }, [activeTerminal, isHybridMode, isRetail]);
+
+  const isLaundryTerminal = useMemo(() => {
+    if (!isHybridMode) {
+      return isService && businessDomainConfig.primaryBusinessModel === 'LAUNDRY';
+    }
+    if (isBusinessLaundryPrimary) return true;
+    if (!activeTerminal) {
+      return isService && businessDomainConfig.primaryBusinessModel === 'LAUNDRY';
+    }
+    if (activeTerminal.modelType === 'laundry') return true;
+    if ((activeTerminal.businessModel || '').toLowerCase().includes('laundry')) return true;
+    if (
+      businessDomainConfig.primaryBusinessModel === 'LAUNDRY' &&
+      (activeTerminal.code === 'POS-SERVICE' ||
+        activeTerminal.id === 'T-08' ||
+        activeTerminal.modelType === 'salon')
+    ) {
+      return true;
+    }
+    return false;
+  }, [activeTerminal, isHybridMode, isService, businessDomainConfig.primaryBusinessModel, isBusinessLaundryPrimary]);
+
+  const isSalonServiceTerminal = useMemo(() => {
+    if (!isHybridMode) {
+      return isService && businessDomainConfig.primaryBusinessModel !== 'LAUNDRY';
+    }
+    if (isLaundryTerminal) return false;
+    if (!activeTerminal) {
+      return (
+        activePosTypes.includes('POS_JASA_LAYANAN') &&
+        businessDomainConfig.primaryBusinessModel !== 'LAUNDRY'
+      );
+    }
+    return (
+      activeTerminal.id === 'T-08' ||
+      activeTerminal.code === 'POS-SERVICE' ||
+      activeTerminal.modelType === 'salon' ||
+      (activeTerminal.businessModel || '').toLowerCase().includes('jasa')
+    );
+  }, [isHybridMode, isService, isLaundryTerminal, activeTerminal, activePosTypes, businessDomainConfig.primaryBusinessModel]);
+
+  const isFashionTerminal = useMemo(() => {
+    if (!isHybridMode) return isFashion;
+    if (isBusinessFashionPrimary) return true;
+    if (!activeTerminal) return isFashion;
+    const bm = (activeTerminal.businessModel || activeTerminal.businessType || '').toLowerCase();
+    return (
+      activeTerminal.modelType === 'fashion' ||
+      activeTerminal.id === 'T-04' ||
+      activeTerminal.code === 'POS-FASHION' ||
+      bm.includes('fashion') ||
+      bm.includes('butik')
+    );
+  }, [activeTerminal, isHybridMode, isFashion, isBusinessFashionPrimary]);
+
+  // Visibilitas Kontekstual Tombol "Kasbon / DP":
+  // HANYA aktif pada BUILDING (Bahan Bangunan), SERVICE sub-profil Laundry, atau RETAIL mode Grosir/B2B.
+  // Disembunyikan pada FNB (Resto/Cafe), FASHION, dan SERVICE Barbershop & Salon.
+  const isWholesaleRetailMode = useMemo(() => {
+    if (
+      !isRetail ||
+      isFnbTerminal ||
+      isFashionTerminal ||
+      isSalonServiceTerminal ||
+      isLaundryTerminal ||
+      isBuildingTerminal
+    ) {
+      return false;
+    }
+    const btLower = String(businessProfile?.businessType || '').toLowerCase();
+    const pmUpper = String(businessDomainConfig?.primaryBusinessModel || '').toUpperCase();
+    return Boolean(
+      businessDomainConfig?.subFeatures?.isWholesale ||
+        pmUpper === 'GROSIR_BESAR' ||
+        pmUpper === 'GROSIR_KECIL' ||
+        pmUpper === 'DEPO_DISTRIBUTOR' ||
+        btLower.includes('grosir') ||
+        btLower.includes('distributor') ||
+        btLower.includes('b2b') ||
+        selectedPriceTier === 'WHOLESALE'
+    );
+  }, [
+    isRetail,
+    isFnbTerminal,
+    isFashionTerminal,
+    isSalonServiceTerminal,
+    isLaundryTerminal,
+    isBuildingTerminal,
+    businessProfile?.businessType,
+    businessDomainConfig?.subFeatures?.isWholesale,
+    businessDomainConfig?.primaryBusinessModel,
+    selectedPriceTier,
+  ]);
+
+  const isKasbonAllowedForSector = useMemo(() => {
+    if (isFnb || isFnbTerminal || isFnbPhotoMenuMode) return false;
+    if (isFashion || isFashionTerminal) return false;
+    if (isSalonServiceTerminal) return false;
+    return Boolean(isBuilding || isBuildingTerminal || isLaundryTerminal || isWholesaleRetailMode);
+  }, [
+    isFnb,
+    isFnbTerminal,
+    isFnbPhotoMenuMode,
+    isFashion,
+    isFashionTerminal,
+    isSalonServiceTerminal,
+    isBuilding,
+    isBuildingTerminal,
+    isLaundryTerminal,
+    isWholesaleRetailMode,
+  ]);
+
+  useEffect(() => {
+    if (!isKasbonAllowedForSector && paymentMethod === 'KREDIT / TEMPO (AR)') {
+      setPaymentMethod('CASH');
+    }
+  }, [isKasbonAllowedForSector, paymentMethod]);
+
+  const pettyCashReasonPresets = useMemo(() => {
+    if (isLaundryTerminal) {
+      return getPettyCashReasonPresets('SERVICE', 'LAUNDRY');
+    }
+    if (isSalonServiceTerminal) {
+      return getPettyCashReasonPresets('SERVICE', 'BARBERSHOP');
+    }
+    if (isFnbTerminal) {
+      return getPettyCashReasonPresets('FNB', 'RESTO_CAFE');
+    }
+    if (isBuildingTerminal) {
+      return getPettyCashReasonPresets('BUILDING', 'BAHAN_BANGUNAN');
+    }
+    if (isFashionTerminal) {
+      return getPettyCashReasonPresets('FASHION', 'FASHION');
+    }
+    return getPettyCashReasonPresets(
+      activeSector,
+      businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+    );
+  }, [
+    isLaundryTerminal,
+    isSalonServiceTerminal,
+    isFnbTerminal,
+    isBuildingTerminal,
+    isFashionTerminal,
+    activeSector,
+    businessDomainConfig?.primaryBusinessModel,
+    businessProfile?.businessType,
+  ]);
+
+  const fashionCatalogSource = useMemo(() => {
+    const fromActive = activeProducts.filter(
+      (p) =>
+        p.businessModel === 'fashion' ||
+        String(p.id || '').toUpperCase().startsWith('FASH-') ||
+        Boolean(p.variantMatrix && p.variantMatrix.length > 0)
+    );
+    if (fromActive.length > 0) return fromActive;
+    return isMasterCatalogWiped ? [] : FASHION_APPAREL_PRODUCTS;
+  }, [activeProducts, isMasterCatalogWiped]);
+
+  const fittingRoomHeldCount = useMemo(
+    () => heldOrders.filter((o) => o.isFittingRoomHold).length,
+    [heldOrders]
+  );
+
+  const salonServiceCatalogSource = useMemo(() => {
+    const fromState = products.filter((p) => isBarbershopSalonProduct(p) && isServiceProductActive(p));
+    if (fromState.length > 0) return fromState;
+    return isMasterCatalogWiped ? [] : BARBERSHOP_SERVICE_SEEDS;
+  }, [products, isMasterCatalogWiped]);
+
+  const laundryCatalogSource = useMemo(() => {
+    const fromState = products.filter((p) => isLaundryCatalogProduct(p) && isServiceProductActive(p));
+    if (fromState.length > 0) return fromState;
+    return isMasterCatalogWiped ? [] : LAUNDRY_SERVICE_SEEDS;
+  }, [products, isMasterCatalogWiped]);
+
+  const manualSearchProducts = useMemo(() => {
+    if (isSalonServiceTerminal) {
+      return salonServiceCatalogSource;
+    }
+    if (isLaundryTerminal) {
+      return laundryCatalogSource;
+    }
+    const pkgProds = isFnbTerminal ? [] : getActivePackageProducts(activeProducts, domainPromoCampaigns);
+    const seen = new Set<string>();
+    const combined: Product[] = [];
+    for (const p of [...pkgProds, ...activeProducts]) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        combined.push(p);
+      }
+    }
+    return combined;
+  }, [
+    activeProducts,
+    isFnbTerminal,
+    isSalonServiceTerminal,
+    isLaundryTerminal,
+    salonServiceCatalogSource,
+    laundryCatalogSource,
+    domainPromoCampaigns,
+  ]);
+
+  const serviceCartCommissionSummary = useMemo(() => {
+    if (!isSalonServiceTerminal && !isLaundryTerminal) return null;
+    return calculateServiceCommissionBreakdown(
+      cart,
+      selectedServiceStylist
+        ? {
+            id: selectedServiceStylist.id,
+            name: selectedServiceStylist.name,
+            commissionRate: selectedServiceStylist.commissionRate,
+          }
+        : stylistName.trim()
+        ? { name: stylistName.trim() }
+        : null,
+      serviceStylists
+    );
+  }, [isSalonServiceTerminal, isLaundryTerminal, cart, selectedServiceStylist, stylistName, serviceStylists]);
+
+  const kiloanLaundryServices = useMemo(() => {
+    const matched = laundryCatalogSource.filter(
+      (p) => p.laundryUnitType === 'KILOAN' || (p.unit || '').toLowerCase() === 'kg'
+    );
+    return matched.length > 0
+      ? matched
+      : LAUNDRY_SERVICE_PRODUCTS.filter((p) => p.laundryUnitType === 'KILOAN');
+  }, [laundryCatalogSource]);
+
+  const [salonCatalogFilter, setSalonCatalogFilter] = useState<'ALL' | ServiceItemFormat>('ALL');
+
+  const filteredSalonServiceCatalog = useMemo(() => {
+    if (salonCatalogFilter === 'ALL') return salonServiceCatalogSource;
+    return salonServiceCatalogSource.filter(
+      (p) => resolveServiceItemFormat(p) === salonCatalogFilter
+    );
+  }, [salonServiceCatalogSource, salonCatalogFilter]);
+
+  const filteredQuickLaundryServices = useMemo(() => {
+    if (laundryCatalogFilter === 'ALL') return laundryCatalogSource;
+    return laundryCatalogSource.filter((p) => {
+      if (p.laundryUnitType) return p.laundryUnitType === laundryCatalogFilter;
+      const u = (p.unit || '').toLowerCase();
+      if (laundryCatalogFilter === 'KILOAN') return u === 'kg';
+      if (laundryCatalogFilter === 'PASANG') return u.includes('pasang');
+      if (laundryCatalogFilter === 'LUAS') return u.includes('m2') || u.includes('m²');
+      return true;
+    });
+  }, [laundryCatalogSource, laundryCatalogFilter]);
+
+  const luasLaundryServices = useMemo(() => {
+    const matched = laundryCatalogSource.filter(
+      (p) =>
+        p.laundryUnitType === 'LUAS' ||
+        (p.unit || '').toLowerCase().includes('m2') ||
+        (p.unit || '').toLowerCase().includes('m²')
+    );
+    return matched.length > 0
+      ? matched
+      : LAUNDRY_SERVICE_PRODUCTS.filter((p) => p.laundryUnitType === 'LUAS');
+  }, [laundryCatalogSource]);
+
+  const activeLaundryQueueCount = useMemo(
+    () => laundryOrders.filter((o) => o.productionStatus !== 'DIAMBIL').length,
+    [laundryOrders]
+  );
+
+  const computedLaundrySla = useMemo(() => {
+    const itemHours = cart
+      .map((it) => Number(it.product?.slaHours) || 0)
+      .filter((h) => h > 0);
+    const autoHours = itemHours.length > 0 ? Math.min(...itemHours) : 48;
+    const hours =
+      laundrySlaOverrideHours === 'AUTO'
+        ? autoHours
+        : Number(laundrySlaOverrideHours) || 48;
+    const label =
+      hours <= 6 ? 'Express 6 Jam' : hours <= 24 ? 'Kilat 24 Jam' : 'Reguler 48 Jam';
+    const estDate = new Date(Date.now() + hours * 3600000);
+    const display = estDate.toLocaleString('id-ID', {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return {
+      hours,
+      label,
+      iso: estDate.toISOString(),
+      display,
+    };
+  }, [cart, laundrySlaOverrideHours]);
+
+  useEffect(() => {
+    if (isRegisterOpen && activeTerminal) {
+      setIsFnbPhotoMenuMode(isFnbTerminal);
+      setReceiptNumber(peekStationReceiptNumber(activeStationCode));
+    }
+  }, [activeTerminal, activeStationCode, isRegisterOpen, isFnbTerminal]);
+
+  const applyBuildingTierPricingToCart = (
+    items: CartItem[],
+    contractorMode: boolean
+  ): CartItem[] => {
+    return items.map((item) => {
+      if (!item?.product || item.isPackage || item.product.isPackage || item.modifiers) {
+        return item;
+      }
+      const isBuildingItem = isBuildingTerminal || isBuildingMaterialProduct(item.product);
+      if (!isBuildingItem) {
+        if (!item.buildingTierName) return item;
+        return {
+          ...item,
+          buildingTierName: undefined,
+          buildingTierBadge: undefined,
+          buildingTierLabel: undefined,
+          buildingTierSavings: undefined,
+          cubicConversionFactorM3: undefined,
+          cubicDeductionM3: undefined,
+          grossMarginPercent: undefined,
+          isMarginBelowFloor: undefined,
+        };
+      }
+
+      const canonical =
+        products.find((p) => p.id === item.product.id) ||
+        products.find((p) => (p.name || '').toLowerCase() === (item.product.name || '').toLowerCase()) ||
+        item.product;
+
+      const cubicInfo = resolveBulkCubicConversionFactor({
+        product: canonical,
+        selectedUnit: item.selectedUnit || item.product.unit,
+        bulkUnitType: item.product.bulkUnitType,
+      });
+
+      const effectiveUnitCost = cubicInfo.isBulkConverted
+        ? cubicInfo.unitCostPrice
+        : Number(canonical.cost_price) > 0
+        ? Number(canonical.cost_price)
+        : Math.round((Number(canonical.sell_price) || 0) * 0.78);
+
+      // Handle manual discount on building item while still evaluating Margin Floor Guard & Cubic Conversion
+      if (item.promoBadge === '[MANUAL DISC]') {
+        const manualEffectivePrice = Math.max(0, (item.product.sell_price || 0) - (item.itemDiscount || 0));
+        const manualMarginEval = evaluateTierMarginGuard(manualEffectivePrice, effectiveUnitCost);
+        return {
+          ...item,
+          costPrice: effectiveUnitCost,
+          cubicConversionFactorM3: cubicInfo.isBulkConverted ? cubicInfo.factorM3 : undefined,
+          cubicDeductionM3: cubicInfo.isBulkConverted
+            ? Number((cubicInfo.factorM3 * item.quantity).toFixed(4))
+            : undefined,
+          grossMarginPercent: manualMarginEval.marginPercent,
+          isMarginBelowFloor: manualMarginEval.isBelowFloor,
+        };
+      }
+
+      const baseUnitPriceOverride =
+        item.isRetailUnit && canonical.priceSecondary
+          ? canonical.priceSecondary
+          : cubicInfo.isBulkConverted && cubicInfo.unitSalePrice > 0
+          ? cubicInfo.unitSalePrice
+          : item.product.bulkUnitType && item.product.sell_price > 0 && item.product.sell_price !== canonical.sell_price
+          ? item.product.sell_price
+          : undefined;
+
+      const tierRes = resolveBuildingItemTierPricing({
+        product: canonical,
+        quantity: item.quantity,
+        isContractorMode: contractorMode,
+        baseUnitPriceOverride,
+        unitLabel: item.selectedUnit || canonical.unit,
+      });
+
+      const hasBetterCampaignPromo =
+        Boolean(item.promoSourceType) && (item.itemDiscount || 0) >= tierRes.savingsPerUnit;
+
+      if (hasBetterCampaignPromo) {
+        const promoEffectiveUnit = Math.max(0, (item.product.sell_price || 0) - (item.itemDiscount || 0));
+        const promoMarginEval = evaluateTierMarginGuard(promoEffectiveUnit, effectiveUnitCost);
+        return {
+          ...item,
+          costPrice: effectiveUnitCost,
+          buildingTierName: tierRes.tierName,
+          buildingTierBadge: tierRes.tierBadge || undefined,
+          buildingTierLabel: tierRes.tierLabel,
+          buildingTierSavings: 0,
+          cubicConversionFactorM3: cubicInfo.isBulkConverted ? cubicInfo.factorM3 : undefined,
+          cubicDeductionM3: cubicInfo.isBulkConverted
+            ? Number((cubicInfo.factorM3 * item.quantity).toFixed(4))
+            : undefined,
+          grossMarginPercent: promoMarginEval.marginPercent,
+          isMarginBelowFloor: promoMarginEval.isBelowFloor,
+        };
+      }
+
+      const marginEval = evaluateTierMarginGuard(tierRes.activeUnitPrice, effectiveUnitCost);
+
+      return {
+        ...item,
+        product: { ...item.product, sell_price: tierRes.tier1UnitPrice },
+        originalUnitPrice: tierRes.tier1UnitPrice,
+        customPrice: tierRes.activeUnitPrice,
+        costPrice: effectiveUnitCost,
+        itemDiscount: tierRes.savingsPerUnit,
+        promoSavings: tierRes.totalSavings,
+        promoCode: undefined,
+        promoName: tierRes.tierName !== 'ECERAN' ? tierRes.tierLabel : undefined,
+        promoSourceType: undefined,
+        promoBadge: undefined,
+        promoMechanic: undefined,
+        freeBonusQty: 0,
+        freeBonusLabel: undefined,
+        promoHint: tierRes.nextTierHint,
+        subtotal: Math.round(tierRes.activeUnitPrice * item.quantity),
+        selectedPriceTier: tierRes.tierName,
+        buildingTierName: tierRes.tierName,
+        buildingTierBadge: tierRes.tierBadge || undefined,
+        buildingTierLabel: tierRes.tierLabel,
+        buildingTierSavings: tierRes.totalSavings,
+        cubicConversionFactorM3: cubicInfo.isBulkConverted ? cubicInfo.factorM3 : undefined,
+        cubicDeductionM3: cubicInfo.isBulkConverted
+          ? Number((cubicInfo.factorM3 * item.quantity).toFixed(4))
+          : undefined,
+        grossMarginPercent: marginEval.marginPercent,
+        isMarginBelowFloor: marginEval.isBelowFloor,
+      };
+    });
+  };
+
+  const recalculatePosCart = (
+    draftCart: CartItem[],
+    campaigns?: ReturnType<typeof loadPromoCampaignsForDomain>,
+    contractorOverride?: boolean
+  ): CartItem[] => {
+    const promoCalculated = recalculateCartWithPromos(
+      draftCart,
+      activeProducts.length > 0 ? activeProducts : products,
+      campaigns || loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType),
+      domainPromotions
+    );
+    const tiered = applyBuildingTierPricingToCart(
+      promoCalculated,
+      contractorOverride ?? isContractorMode
+    );
+    return tiered.map((item) => {
+      if (!item?.product || !item.modifiers) return item;
+      const effectiveUnit = Math.max(0, (item.product.sell_price || 0) - (item.itemDiscount || 0));
+      const syncedSubtotal = Math.round(effectiveUnit * item.quantity);
+      return syncedSubtotal === item.subtotal ? item : { ...item, subtotal: syncedSubtotal };
+    });
+  };
+
+  useEffect(() => {
+    const shouldEnforceLaundry = isLaundryTerminal || isBusinessLaundryPrimary;
+    const shouldEnforceFashion = isFashionTerminal || isBusinessFashionPrimary;
+    if (!shouldEnforceLaundry && !shouldEnforceFashion && !isMultiPosSelectorActive && activeTerminal?.id !== primaryPosIdentityId) return;
+    setCart((prev) => {
+      if (prev.length === 0) return prev;
+      if (shouldEnforceLaundry) {
+        const hasNonLaundry = prev.some((c) => !isLaundryCartItem(c));
+        if (hasNonLaundry) {
+          const laundryOnly = prev.filter(isLaundryCartItem);
+          return laundryOnly.length > 0 ? recalculatePosCart(laundryOnly) : [];
+        }
+        return recalculatePosCart(prev);
+      }
+      if (shouldEnforceFashion) {
+        const hasNonFashion = prev.some((c) => !isFashionCartItem(c));
+        if (hasNonFashion) {
+          const fashionOnly = prev.filter(isFashionCartItem);
+          return fashionOnly.length > 0 ? recalculatePosCart(fashionOnly) : [];
+        }
+        return recalculatePosCart(prev);
+      }
+      if (!isMultiPosSelectorActive) {
+        const hasBuildingInCart = prev.some((c) => isBuildingMaterialProduct(c.product));
+        if (businessDomainConfig.mechanismFamily !== 'BUILDING_BULK' && hasBuildingInCart) {
+          const nonBuildingOnly = prev.filter((c) => !isBuildingMaterialProduct(c.product));
+          return nonBuildingOnly.length > 0 ? recalculatePosCart(nonBuildingOnly) : [];
+        }
+        if (businessDomainConfig.mechanismFamily === 'BUILDING_BULK' && !hasBuildingInCart) {
+          const buildingOnly = prev.filter((c) => isBuildingMaterialProduct(c.product));
+          return buildingOnly.length > 0 ? recalculatePosCart(buildingOnly) : [];
+        }
+      }
+      return recalculatePosCart(prev);
+    });
+  }, [
+    activeTerminal?.name,
+    activeTerminal?.id,
+    activeTerminal?.modelType,
+    isMultiPosSelectorActive,
+    primaryPosIdentityId,
+    businessDomainConfig.mechanismFamily,
+    businessDomainConfig.primaryBusinessModel,
+    businessDomainConfig.isHybridMultiUnit,
+    isLaundryTerminal,
+    isBusinessLaundryPrimary,
+    isFashionTerminal,
+    isBusinessFashionPrimary,
+  ]);
+
+  const handleToggleContractorMode = () => {
+    const nextMode = !isContractorMode;
+    setIsContractorMode(nextMode);
+    setCart((prev) =>
+      recalculatePosCart(
+        prev,
+        loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType),
+        nextMode
+      )
+    );
+    showToast(
+      nextMode
+        ? 'Mode Pelanggan Kontraktor AKTIF — Seluruh item material otomatis mendapat Harga Tier 3'
+        : 'Mode Pelanggan Kontraktor NONAKTIF — Harga kembali menyesuaikan Qty (Eceran / Tukang / Kontraktor)',
+      nextMode ? 'success' : 'info'
+    );
+  };
+
+  const getActiveTransactionPriceTierLabel = (): string => {
+    const hasBuildingItems = isBuildingTerminal || cart.some((c) => isBuildingMaterialProduct(c.product));
+    if (hasBuildingItems) {
+      if (isContractorMode) return 'Tier Kontraktor (Tier 3)';
+      const tierSet = new Set(cart.map((c) => c.buildingTierName).filter(Boolean));
+      if (tierSet.has('KONTRAKTOR') && (tierSet.has('TUKANG') || tierSet.has('ECERAN'))) {
+        return 'Bertingkat (Tier Tukang & Kontraktor)';
+      }
+      if (tierSet.has('KONTRAKTOR')) return 'Tier Kontraktor (Tier 3)';
+      if (tierSet.has('TUKANG')) return 'Tier Tukang (Tier 2)';
+      return 'Eceran Umum (Tier 1)';
+    }
+    return getTierLabel(selectedPriceTier);
+  };
+
+  const handleAddToCart = (
+    product: Product,
+    scanQty = 1,
+    explicitPkgPromo?: ResolvedPromoResult,
+    laundryAreaMeta?: {
+      lengthM: number;
+      widthM: number;
+      isMinAreaAdjusted: boolean;
+      minAreaAppliedM2: number;
+    }
+  ) => {
     const isRaw =
       product.itemType === 'RAW_MATERIAL' ||
       (product.id || '').toLowerCase().startsWith('ing-') ||
       (product.id || '').toLowerCase().startsWith('raw-') ||
-      (product.category || '').toLowerCase().includes('bahan baku') ||
-      (product.category || '').toLowerCase().includes('bahan mentah');
+      (product.category || '').toLowerCase().includes('bahan baku');
 
     if (isRaw) {
-      showToast(
-        language === 'ID'
-          ? `❌ Item [${product.name}] adalah BAHAN BAKU mentah dan TIDAK DAPAT dijual di kasir!`
-          : `❌ Item [${product.name}] is RAW MATERIAL and CANNOT be sold at POS cashier!`
-      );
+      showToast(`❌ Item [${product.name}] adalah BAHAN BAKU mentah dan TIDAK DAPAT dijual di kasir!`);
       return;
     }
 
-    if (product.stock <= 0) {
-      showToast(
-        language === 'ID'
-          ? `Stok ${product.name} telah habis!`
-          : `Stock for ${product.name} is depleted!`
-      );
+    if (product.laundryUnitType === 'LUAS' && !laundryAreaMeta) {
+      setAreaTargetCartIndex(null);
+      setAreaModalService(product);
       return;
     }
 
-    const tierUnitPrice = getProductPriceByTier(product, selectedPriceTier);
-    const productWithTierPrice: Product = {
-      ...product,
-      sell_price: tierUnitPrice,
+    const isZeroOrNegativeStock =
+      !product.isPackage && product.itemType !== 'SERVICE' && (product.stock ?? 0) <= 0;
+
+    const campaigns = loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType);
+    let resolvedPkg = explicitPkgPromo;
+    let resolvedProduct = product;
+    if (product.isPackage && !resolvedPkg) {
+      const pkgLookup = resolvePackageBarcodePromo(
+        product.barcode || product.sku || product.id,
+        activeProducts,
+        campaigns,
+        scanQty
+      );
+      if (pkgLookup) {
+        if (pkgLookup.insufficientStockComponents.length > 0) {
+          showToast(
+            `⚠️ Stok komponen paket tidak mencukupi: ${pkgLookup.insufficientStockComponents.join(', ')}`,
+            'warning'
+          );
+        }
+        resolvedPkg = pkgLookup.promo;
+        resolvedProduct = pkgLookup.product;
+      }
+    }
+
+    const isLaundryItem =
+      resolvedProduct.businessModel === 'laundry' ||
+      Boolean(resolvedProduct.laundryUnitType) ||
+      (resolvedProduct.id || '').startsWith('LND-');
+    const isLaundryKiloan =
+      resolvedProduct.laundryUnitType === 'KILOAN' ||
+      (isLaundryItem && (resolvedProduct.unit || '').toLowerCase() === 'kg');
+    const rawMinOrder = Number(resolvedProduct.minOrderWeightKg ?? resolvedProduct.minOrderQty ?? 0);
+    let effectiveQty = scanQty;
+    let autoMinApplied = false;
+    if (isLaundryKiloan && rawMinOrder > 0 && effectiveQty < rawMinOrder) {
+      effectiveQty = rawMinOrder;
+      autoMinApplied = true;
+    }
+
+    const baseUnitPrice = resolvedProduct.isPackage && resolvedPkg
+      ? resolvedPkg.originalUnitPrice
+      : getProductPriceByTier(resolvedProduct, selectedPriceTier);
+
+    const productWithBasePrice: Product = {
+      ...resolvedProduct,
+      sell_price: baseUnitPrice,
+      price: baseUnitPrice,
     };
 
+    const isFashionItem =
+      resolvedProduct.businessModel === 'fashion' ||
+      String(resolvedProduct.id || '').toUpperCase().startsWith('FASH-') ||
+      Boolean(resolvedProduct.variantMatrix && resolvedProduct.variantMatrix.length > 0);
+    const defaultMatrixCell = isFashionItem && resolvedProduct.variantMatrix?.length
+      ? resolvedProduct.variantMatrix.find((c) => c.stock > 0) || resolvedProduct.variantMatrix[0]
+      : undefined;
+    const defaultFashionSize = isFashionItem
+      ? defaultMatrixCell?.size ||
+        (resolvedProduct.variantSize || 'M').split(',')[0]?.trim() ||
+        'M'
+      : undefined;
+    const defaultFashionColor = isFashionItem
+      ? defaultMatrixCell?.color ||
+        (resolvedProduct.variantColor || 'Sage').split(',')[0]?.trim() ||
+        'Sage'
+      : undefined;
+
+    let toastPromoSummary: ResolvedPromoResult | null = null;
+
     setCart((prev) => {
-      const existing = prev.find(
-        (item) => item.product.id === product.id && !item.modifiers
+      const existing = !laundryAreaMeta
+        ? prev.find((item) => {
+            if (item.product.id !== resolvedProduct.id || item.modifiers) return false;
+            if (isFashionItem) {
+              return (
+                (item.selectedFashionSize || defaultFashionSize) === defaultFashionSize &&
+                (item.selectedFashionColor || defaultFashionColor) === defaultFashionColor
+              );
+            }
+            return true;
+          })
+        : undefined;
+      const draftCart: CartItem[] = existing
+        ? prev.map((item) => {
+            const matchesTarget =
+              item.product.id === resolvedProduct.id &&
+              !item.modifiers &&
+              (!isFashionItem ||
+                ((item.selectedFashionSize || defaultFashionSize) === defaultFashionSize &&
+                  (item.selectedFashionColor || defaultFashionColor) === defaultFashionColor));
+            if (matchesTarget) {
+              const combinedQty = Number((item.quantity + scanQty).toFixed(2));
+              const clampedQty =
+                isLaundryKiloan && rawMinOrder > 0 && combinedQty < rawMinOrder
+                  ? rawMinOrder
+                  : combinedQty;
+              return {
+                ...item,
+                product: productWithBasePrice,
+                quantity: clampedQty,
+                selectedUnit: item.selectedUnit || resolvedProduct.unit,
+                selectedFashionSize: item.selectedFashionSize || defaultFashionSize,
+                selectedFashionColor: item.selectedFashionColor || defaultFashionColor,
+                actualNetWeightKg: isLaundryKiloan ? combinedQty : item.actualNetWeightKg,
+                isMinWeightAdjusted:
+                  isLaundryKiloan && rawMinOrder > 0 ? combinedQty < rawMinOrder : item.isMinWeightAdjusted,
+                minWeightAppliedKg:
+                  isLaundryKiloan && rawMinOrder > 0 ? rawMinOrder : item.minWeightAppliedKg,
+                originalUnitPrice: baseUnitPrice,
+                isPackage: Boolean(resolvedProduct.isPackage),
+                componentSkus: resolvedProduct.componentSkus,
+              };
+            }
+            return item;
+          })
+        : [
+            ...prev,
+            {
+              product: productWithBasePrice,
+              quantity: effectiveQty,
+              subtotal: Math.round(baseUnitPrice * effectiveQty),
+              originalUnitPrice: baseUnitPrice,
+              itemDiscount: 0,
+              selectedUnit: isLaundryItem ? resolvedProduct.unit : undefined,
+              selectedFashionSize: defaultFashionSize,
+              selectedFashionColor: defaultFashionColor,
+              laundryLengthM: laundryAreaMeta?.lengthM,
+              laundryWidthM: laundryAreaMeta?.widthM,
+              actualNetWeightKg: isLaundryKiloan ? scanQty : undefined,
+              isMinWeightAdjusted: laundryAreaMeta
+                ? laundryAreaMeta.isMinAreaAdjusted
+                : autoMinApplied,
+              minWeightAppliedKg: laundryAreaMeta
+                ? laundryAreaMeta.minAreaAppliedM2
+                : autoMinApplied
+                ? rawMinOrder
+                : undefined,
+              promoCode: resolvedPkg ? resolvedPkg.campaignCode : null,
+              isPackage: Boolean(resolvedProduct.isPackage),
+              componentSkus: resolvedProduct.componentSkus,
+              ...(isSalonServiceTerminal &&
+              resolvedProduct.itemType === 'SERVICE' &&
+              selectedServiceStylist
+                ? {
+                    stylistId: selectedServiceStylist.id,
+                    stylistName: selectedServiceStylist.name,
+                    stylistCommissionRate: selectedServiceStylist.commissionRate,
+                  }
+                : {}),
+            },
+          ];
+
+      const recalculated = recalculatePosCart(draftCart, campaigns);
+      const updatedLine = recalculated.find(
+        (it) =>
+          it.product.id === resolvedProduct.id &&
+          !it.modifiers &&
+          (!isFashionItem ||
+            ((it.selectedFashionSize || defaultFashionSize) === defaultFashionSize &&
+              (it.selectedFashionColor || defaultFashionColor) === defaultFashionColor))
       );
-      if (existing) {
-        return prev.map((item) => {
-          if (item.product.id === product.id && !item.modifiers) {
-            const nextQty = item.quantity + scanQty;
-            return {
-              ...item,
-              product: productWithTierPrice,
-              quantity: nextQty,
-              subtotal: (tierUnitPrice - (item.itemDiscount || 0)) * nextQty,
-              signa: item.signa || product.signa,
-            };
-          }
-          return item;
-        });
+      if (updatedLine?.promoSourceType && updatedLine.promoBadge) {
+        toastPromoSummary = {
+          campaignId: updatedLine.promoCode || '',
+          campaignCode: updatedLine.promoCode || '',
+          promoName: updatedLine.promoName || '',
+          sourceType: updatedLine.promoSourceType,
+          mechanic: updatedLine.promoMechanic || 'STANDARD',
+          badgeLabel: updatedLine.promoBadge,
+          originalUnitPrice: updatedLine.originalUnitPrice ?? baseUnitPrice,
+          finalUnitPrice: baseUnitPrice,
+          savingsPerUnit: updatedLine.itemDiscount || 0,
+          totalLineSavings: updatedLine.promoSavings || 0,
+          lineSubtotal: updatedLine.subtotal,
+          promoQtyCapped: updatedLine.promoQtyCapped || 0,
+          maxQtyPerReceipt: updatedLine.maxQtyPerReceipt ?? null,
+          isUnlimitedFefo: Boolean(updatedLine.isUnlimitedFefo),
+          freeBonusQty: updatedLine.freeBonusQty || 0,
+          freeBonusLabel: updatedLine.freeBonusLabel,
+          pwpQualified: updatedLine.pwpQualified,
+          promoHint: updatedLine.promoHint,
+          overriddenPromosCount: updatedLine.overriddenPromosCount || 0,
+        };
       }
-      return [
-        ...prev,
-        {
-          product: productWithTierPrice,
-          quantity: scanQty,
-          subtotal: tierUnitPrice * scanQty,
-          itemDiscount: 0,
-          signa: product.signa,
-        },
-      ];
+      return recalculated;
     });
 
     playScannerBeep();
-    triggerItemScannedEffect(product.name, scanQty, tierUnitPrice * scanQty);
-    showToast(
-      language === 'ID'
-        ? `+${scanQty} ${product.name} ditambahkan (${getTierLabel(selectedPriceTier)})`
-        : `+${scanQty} ${product.name} added to cart`
-    );
+    const activePromoInfo = toastPromoSummary || resolvedPkg;
+    if (activePromoInfo) {
+      const antiStackNote = activePromoInfo.overriddenPromosCount > 0 ? ` • Anti-Tumpuk (${activePromoInfo.overriddenPromosCount} promo lain dilewati)` : '';
+      const bonusNote = activePromoInfo.freeBonusQty > 0 ? ` • +${activePromoInfo.freeBonusQty} Gratis!` : '';
+      const savVal = toastPromoSummary ? toastPromoSummary.totalLineSavings : activePromoInfo.totalLineSavings;
+      showToast(
+        `+${effectiveQty} ${resolvedProduct.name} • ${activePromoInfo.badgeLabel}${bonusNote}${savVal > 0 ? ` Hemat Rp ${savVal.toLocaleString('id-ID')}` : ''}${antiStackNote}`,
+        'success'
+      );
+    } else if (laundryAreaMeta) {
+      showToast(
+        `${resolvedProduct.name} (${laundryAreaMeta.lengthM}m × ${laundryAreaMeta.widthM}m = ${effectiveQty} m²) ditambahkan`,
+        laundryAreaMeta.isMinAreaAdjusted ? 'warning' : 'success'
+      );
+    } else if (autoMinApplied) {
+      showToast(
+        `${resolvedProduct.name} otomatis disesuaikan ke minimum order ${rawMinOrder} ${resolvedProduct.unit || 'kg'}`,
+        'warning'
+      );
+    } else if (isZeroOrNegativeStock) {
+      showToast(
+        `+${effectiveQty} ${resolvedProduct.name} ditambahkan (Stok sistem: ${resolvedProduct.stock ?? 0} → izin stok minus sementara)`,
+        'warning'
+      );
+    } else {
+      showToast(`+${effectiveQty} ${resolvedProduct.name} ditambahkan (${getTierLabel(selectedPriceTier)})`);
+    }
     focusBarcodeInput();
   };
 
-  // Add F&B item with modifiers
+  const handleApplyDigitalScaleWeight = (payload: ScaleMeasurementPayload) => {
+    const unitPrice = getProductPriceByTier(payload.service, selectedPriceTier);
+    const serviceWithPrice: Product = {
+      ...payload.service,
+      sell_price: unitPrice,
+      price: unitPrice,
+    };
+
+    setCart((prev) => {
+      const targetIdx =
+        selectedCartIndex !== null && prev[selectedCartIndex]?.product.id === payload.service.id
+          ? selectedCartIndex
+          : prev.findIndex((it) => it.product.id === payload.service.id && !it.modifiers);
+
+      const draftCart: CartItem[] =
+        targetIdx >= 0
+          ? prev.map((it, idx) =>
+              idx === targetIdx
+                ? {
+                    ...it,
+                    product: serviceWithPrice,
+                    quantity: payload.billedWeightKg,
+                    selectedUnit: payload.service.unit || 'kg',
+                    grossWeightKg: payload.grossWeightKg,
+                    tareWeightKg: payload.tareWeightKg,
+                    actualNetWeightKg: payload.netWeightKg,
+                    isMinWeightAdjusted: payload.isMinWeightAdjusted,
+                    minWeightAppliedKg: payload.minWeightAppliedKg,
+                    originalUnitPrice: unitPrice,
+                    subtotal: Math.round(unitPrice * payload.billedWeightKg),
+                  }
+                : it
+            )
+          : [
+              ...prev,
+              {
+                product: serviceWithPrice,
+                quantity: payload.billedWeightKg,
+                subtotal: Math.round(unitPrice * payload.billedWeightKg),
+                originalUnitPrice: unitPrice,
+                itemDiscount: 0,
+                selectedUnit: payload.service.unit || 'kg',
+                grossWeightKg: payload.grossWeightKg,
+                tareWeightKg: payload.tareWeightKg,
+                actualNetWeightKg: payload.netWeightKg,
+                isMinWeightAdjusted: payload.isMinWeightAdjusted,
+                minWeightAppliedKg: payload.minWeightAppliedKg,
+              },
+            ];
+
+      return recalculatePosCart(draftCart);
+    });
+
+    playScannerBeep();
+    setScaleTargetService(null);
+    if (payload.isMinWeightAdjusted) {
+      showToast(
+        `⚖️ ${payload.service.name}: Netto ${payload.netWeightKg.toFixed(2)} kg < Min. ${payload.minWeightAppliedKg} kg → Ditagih ${payload.billedWeightKg.toFixed(2)} kg`,
+        'warning'
+      );
+    } else {
+      showToast(
+        `⚖️ ${payload.service.name}: ${payload.billedWeightKg.toFixed(2)} kg (Bruto ${payload.grossWeightKg.toFixed(2)} - Tare ${payload.tareWeightKg.toFixed(2)}) diterapkan`,
+        'success'
+      );
+    }
+    focusBarcodeInput();
+  };
+
+  const handleConfirmLaundryArea = (payload: LaundryAreaPayload) => {
+    if (areaTargetCartIndex !== null && cart[areaTargetCartIndex]) {
+      const idxToUpdate = areaTargetCartIndex;
+      setCart((prev) => {
+        const next = prev.map((item, idx) =>
+          idx === idxToUpdate
+            ? {
+                ...item,
+                quantity: payload.billedAreaM2,
+                selectedUnit: payload.service.unit || 'm2',
+                laundryLengthM: payload.lengthM,
+                laundryWidthM: payload.widthM,
+                isMinWeightAdjusted: payload.isMinAreaAdjusted,
+                minWeightAppliedKg: payload.minAreaAppliedM2,
+                subtotal: Math.round((item.product.sell_price || 0) * payload.billedAreaM2),
+              }
+            : item
+        );
+        return recalculatePosCart(next);
+      });
+      setAreaTargetCartIndex(null);
+      setAreaModalService(null);
+      playScannerBeep();
+      showToast(
+        `Dimensi ${payload.service.name} diperbarui: ${payload.lengthM}m × ${payload.widthM}m (${payload.billedAreaM2.toFixed(2)} m²)`,
+        'success'
+      );
+      return;
+    }
+
+    setAreaModalService(null);
+    handleAddToCart(payload.service, payload.billedAreaM2, undefined, {
+      lengthM: payload.lengthM,
+      widthM: payload.widthM,
+      isMinAreaAdjusted: payload.isMinAreaAdjusted,
+      minAreaAppliedM2: payload.minAreaAppliedM2,
+    });
+  };
+
+  const formatFnbOrderLocationLabel = (
+    mode: 'Dine-In' | 'Takeaway' | 'Delivery',
+    tableNo: string
+  ) => {
+    if (mode === 'Dine-In') return `Dine-In • ${tableNo || 'Meja 01'}`;
+    if (mode === 'Delivery') return 'Delivery • Tanpa Meja (Kurir)';
+    return 'Takeaway • Tanpa Meja (Bungkus)';
+  };
+
   const handleAddFnbOrder = (
     product: Product,
     quantity: number,
     modifiers: {
       tableNumber: string;
-      orderType: 'Dine-In' | 'Take-Away';
+      orderType: 'Dine-In' | 'Take-Away' | 'Takeaway' | 'Delivery';
       spicyLevel: number;
       toppings: string[];
       notes: string;
     },
     extraPrice: number
   ) => {
-    const isRaw =
-      product.itemType === 'RAW_MATERIAL' ||
-      (product.id || '').toLowerCase().startsWith('ing-') ||
-      (product.id || '').toLowerCase().startsWith('raw-') ||
-      (product.category || '').toLowerCase().includes('bahan baku') ||
-      (product.category || '').toLowerCase().includes('bahan mentah');
-
-    if (isRaw) {
-      showToast(
-        language === 'ID'
-          ? `❌ Item [${product.name}] adalah BAHAN BAKU mentah dan TIDAK DAPAT dijual di kasir!`
-          : `❌ Item [${product.name}] is RAW MATERIAL and CANNOT be sold at POS cashier!`
-      );
-      return;
-    }
-
     const unitPrice = product.sell_price + extraPrice;
+    const syncedOrderType = (
+      modifiers.orderType === 'Take-Away'
+        ? 'Takeaway'
+        : modifiers.orderType || fnbOrderMode
+    ) as 'Dine-In' | 'Takeaway' | 'Delivery';
+    const syncedTable =
+      syncedOrderType === 'Dine-In'
+        ? modifiers.tableNumber
+          ? modifiers.tableNumber.toLowerCase().includes('meja')
+            ? modifiers.tableNumber
+            : `Meja ${modifiers.tableNumber}`
+          : fnbTableNo
+        : '';
+
+    if (syncedOrderType === 'Dine-In' && syncedTable) {
+      setFnbTableNo(syncedTable);
+    }
+    setFnbOrderMode(syncedOrderType);
+
     setCart((prev) => [
       ...prev,
       {
-        product: {
-          ...product,
-          sell_price: unitPrice,
-        },
+        product: { ...product, sell_price: unitPrice },
+        originalUnitPrice: product.sell_price,
         quantity,
         subtotal: unitPrice * quantity,
         itemDiscount: 0,
-        modifiers,
+        modifiers: {
+          ...modifiers,
+          toppingExtraPrice: extraPrice,
+          tableNumber: syncedTable,
+          orderType: syncedOrderType === 'Takeaway' ? 'Take-Away' : syncedOrderType,
+        },
       },
     ]);
     playScannerBeep();
-    triggerItemScannedEffect(product.name, quantity, unitPrice * quantity);
     showToast(
-      language === 'ID'
-        ? `+${quantity} ${product.name} (${modifiers.orderType} • ${modifiers.tableNumber}) ditambahkan`
-        : `+${quantity} ${product.name} (${modifiers.orderType} • ${modifiers.tableNumber}) added`
+      `+${quantity} ${product.name} (${formatFnbOrderLocationLabel(syncedOrderType, syncedTable)}) ditambahkan`
     );
   };
 
-  // Update item quantity
+  const handleQuickAddFnbProduct = (product: Product, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const activeTableForOrder = fnbOrderMode === 'Dine-In' ? fnbTableNo : '';
+    setCart((prev) => {
+      const existingIdx = prev.findIndex(
+        (it) =>
+          it.product.id === product.id &&
+          !isItemSentToKot(it) &&
+          (!it.modifiers?.toppings || it.modifiers.toppings.length === 0) &&
+          !it.modifiers?.spicyLabel &&
+          (!it.modifiers?.sugarIceLabel || it.modifiers.sugarIceLabel === 'Normal') &&
+          !it.modifiers?.notes
+      );
+      if (existingIdx >= 0) {
+        const next = [...prev];
+        const target = { ...next[existingIdx] };
+        target.quantity += 1;
+        target.subtotal = target.quantity * target.product.sell_price;
+        target.modifiers = {
+          ...(target.modifiers || {
+            spicyLevel: 0,
+            toppings: [],
+            notes: '',
+          }),
+          tableNumber: activeTableForOrder,
+          orderType: fnbOrderMode === 'Takeaway' ? 'Take-Away' : fnbOrderMode,
+        };
+        next[existingIdx] = target;
+        return recalculatePosCart(next);
+      }
+      return recalculatePosCart([
+        ...prev,
+        {
+          product,
+          originalUnitPrice: product.sell_price,
+          quantity: 1,
+          subtotal: product.sell_price,
+          itemDiscount: 0,
+          modifiers: {
+            tableNumber: activeTableForOrder,
+            orderType: fnbOrderMode === 'Takeaway' ? 'Take-Away' : fnbOrderMode,
+            spicyLevel: 0,
+            toppings: [],
+            toppingDetails: [],
+            toppingExtraPrice: 0,
+            notes: '',
+          },
+        },
+      ]);
+    });
+    playScannerBeep();
+    showToast(
+      `+1 ${product.name} masuk keranjang (${formatFnbOrderLocationLabel(fnbOrderMode, activeTableForOrder)})`
+    );
+  };
+
+  const handleChangeFnbOrderMode = (nextMode: 'Dine-In' | 'Takeaway' | 'Delivery') => {
+    setFnbOrderMode(nextMode);
+    const nextTableForItems = nextMode === 'Dine-In' ? fnbTableNo : '';
+    setCart((prev) =>
+      prev.map((item) => ({
+        ...item,
+        modifiers: {
+          ...(item.modifiers || { spicyLevel: 0, toppings: [], notes: '' }),
+          tableNumber: nextTableForItems,
+          orderType: nextMode === 'Takeaway' ? 'Take-Away' : nextMode,
+        },
+      }))
+    );
+  };
+
+  const handleChangeFnbTableNo = (nextTable: string) => {
+    setFnbTableNo(nextTable);
+    setCart((prev) =>
+      prev.map((item) => ({
+        ...item,
+        modifiers: {
+          ...(item.modifiers || { spicyLevel: 0, toppings: [], notes: '' }),
+          tableNumber: fnbOrderMode === 'Dine-In' ? nextTable : '',
+          orderType: fnbOrderMode === 'Takeaway' ? 'Take-Away' : fnbOrderMode,
+        },
+      }))
+    );
+  };
+
+  const isFnbModeActive = isFnbTerminal || isFnbPhotoMenuMode;
+  const isItemSentToKot = (it?: CartItem | null) => Boolean(it?.kotSent && (it.kotSentQty ?? 0) > 0);
+  const hasAnyKotSentItem = hasSentKot || cart.some((it) => isItemSentToKot(it));
+
+  const [kotNowMs, setKotNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!hasAnyKotSentItem || !kotSentAt) return;
+    setKotNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setKotNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [hasAnyKotSentItem, kotSentAt]);
+
+  const kotElapsedMs = kotSentAt ? Math.max(0, kotNowMs - kotSentAt) : 0;
+  const kotRemainingMs = kotSentAt ? Math.max(0, KOT_GRACE_PERIOD_MS - kotElapsedMs) : 0;
+  const isKotGraceExpired = Boolean(hasAnyKotSentItem && kotSentAt && kotElapsedMs > KOT_GRACE_PERIOD_MS);
+  const kotRemainingLabel = (() => {
+    const totalSeconds = Math.max(0, Math.ceil(kotRemainingMs / 1000));
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  })();
+
+  const checkKotExpiredNow = () =>
+    Boolean(hasAnyKotSentItem && kotSentAt && Date.now() - kotSentAt > KOT_GRACE_PERIOD_MS);
+
   const handleUpdateQty = (index: number, delta: number) => {
     const currentItem = cart[index];
     if (!currentItem) return;
+    const nextQty = Number((currentItem.quantity + delta).toFixed(2));
 
-    if (currentItem.quantity + delta <= 0) {
-      handleRequestRemoveItem(index);
-      return;
+    if (delta < 0) {
+      if (isFnbModeActive) {
+        if (!isItemSentToKot(currentItem)) {
+          // Item F&B status draft (belum dikirim ke KOT Dapur): kurangi/hapus langsung tanpa PIN Supervisor
+          if (nextQty <= 0) {
+            handleRemoveItem(index);
+            return;
+          }
+          setCart((prev) => {
+            const updated = prev.map((item, idx) =>
+              idx === index ? { ...item, quantity: nextQty } : item
+            );
+            return recalculatePosCart(updated);
+          });
+          return;
+        }
+        // Item F&B SUDAH dikirim ke KOT Dapur
+        const sentQty = currentItem.kotSentQty ?? currentItem.quantity;
+        if (nextQty >= sentQty) {
+          // Hanya mengurangi tambahan draft (Add-on) di atas qty yang sudah terkirim ke dapur
+          setCart((prev) => {
+            const updated = prev.map((item, idx) =>
+              idx === index ? { ...item, quantity: nextQty } : item
+            );
+            return recalculatePosCart(updated);
+          });
+          return;
+        }
+        // Cek batas waktu grace period 5 menit setelah KOT dikirim
+        if (checkKotExpiredNow()) {
+          showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
+          return;
+        }
+        // Masih dalam <= 5 menit -> wajib PIN Supervisor (1234 / 8888)
+        setVoidingCartItem({
+          item: currentItem,
+          index,
+          mode: nextQty <= 0 ? 'REMOVE_ITEM' : 'REDUCE_QTY',
+          targetQty: nextQty,
+        });
+        setIsSupervisorVoidModalOpen(true);
+        return;
+      }
+
+      if (nextQty <= 0) {
+        handleRequestRemoveItem(index);
+        return;
+      }
     }
 
     setCart((prev) => {
-      return prev.map((item, idx) => {
-        if (idx === index) {
-          const targetQty = item.quantity + delta;
-          return {
-            ...item,
-            quantity: targetQty,
-            subtotal: (item.product.sell_price - (item.itemDiscount || 0)) * targetQty,
-          };
-        }
-        return item;
-      });
+      const updated = prev.map((item, idx) =>
+        idx === index ? { ...item, quantity: nextQty } : item
+      );
+      return recalculatePosCart(updated);
     });
   };
 
-  // Toggle Satuan Eceran vs Utuh (Meter vs Batang/Roll untuk material bangunan)
   const handleToggleItemUnit = (index: number) => {
-    setCart((prev) =>
-      prev.map((item, idx) => {
+    setCart((prev) => {
+      const updated = prev.map((item, idx) => {
         if (idx === index) {
           const p = item.product;
           if (p.unitSecondary && p.priceSecondary) {
             const nextIsRetail = !item.isRetailUnit;
             const nextUnit = nextIsRetail ? p.unitSecondary : p.unit || 'Pcs';
             const unitPrice = nextIsRetail ? p.priceSecondary : p.sell_price;
-            const nextSubtotal = Math.round((unitPrice - (item.itemDiscount || 0)) * item.quantity);
-            return {
-              ...item,
-              isRetailUnit: nextIsRetail,
-              selectedUnit: nextUnit,
-              subtotal: nextSubtotal,
-            };
+            return { ...item, isRetailUnit: nextIsRetail, selectedUnit: nextUnit, originalUnitPrice: unitPrice };
           }
         }
         return item;
-      })
-    );
-  };
-
-  // Dropdown Armada Cepat untuk Item Curah KASIR 09
-  const handleSelectFleetTier = (index: number, fleetId: string) => {
-    setCart((prev) =>
-      prev.map((item, idx) => {
-        if (idx === index) {
-          const fleetList =
-            item.product.bulkFleetTiers && item.product.bulkFleetTiers.length > 0
-              ? item.product.bulkFleetTiers
-              : DEFAULT_FLEET_OPTIONS;
-          const chosen = fleetList.find((f) => f.id === fleetId);
-          if (chosen) {
-            const newPrice = chosen.price;
-            const newUnit = chosen.name;
-            const nextSubtotal = Math.round((newPrice - (item.itemDiscount || 0)) * item.quantity);
-            return {
-              ...item,
-              selectedUnit: newUnit,
-              subtotal: nextSubtotal,
-              product: {
-                ...item.product,
-                sell_price: newPrice,
-                bulkUnitType: chosen.id,
-              },
-            };
-          }
-        }
-        return item;
-      })
-    );
-  };
-
-  // Direct fast numeric quantity change (supermarket cashier keyboard input with decimal support)
-  const handleDirectQtyChange = (index: number, newQty: number) => {
-    setCart((prev) =>
-      prev.map((item, idx) => {
-        if (idx === index) {
-          const isDecimalAllowed = Boolean(item.product.supportDecimal || isBuildingTerminal);
-          let validQty = isNaN(newQty) ? 1 : newQty;
-          if (isDecimalAllowed) {
-            validQty = Math.max(0.01, Math.round(validQty * 100) / 100);
-          } else {
-            validQty = Math.max(1, Math.floor(validQty));
-          }
-          const unitPrice = item.isRetailUnit && item.product.priceSecondary
-            ? item.product.priceSecondary
-            : item.product.sell_price;
-          const effectivePrice = Math.max(0, unitPrice - (item.itemDiscount || 0));
-          return {
-            ...item,
-            quantity: validQty,
-            subtotal: Math.round(effectivePrice * validQty),
-          };
-        }
-        return item;
-      })
-    );
-  };
-
-  // Update per-item discount
-  const handleUpdateItemDiscount = (index: number, discount: number) => {
-    setCart((prev) =>
-      prev.map((item, idx) => {
-        if (idx === index) {
-          const clampedDiscount = Math.max(0, Math.min(item.product.sell_price, discount));
-          return {
-            ...item,
-            itemDiscount: clampedDiscount,
-            subtotal: (item.product.sell_price - clampedDiscount) * item.quantity,
-          };
-        }
-        return item;
-      })
-    );
-  };
-
-  // Remove item by index
-  const handleRemoveItem = (index: number) => {
-    setCart((prev) => {
-      const next = prev.filter((_, idx) => idx !== index);
-      if (next.length === 0) {
-        setSelectedCartIndex(null);
-      } else {
-        setSelectedCartIndex((curr) => {
-          if (curr === null) return null;
-          if (curr >= next.length) return next.length - 1;
-          return curr;
-        });
-      }
-      return next;
+      });
+      return recalculatePosCart(updated);
     });
   };
 
-  // Supervisor Void Approval: triggers verification modal before removing scanned item
+  const handleChangeFashionVariant = (index: number, nextSize: string, nextColor: string) => {
+    setCart((prev) => {
+      const updated = prev.map((item, idx) =>
+        idx === index
+          ? {
+              ...item,
+              selectedFashionSize: nextSize,
+              selectedFashionColor: nextColor,
+            }
+          : item
+      );
+      return recalculatePosCart(updated);
+    });
+  };
+
+  const handleConfirmFashionVariants = (selections: FashionVariantSelection[]) => {
+    if (!variantPickerState || selections.length === 0) return;
+    const { product, mode, cartIndex } = variantPickerState;
+    const campaigns = loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType);
+    const unitPrice = getProductPriceByTier(product, selectedPriceTier);
+    const prodWithPrice: Product = { ...product, sell_price: unitPrice, price: unitPrice };
+
+    if (mode === 'CHANGE' && cartIndex !== undefined && cart[cartIndex]) {
+      const chosen = selections[0];
+      handleChangeFashionVariant(cartIndex, chosen.size, chosen.color);
+      playScannerBeep();
+      showToast(`Varian ${product.name} diubah ke ${chosen.size} • ${chosen.color}`);
+      return;
+    }
+
+    let zeroStockPicked = false;
+    setCart((prev) => {
+      let draft = [...prev];
+      for (const sel of selections) {
+        const cell = product.variantMatrix?.find(
+          (c) => c.size === sel.size && c.color === sel.color
+        );
+        if (cell && cell.stock <= 0) zeroStockPicked = true;
+        const baseTierPrice = getProductPriceByTier(product, selectedPriceTier);
+        const upcharge = Number(product.sizeUpcharges?.[sel.size] || product.sizeUpcharges?.[sel.size.toUpperCase()] || 0);
+        const unitPrice = baseTierPrice + upcharge;
+        const prodWithPrice: Product = { ...product, sell_price: unitPrice, price: unitPrice };
+
+        const existingIdx = draft.findIndex(
+          (it) =>
+            it.product.id === product.id &&
+            !it.modifiers &&
+            it.selectedFashionSize === sel.size &&
+            it.selectedFashionColor === sel.color
+        );
+        if (existingIdx >= 0) {
+          const cur = draft[existingIdx];
+          draft[existingIdx] = {
+            ...cur,
+            product: prodWithPrice,
+            quantity: Number((cur.quantity + sel.qty).toFixed(2)),
+            originalUnitPrice: unitPrice,
+          };
+        } else {
+          draft.push({
+            product: prodWithPrice,
+            quantity: sel.qty,
+            subtotal: Math.round(unitPrice * sel.qty),
+            originalUnitPrice: unitPrice,
+            itemDiscount: 0,
+            selectedUnit: product.unit || 'Pcs',
+            selectedFashionSize: sel.size,
+            selectedFashionColor: sel.color,
+          });
+        }
+      }
+      return recalculatePosCart(draft, campaigns);
+    });
+
+    playScannerBeep();
+    const summaryTags = selections.map((s) => `${s.size}•${s.color} (${s.qty}x)`).join(', ');
+    showToast(
+      `+${product.name} [${summaryTags}] masuk keranjang${zeroStockPicked ? ' (Non-Blocking stok 0)' : ''}`,
+      zeroStockPicked ? 'warning' : 'success'
+    );
+    focusBarcodeInput();
+  };
+
+  const handleSelectFleetTier = (index: number, fleetId: string) => {
+    setCart((prev) => {
+      const updated = prev.map((item, idx) => {
+        if (idx === index) {
+          const fleetList = item.product.bulkFleetTiers && item.product.bulkFleetTiers.length > 0 ? item.product.bulkFleetTiers : DEFAULT_FLEET_OPTIONS;
+          const chosen = fleetList.find((f) => f.id === fleetId);
+          if (chosen) {
+            const cubicInfo = resolveBulkCubicConversionFactor({
+              product: item.product,
+              bulkUnitType: chosen.id,
+              selectedUnit: chosen.name,
+            });
+            return {
+              ...item,
+              selectedUnit: chosen.name,
+              originalUnitPrice: chosen.price,
+              costPrice: cubicInfo.unitCostPrice,
+              cubicConversionFactorM3: cubicInfo.factorM3,
+              cubicDeductionM3: Number((cubicInfo.factorM3 * item.quantity).toFixed(4)),
+              product: { ...item.product, sell_price: chosen.price, bulkUnitType: chosen.id },
+            };
+          }
+        }
+        return item;
+      });
+      return recalculatePosCart(updated);
+    });
+  };
+
+  const handleDirectQtyChange = (index: number, newQty: number) => {
+    setCart((prev) => {
+      const updated = prev.map((item, idx) => {
+        if (idx === index) {
+          const isDecimalAllowed = Boolean(
+            item.product.supportDecimal ||
+              item.product.isWeighable ||
+              item.product.laundryUnitType === 'KILOAN' ||
+              item.product.laundryUnitType === 'LUAS' ||
+              isBuildingTerminal
+          );
+          let validQty = isNaN(newQty) ? 1 : newQty;
+          validQty = isDecimalAllowed ? Math.max(0.01, Math.round(validQty * 100) / 100) : Math.max(1, Math.floor(validQty));
+          return { ...item, quantity: validQty };
+        }
+        return item;
+      });
+      return recalculatePosCart(updated);
+    });
+  };
+
+  const handleRemoveItem = (index: number) => {
+    setCart((prev) => {
+      const next = prev.filter((_, idx) => idx !== index);
+      if (next.length === 0) setSelectedCartIndex(null);
+      else setSelectedCartIndex((curr) => (curr === null ? null : Math.min(curr, next.length - 1)));
+      return recalculatePosCart(next);
+    });
+  };
+
   const handleRequestRemoveItem = (index: number) => {
     const targetItem = cart[index];
     if (!targetItem) return;
-    setVoidingCartItem({ item: targetItem, index });
+
+    // Mode F&B: item draft (belum dikirim ke KOT Dapur) langsung dihapus tanpa PIN Supervisor
+    if (isFnbModeActive && !isItemSentToKot(targetItem)) {
+      handleRemoveItem(index);
+      showToast(`Item draft "${targetItem.product.name}" dihapus dari keranjang.`);
+      return;
+    }
+
+    // Mode F&B: item SUDAH dikirim ke KOT Dapur & melewati batas waktu 5 menit -> blokir hapus
+    if (isFnbModeActive && isItemSentToKot(targetItem) && checkKotExpiredNow()) {
+      showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
+      return;
+    }
+
+    setVoidingCartItem({ item: targetItem, index, mode: 'REMOVE_ITEM' });
     setIsSupervisorVoidModalOpen(true);
   };
 
-  // Called when supervisor approves void
-  const handleApproveVoidItem = (item: CartItem, index: number, supervisorName: string, reason: string) => {
+  const handleRequestCancelCart = () => {
+    if (cart.length === 0) return;
+    if (hasAnyKotSentItem) {
+      if (checkKotExpiredNow()) {
+        showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
+        return;
+      }
+      // Masih dalam <= 5 menit sejak KOT dikirim -> wajib Otorisasi PIN Supervisor (1234 / 8888)
+      setVoidingCartItem(null);
+      setIsSupervisorVoidModalOpen(true);
+    } else {
+      // Belum ada item terkirim ke KOT Dapur -> konfirmasi ringan tanpa memblokir kasir
+      setIsVoidConfirmOpen(true);
+    }
+  };
+
+  const applyToppingResultToCartItem = (index: number, result: FnbQuickToppingResult) => {
+    setCart((prev) => {
+      const updated = prev.map((it, idx) => {
+        if (idx !== index) return it;
+        const basePrice =
+          it.originalUnitPrice ??
+          Math.max(0, it.product.sell_price - (it.modifiers?.toppingExtraPrice || 0));
+        const nextUnitPrice = basePrice + result.toppingExtraPrice;
+        const effectiveUnit = Math.max(0, nextUnitPrice - (it.itemDiscount || 0));
+        const nextOrderType: 'Dine-In' | 'Take-Away' | 'Takeaway' | 'Delivery' =
+          fnbOrderMode === 'Takeaway' ? 'Take-Away' : fnbOrderMode;
+        return {
+          ...it,
+          originalUnitPrice: basePrice,
+          product: {
+            ...it.product,
+            sell_price: nextUnitPrice,
+            price: nextUnitPrice,
+          },
+          subtotal: Math.round(effectiveUnit * it.quantity),
+          modifiers: {
+            ...(it.modifiers || {}),
+            tableNumber: fnbOrderMode === 'Dine-In' ? fnbTableNo : '',
+            orderType: nextOrderType,
+            toppings: result.toppings,
+            toppingDetails: result.toppingDetails,
+            toppingExtraPrice: result.toppingExtraPrice,
+            spicyLabel: result.spicyLabel,
+            spicyLevel: result.spicyLevel ?? 0,
+            sugarIceLabel: result.sugarIceLabel,
+            sugarLevel: result.sugarLevel,
+            temperature: result.temperature,
+            notes: result.notes,
+          },
+        };
+      });
+      return recalculatePosCart(updated);
+    });
+  };
+
+  const handleOpenQuickTopping = (index: number) => {
+    const targetItem = cart[index];
+    if (!targetItem) return;
+    if (isItemSentToKot(targetItem) && checkKotExpiredNow()) {
+      showToast(KOT_TOPPING_LOCK_MESSAGE, 'error');
+      return;
+    }
+    setEditingToppingCartIndex(index);
+  };
+
+  const handleConfirmQuickTopping = (result: FnbQuickToppingResult) => {
+    const idx = editingToppingCartIndex;
+    setEditingToppingCartIndex(null);
+    if (idx === null) return;
+    const targetItem = cart[idx];
+    if (!targetItem) return;
+
+    if (!isItemSentToKot(targetItem)) {
+      // Item draft (belum dikirim ke KOT): langsung simpan tanpa PIN Supervisor
+      applyToppingResultToCartItem(idx, result);
+      showToast(
+        `Topping & catatan "${targetItem.product.name}" diperbarui (${result.summaryText}).`
+      );
+      return;
+    }
+
+    // Item sudah masuk KOT: periksa lagi grace period 5 menit
+    if (checkKotExpiredNow()) {
+      showToast(KOT_TOPPING_LOCK_MESSAGE, 'error');
+      return;
+    }
+
+    // Masih dalam <= 5 menit -> wajib PIN Supervisor (1234 / 8888) & picu [REVISI KOT]
+    setVoidingCartItem({
+      item: targetItem,
+      index: idx,
+      mode: 'EDIT_TOPPING',
+      pendingToppingUpdate: result,
+    });
+    setIsSupervisorVoidModalOpen(true);
+  };
+
+  const handleApproveVoidItem = (
+    item: CartItem | null,
+    index: number | null,
+    supervisorName: string,
+    reason: string
+  ) => {
+    // Kasus 0: Revisi Topping / Catatan item yang SUDAH dikirim ke KOT Dapur (<= 5 menit)
+    if (
+      item &&
+      index !== null &&
+      voidingCartItem?.mode === 'EDIT_TOPPING' &&
+      voidingCartItem.pendingToppingUpdate
+    ) {
+      const rev = voidingCartItem.pendingToppingUpdate;
+      applyToppingResultToCartItem(index, rev);
+      const revLabel = `${item.product.name}: ${rev.summaryText}`;
+      setKotRevisedItems((prev) => [...prev, revLabel]);
+      const basePrice =
+        item.originalUnitPrice ??
+        Math.max(0, item.product.sell_price - (item.modifiers?.toppingExtraPrice || 0));
+      const newLineTotal = Math.round((basePrice + rev.toppingExtraPrice) * item.quantity);
+      addAuditLog({
+        action: `[REVISI TOPPING KOT] "${item.product.name}" diubah ke [${rev.summaryText}] (Total baris Rp ${newLineTotal.toLocaleString('id-ID')}). Disetujui: ${supervisorName}. Alasan: ${reason}.`,
+        module: 'POS / Kasir',
+        user: activeUser?.name || 'Kasir',
+        division: activeUser?.division || 'POS / Kasir',
+        amount: newLineTotal,
+        category: 'VOID_POS',
+        level: 'WARNING',
+      });
+      setVoidingCartItem(null);
+      showToast(
+        `Topping "${item.product.name}" diubah & ditandai [REVISI KOT] (Disetujui: ${supervisorName}).`,
+        'warning'
+      );
+      return;
+    }
+
+    // Kasus 1: Full-cart void (pembatalan seluruh pesanan yang sudah masuk KOT Dapur)
+    if (!item || index === null) {
+      const totalValue = grandTotal;
+      const orderDesc = isFnbModeActive
+        ? formatFnbOrderLocationLabel(fnbOrderMode, fnbTableNo)
+        : activeStationCode;
+      addAuditLog({
+        action: `[VOID TRANSAKSI POS] Pesanan ${orderDesc} (${cart.length} item, Rp ${totalValue.toLocaleString('id-ID')}) DIBATALKAN. Disetujui: ${supervisorName}. Alasan: ${reason}.`,
+        module: 'POS / Kasir',
+        user: activeUser?.name || 'Kasir',
+        division: activeUser?.division || 'POS / Kasir',
+        amount: totalValue,
+        category: 'VOID_POS',
+        level: 'WARNING',
+      });
+      resetToNewTransaction();
+      setVoidingCartItem(null);
+      showToast(`Pesanan berhasil dibatalkan & dicatat ke Audit Log (Disetujui: ${supervisorName}).`, 'warning');
+      return;
+    }
+
+    // Kasus 2: Pengurangan qty item yang SUDAH dikirim ke KOT Dapur
+    if (voidingCartItem?.mode === 'REDUCE_QTY' && typeof voidingCartItem.targetQty === 'number') {
+      const targetQty = Math.max(1, voidingCartItem.targetQty);
+      const prevSentQty = item.kotSentQty ?? item.quantity;
+      const cancelledQty = Math.max(1, Number((prevSentQty - targetQty).toFixed(2)));
+      const cancelledNominal = Math.round((item.product.sell_price || 0) * cancelledQty);
+      setCart((prev) => {
+        const updated = prev.map((it, idx) =>
+          idx === index
+            ? {
+                ...it,
+                quantity: targetQty,
+                kotSentQty: Math.min(prevSentQty, targetQty),
+              }
+            : it
+        );
+        return recalculatePosCart(updated);
+      });
+      if (isItemSentToKot(item)) {
+        const label = `${item.product.name} (${cancelledQty}x)`;
+        setKotVoidedItems((prev) => [...prev, label]);
+      }
+      addAuditLog({
+        action: `[VOID ITEM KOT] Item "${item.product.name}" dikurangi -${cancelledQty}x (Rp ${cancelledNominal.toLocaleString('id-ID')}). Disetujui: ${supervisorName}. Alasan: ${reason}.`,
+        module: 'POS / Kasir',
+        user: activeUser?.name || 'Kasir',
+        division: activeUser?.division || 'POS / Kasir',
+        amount: cancelledNominal,
+        category: 'VOID_POS',
+        level: 'WARNING',
+      });
+      setVoidingCartItem(null);
+      showToast(
+        `Qty "${item.product.name}" dikurangi & ditandai REVISI KOT (Disetujui: ${supervisorName}).`,
+        'warning'
+      );
+      return;
+    }
+
+    // Kasus 3: Penghapusan penuh item (KOT-sent atau non-F&B void)
+    const wasSentToKot = isItemSentToKot(item);
+    if (wasSentToKot) {
+      const voidLabel = `${item.product.name} (${item.kotSentQty ?? item.quantity}x)`;
+      setKotVoidedItems((prev) => [...prev, voidLabel]);
+    }
     handleRemoveItem(index);
-
-    const subtotalVal = item.subtotal || item.product.sell_price * item.quantity;
-    addAuditLog(
-      `[VOID ITEM POS] Item "${item.product.name}" (${item.quantity} ${item.product.unit || 'pcs'} @ Rp ${item.product.sell_price.toLocaleString('id-ID')} | Total: Rp ${subtotalVal.toLocaleString('id-ID')}) DIBATALKAN dari transaksi kasir. Disetujui oleh: ${supervisorName}. Alasan: ${reason}.`,
-      'POS / Kasir',
-      'WARN'
-    );
-
+    addAuditLog({
+      action: `[VOID ITEM POS] Item "${item.product.name}" (${item.quantity}x, Rp ${(item.subtotal || 0).toLocaleString('id-ID')}) DIBATALKAN. Disetujui: ${supervisorName}. Alasan: ${reason}.`,
+      module: 'POS / Kasir',
+      user: activeUser?.name || 'Kasir',
+      division: activeUser?.division || 'POS / Kasir',
+      amount: item.subtotal || 0,
+      category: 'VOID_POS',
+      level: 'WARNING',
+    });
+    setVoidingCartItem(null);
     showToast(
-      language === 'ID'
-        ? `Item "${item.product.name}" berhasil di-void (Disetujui: ${supervisorName})`
-        : `Item "${item.product.name}" voided (Approved by: ${supervisorName})`
+      wasSentToKot
+        ? `Item "${item.product.name}" di-void & masuk penanda REVISI KOT (Disetujui: ${supervisorName}).`
+        : `Item "${item.product.name}" berhasil di-void (Disetujui: ${supervisorName}).`
     );
   };
 
-  // Clear / Void Cart
   const handleConfirmVoid = () => {
-    const totalItems = cart.reduce((s, i) => s + i.quantity, 0);
-    addAuditLog(
-      `[VOID TRANSAKSI] Seluruh transaksi kasir (${cart.length} SKU, ${totalItems} pcs senilai Rp ${grandTotal.toLocaleString('id-ID')}) DIBATALKAN (Void) oleh kasir.`,
-      'POS / Kasir',
-      'WARN'
-    );
     resetToNewTransaction();
     setIsVoidConfirmOpen(false);
-    showToast(
-      language === 'ID'
-        ? 'Transaksi berhasil dibatalkan (VOID). Kasir kembali ke Transaksi Baru / Pelanggan Umum.'
-        : 'Transaction voided successfully. Reverted to New Transaction / Guest.'
-    );
+    showToast('Keranjang pesanan berhasil dikosongkan.');
   };
 
-  // Open Hold Cart Modal
   const handleOpenHoldModal = () => {
     if (cart.length === 0) {
-      showToast(
-        language === 'ID'
-          ? 'Keranjang masih kosong, tidak ada pesanan untuk ditahan.'
-          : 'Cart is empty, nothing to hold.'
-      );
+      showToast('Keranjang masih kosong, tidak ada pesanan untuk ditahan.');
       return;
     }
     setIsHoldCartModalOpen(true);
   };
 
-  // Confirm Hold Order from Modal
-  const handleConfirmHoldOrder = (holdName: string) => {
+  const handleConfirmHoldOrder = (
+    holdName: string,
+    fnbMeta?: { tableNo?: string; orderMode?: 'Dine-In' | 'Takeaway' | 'Delivery' }
+  ) => {
     if (cart.length === 0) return;
-
+    const savedOrderMode = fnbMeta?.orderMode || fnbOrderMode;
+    const savedTableNo =
+      savedOrderMode === 'Dine-In' ? fnbMeta?.tableNo || fnbTableNo || 'Meja 01' : undefined;
     const newHeld: HeldOrder = {
       id: `HOLD-${Date.now()}`,
       name: holdName,
@@ -1783,107 +3098,103 @@ export const PosModule: React.FC = () => {
       total: grandTotal,
       customer: selectedCustomer,
       priceTier: selectedPriceTier,
+      discountType,
+      discountVal: discountType === 'PERCENT' ? discountPercent : discountAmount,
+      isFittingRoomHold: isFashionTerminal,
+      fittingRoomLabel: isFashionTerminal ? holdName : undefined,
+      fashionAdvisorId: selectedFashionAdvisor?.id,
+      fashionAdvisorName: selectedFashionAdvisor?.name,
+      stationCode: activeStationCode,
+      isFnbHold: isFnbModeActive,
+      fnbTableNo: isFnbModeActive ? savedTableNo : undefined,
+      fnbOrderMode: isFnbModeActive ? savedOrderMode : undefined,
+      kotSent: hasAnyKotSentItem,
+      kotSentAt: kotSentAt,
+      kotVoidedItems: kotVoidedItems.length > 0 ? [...kotVoidedItems] : undefined,
+      kotRevisedItems: kotRevisedItems.length > 0 ? [...kotRevisedItems] : undefined,
     };
-
     setHeldOrders((prev) => [newHeld, ...prev]);
     resetToNewTransaction();
-    addAuditLog(
-      `[HOLD CART] Transaksi antrean "${newHeld.name}" (${newHeld.items.length} SKU, total Rp ${newHeld.total.toLocaleString('id-ID')}) DITAHAN (HOLD) oleh kasir.`,
-      'POS / Kasir',
-      'INFO'
-    );
     showToast(
-      language === 'ID'
-        ? `Transaksi "${newHeld.name}" berhasil ditahan (HOLD). Kasir siap melayani antrean berikutnya.`
-        : `Order "${newHeld.name}" held successfully.`
+      isFnbModeActive
+        ? `Pesanan "${newHeld.name}" berhasil ditahan di loket ${activeStationCode}.`
+        : isFashionTerminal
+        ? `Pesanan "${newHeld.name}" dititipkan (Fitting Room) — Kasir siap melayani antrean berikutnya.`
+        : `Transaksi "${newHeld.name}" berhasil ditahan (HOLD).`
     );
   };
 
-  // Hold / Pending Current Transaction (Quick / Fallback)
-  const handleHoldOrder = () => {
-    handleOpenHoldModal();
-  };
-
-  // Recall Held Order
   const handleRecallOrder = (order: HeldOrder) => {
-    // If cart currently has items, automatically park current cart to prevent data loss
     if (cart.length > 0) {
-      const autoParkName = `${language === 'ID' ? 'Antrean Sebelumnya' : 'Previous Cart'} (${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})`;
+      const autoHoldLabel = isFnbModeActive
+        ? fnbOrderMode === 'Dine-In'
+          ? `${fnbTableNo} (Dine-In)`
+          : fnbOrderMode === 'Delivery'
+          ? 'Delivery • Tanpa Meja (Kurir)'
+          : 'Takeaway • Tanpa Meja (Bungkus)'
+        : isFashionTerminal
+        ? `Fitting Room Auto (${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})`
+        : `Antrean Sebelumnya (${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })})`;
       const autoHeld: HeldOrder = {
         id: `HOLD-${Date.now()}`,
-        name: autoParkName,
+        name: autoHoldLabel,
         timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         items: [...cart],
         total: grandTotal,
         customer: selectedCustomer,
         priceTier: selectedPriceTier,
+        isFittingRoomHold: isFashionTerminal,
+        fittingRoomLabel: isFashionTerminal ? 'Titipan Antrean Sebelumnya' : undefined,
+        fashionAdvisorId: selectedFashionAdvisor?.id,
+        fashionAdvisorName: selectedFashionAdvisor?.name,
+        stationCode: activeStationCode,
+        isFnbHold: isFnbModeActive,
+        fnbTableNo: isFnbModeActive && fnbOrderMode === 'Dine-In' ? fnbTableNo : undefined,
+        fnbOrderMode: isFnbModeActive ? fnbOrderMode : undefined,
+        kotSent: hasAnyKotSentItem,
+        kotSentAt: kotSentAt,
+        kotVoidedItems: kotVoidedItems.length > 0 ? [...kotVoidedItems] : undefined,
+        kotRevisedItems: kotRevisedItems.length > 0 ? [...kotRevisedItems] : undefined,
       };
       setHeldOrders((prev) => [autoHeld, ...prev.filter((o) => o.id !== order.id)]);
-      showToast(
-        language === 'ID'
-          ? `Keranjang aktif disimpan ke "${autoParkName}" & antrean "${order.name}" dimuat.`
-          : `Active cart saved to "${autoParkName}" & order "${order.name}" recalled.`
-      );
     } else {
       setHeldOrders((prev) => prev.filter((o) => o.id !== order.id));
-      showToast(
-        language === 'ID'
-          ? `Antrean "${order.name}" berhasil dimuat kembali (RECALL).`
-          : `Order "${order.name}" recalled successfully.`
-      );
     }
-
-    setCart(order.items);
+    setCart(recalculatePosCart(order.items));
     setSelectedCustomer(order.customer || null);
     setSelectedPriceTier(order.priceTier || 'RETAIL');
+    if (order.fashionAdvisorId) {
+      setFashionAdvisorId(order.fashionAdvisorId);
+    }
+    if (order.fnbOrderMode) {
+      setFnbOrderMode(order.fnbOrderMode);
+    }
+    if (order.fnbOrderMode === 'Dine-In' && order.fnbTableNo) {
+      setFnbTableNo(order.fnbTableNo);
+    }
+    setHasSentKot(Boolean(order.kotSent || order.items.some((it) => it.kotSent)));
+    setKotSentAt(order.kotSentAt ?? null);
+    setKotVoidedItems(order.kotVoidedItems ? [...order.kotVoidedItems] : []);
+    setKotRevisedItems(order.kotRevisedItems ? [...order.kotRevisedItems] : []);
+    if (order.discountType && order.discountVal !== undefined) {
+      setDiscountType(order.discountType);
+      if (order.discountType === 'PERCENT') setDiscountPercent(order.discountVal);
+      else setDiscountAmount(order.discountVal);
+    }
     setIsHeldOrdersModalOpen(false);
-
-    addAuditLog(
-      `[RECALL CART] Antrean "${order.name}" (${order.items.length} SKU, total Rp ${order.total.toLocaleString('id-ID')}) DIPANGGIL KEMBALI (RECALL) ke kasir.`,
-      'POS / Kasir',
-      'INFO'
-    );
+    showToast(`Antrean "${order.name}" berhasil dimuat kembali.`);
   };
 
-  // Delete Held Order
   const handleDeleteHeldOrder = (id: string) => {
-    const target = heldOrders.find((o) => o.id === id);
     setHeldOrders((prev) => prev.filter((o) => o.id !== id));
-    if (target) {
-      addAuditLog(
-        `[DELETE HELD] Antrean "${target.name}" (${target.items.length} SKU) dihapus oleh kasir.`,
-        'POS / Kasir',
-        'INFO'
-      );
-    }
-    showToast(language === 'ID' ? 'Antrean berhasil dihapus.' : 'Held order deleted.');
+    showToast('Antrean berhasil dihapus.');
   };
 
-  // Reprint Last Receipt
-  const handleReprintLastReceipt = () => {
-    if (!sales || sales.length === 0) {
-      showToast(
-        language === 'ID'
-          ? 'Belum ada transaksi penjualan yang tercatat.'
-          : 'No sales recorded yet.'
-      );
-      return;
-    }
-    const lastSale = sales[sales.length - 1];
-    showReceipt(lastSale);
-  };
-
-  // Manual Cash Drawer Open Command (ESC/POS RJ11 Trigger)
   const handleManualOpenDrawer = () => {
     triggerCashDrawer();
-    showToast(
-      language === 'ID'
-        ? 'Sinyal pulsa buka laci kasir terkirim ke printer'
-        : 'Pulse signal sent to open cash drawer via printer'
-    );
+    showToast('Sinyal pulsa buka laci kasir terkirim ke printer');
   };
 
-  // Barcode search / enter handler
   const handleBarcodeSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const q = barcodeInput.trim();
@@ -1897,29 +3208,96 @@ export const PosModule: React.FC = () => {
       return;
     }
 
-    // Dukungan instan scanner untuk barcode Obat Racikan "RCK-2026-001"
-    if (q.toUpperCase() === 'RCK-2026-001' || q.toUpperCase() === 'RACIK-FLU-BATUK-DEWASA') {
-      const racikanItem: Product = {
-        id: 'RCK-2026-001',
-        plu: 'RACIK-FLU-BATUK-DEWASA',
-        barcode: 'RCK-2026-001',
-        name: 'Racikan Kapsul Flu & Batuk Dewasa',
-        itemType: 'RETAIL',
-        category: 'FARMASI_RACIKAN',
-        brand: 'Apotek JacS Farma',
-        sell_price: 45000,
-        cost_price: 24500,
-        stock: 50,
-        status: 'Active',
-        unit: 'Kapsul',
-        pharmacyClass: 'RACIKAN',
-        signa: '3 x 1 Kapsul sesudah makan',
-        businessModel: 'pharmacy',
-      };
-      handleAddToCart(racikanItem, 1);
+    const pkgResolved = resolvePackageBarcodePromo(q, activeProducts, domainPromoCampaigns);
+    if (pkgResolved) {
+      if (pkgResolved.insufficientStockComponents.length > 0) {
+        showToast(`⚠️ Stok komponen paket tidak mencukupi: ${pkgResolved.insufficientStockComponents.join(', ')}`, 'warning');
+      }
+      handleAddToCart(pkgResolved.product, 1, pkgResolved.promo);
       setBarcodeInput('');
       focusBarcodeInput();
       return;
+    }
+
+    // Support scanning/typing bulk material barcode or PLU with fleet suffix (-PKP, -ENG, -TRK, -SAK)
+    const upperQ = q.toUpperCase();
+    const fleetSuffixMatch = DEFAULT_FLEET_OPTIONS.find((f) => upperQ.endsWith(f.suffix));
+    if (fleetSuffixMatch) {
+      const baseQuery = q.slice(0, q.length - fleetSuffixMatch.suffix.length).trim();
+      const baseProduct = activeProducts.find(
+        (p) =>
+          (p.barcode && p.barcode.toLowerCase() === baseQuery.toLowerCase()) ||
+          (p.plu && p.plu.toLowerCase() === baseQuery.toLowerCase()) ||
+          (p.id && p.id.toLowerCase() === baseQuery.toLowerCase()) ||
+          (p.name && p.name.toLowerCase().includes(baseQuery.toLowerCase()))
+      );
+      if (baseProduct) {
+        const fleetList =
+          baseProduct.bulkFleetTiers && baseProduct.bulkFleetTiers.length > 0
+            ? baseProduct.bulkFleetTiers
+            : DEFAULT_FLEET_OPTIONS;
+        const chosenFleet = fleetList.find((f) => f.id === fleetSuffixMatch.id) || fleetSuffixMatch;
+        const productWithFleet: Product = {
+          ...baseProduct,
+          sell_price: chosenFleet.price,
+          bulkUnitType: chosenFleet.id,
+        };
+        const fleetDisplayName = 'shortName' in chosenFleet ? chosenFleet.shortName : chosenFleet.name;
+        handleAddToCart(productWithFleet, 1);
+        showToast(
+          `Curah [${baseProduct.name}] mode ${fleetDisplayName} (${chosenFleet.volumeM3} m³) ditambahkan!`
+        );
+        setBarcodeInput('');
+        focusBarcodeInput();
+        return;
+      }
+    }
+
+    // Check exact barcode/sku variant in Fashion matrix first (1-scan exact size x color match)
+    for (const prod of activeProducts) {
+      if (Array.isArray(prod.variantMatrix) && prod.variantMatrix.length > 0) {
+        const matchedCell = prod.variantMatrix.find(
+          (cell) =>
+            (cell.barcodeVariant && cell.barcodeVariant.toLowerCase() === q.toLowerCase()) ||
+            (cell.skuVariant && cell.skuVariant.toLowerCase() === q.toLowerCase())
+        );
+        if (matchedCell) {
+          const campaigns = loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType);
+          const unitPrice = getProductPriceByTier(prod, selectedPriceTier);
+          const prodWithPrice = { ...prod, sell_price: unitPrice, price: unitPrice };
+          setCart((prev) => {
+            const idx = prev.findIndex(
+              (it) =>
+                it.product.id === prod.id &&
+                !it.modifiers &&
+                it.selectedFashionSize === matchedCell.size &&
+                it.selectedFashionColor === matchedCell.color
+            );
+            const next =
+              idx >= 0
+                ? prev.map((it, i) => (i === idx ? { ...it, quantity: it.quantity + 1 } : it))
+                : [
+                    ...prev,
+                    {
+                      product: prodWithPrice,
+                      quantity: 1,
+                      subtotal: unitPrice,
+                      originalUnitPrice: unitPrice,
+                      itemDiscount: 0,
+                      selectedUnit: prod.unit || 'Pcs',
+                      selectedFashionSize: matchedCell.size,
+                      selectedFashionColor: matchedCell.color,
+                    },
+                  ];
+            return recalculatePosCart(next, campaigns);
+          });
+          playScannerBeep();
+          showToast(`+${prod.name} (${matchedCell.size} • ${matchedCell.color}) ditambahkan!`);
+          setBarcodeInput('');
+          focusBarcodeInput();
+          return;
+        }
+      }
     }
 
     const match = activeProducts.find(
@@ -1930,564 +3308,142 @@ export const PosModule: React.FC = () => {
         (p.name && p.name.toLowerCase() === q.toLowerCase())
     );
 
+    const openOrAddMatched = (targetProd: Product) => {
+      if (targetProd.variantMatrix && targetProd.variantMatrix.length > 0) {
+        setVariantPickerState({ product: targetProd, mode: 'ADD' });
+      } else {
+        handleAddToCart(targetProd, 1);
+      }
+    };
+
     if (match) {
-      handleAddToCart(match, 1);
+      openOrAddMatched(match);
       setBarcodeInput('');
       focusBarcodeInput();
     } else {
-      // Check if item exists in raw materials
-      const rawMatch = products.find(
-        (p) =>
-          (p.itemType === 'RAW_MATERIAL' ||
-            (p.id || '').toLowerCase().startsWith('ing-') ||
-            (p.id || '').toLowerCase().startsWith('raw-') ||
-            (p.category || '').toLowerCase().includes('bahan baku') ||
-            (p.category || '').toLowerCase().includes('bahan mentah')) &&
-          ((p.barcode && p.barcode.toLowerCase() === q.toLowerCase()) ||
-            (p.plu && p.plu.toLowerCase() === q.toLowerCase()) ||
-            (p.id && p.id.toLowerCase() === q.toLowerCase()) ||
-            (p.name && p.name.toLowerCase() === q.toLowerCase()))
-      );
-      if (rawMatch) {
-        showToast(
-          language === 'ID'
-            ? `❌ Item [${rawMatch.name}] adalah BAHAN BAKU mentah dan TIDAK DAPAT dijual di kasir!`
-            : `❌ Item [${rawMatch.name}] is RAW MATERIAL and CANNOT be sold at POS cashier!`
-        );
-        setBarcodeInput('');
-        focusBarcodeInput();
-        return;
-      }
-
-      // Check if item exists but is DISCONTINUED
-      const discontinuedMatch = products.find(
-        (p) =>
-          String(p.status || '').toUpperCase() === 'DISCONTINUED' &&
-          ((p.barcode && p.barcode.toLowerCase() === q.toLowerCase()) ||
-            (p.plu && p.plu.toLowerCase() === q.toLowerCase()) ||
-            (p.id && p.id.toLowerCase() === q.toLowerCase()) ||
-            (p.name && p.name.toLowerCase() === q.toLowerCase()))
-      );
-      if (discontinuedMatch) {
-        showToast(
-          language === 'ID'
-            ? `Produk [${discontinuedMatch.name}] berstatus DISCONTINUED dan disembunyikan dari kasir!`
-            : `Product [${discontinuedMatch.name}] is DISCONTINUED and hidden from POS!`
-        );
-        setBarcodeInput('');
-        focusBarcodeInput();
-        return;
-      }
-
-      // Check partial match by name, description, plu, or barcode in activeProducts
       const partial = activeProducts.find(
         (p) =>
           (p.name && p.name.toLowerCase().includes(q.toLowerCase())) ||
-          (p.description && p.description.toLowerCase().includes(q.toLowerCase())) ||
           (p.plu && p.plu.toLowerCase().includes(q.toLowerCase())) ||
           (p.barcode && p.barcode.includes(q))
       );
       if (partial) {
-        handleAddToCart(partial, 1);
-        setBarcodeInput('');
-        focusBarcodeInput();
+        openOrAddMatched(partial);
       } else {
-        showToast(
-          language === 'ID'
-            ? `Produk [${q}] tidak ditemukan di master data!`
-            : `Product [${q}] not found in master catalog!`
-        );
-        setBarcodeInput('');
-        focusBarcodeInput();
+        showToast(`Produk [${q}] tidak ditemukan di master data!`);
       }
+      setBarcodeInput('');
+      focusBarcodeInput();
     }
   };
 
-  // Helper to format item variant/size cleanly for enterprise grid table (tanpa duplikasi teks satuan UOM)
   const getItemVariant = (item: CartItem): string => {
     if (!item?.product) return '';
+    if (item.selectedFashionSize || item.selectedFashionColor) {
+      return `${item.selectedFashionSize || 'M'} • ${item.selectedFashionColor || 'Sage'}`;
+    }
     let val = item.modifiers?.variant;
-    if (!val) {
-      if (item.modifiers?.orderType) {
-        const m = item.modifiers;
-        const oType = m.orderType;
-        const rawT = m.tableNumber || '01';
-        const tNum = rawT.toLowerCase().includes('meja') ? rawT : `Meja ${rawT}`;
-        const temp = m.temperature ? ` • ${m.temperature}` : '';
-        const sugar = m.sugarLevel ? ` • ${m.sugarLevel}` : '';
-        const spicy = (m.spicyLevel !== undefined && m.spicyLevel > 0) ? ` • Level ${m.spicyLevel}` : '';
-        const tops = m.toppings && m.toppings.length > 0 ? ` • ${m.toppings.join(', ')}` : '';
-
-        if (oType === 'Take-Away') {
-          val = `Take-Away${temp}${sugar}${spicy}${tops}`;
-        } else {
-          val = `Dine-In • ${tNum}${temp}${sugar}${spicy}${tops}`;
-        }
-      } else if (item.product.size && item.product.size.toLowerCase() !== (item.product.unit || '').toLowerCase()) {
-        val = item.product.size;
-      } else {
-        return '';
-      }
+    if (!val && item.modifiers?.orderType) {
+      const m = item.modifiers;
+      const tNum = (m.tableNumber || '01').toLowerCase().includes('meja') ? m.tableNumber : `Meja ${m.tableNumber || '01'}`;
+      val = m.orderType === 'Take-Away' ? 'Take-Away' : `Dine-In • ${tNum}`;
+    } else if (!val && item.product.size && item.product.size.toLowerCase() !== (item.product.unit || '').toLowerCase()) {
+      val = item.product.size;
     }
-    const cleaned = (val || '')
-      .replace(/\s*\/\s*ORIGINAL\b/gi, '')
-      .replace(/\bORIGINAL\s*\/\s*/gi, '')
-      .replace(/\bORIGINAL\b/gi, '')
-      .trim();
-
-    if (
-      !cleaned ||
-      cleaned.toUpperCase() === 'STANDAR' ||
-      cleaned.toUpperCase() === 'STD' ||
-      cleaned.toUpperCase() === 'ALL' ||
-      cleaned.toLowerCase() === (item.product.unit || '').toLowerCase()
-    ) {
-      return '';
-    }
-    return cleaned;
+    return val || '';
   };
 
-  const handleSaveEditedItem = (newQty: number, newItemDiscount: number, newVariant: string) => {
+  const handleSaveEditedItem = (
+    newQty: number,
+    newItemDiscount: number,
+    newVariant: string,
+    discountMeta?: { reason?: string; authorizedBy?: string }
+  ) => {
     if (editingItemIndex === null || editingItemIndex >= cart.length) return;
     setCart((prev) => {
       const next = [...prev];
       const target = { ...next[editingItemIndex] };
+      const isManualOverride = newItemDiscount !== (target.itemDiscount || 0) || Boolean(discountMeta?.reason);
       target.quantity = newQty;
-      target.itemDiscount = newItemDiscount;
-      target.modifiers = { ...target.modifiers, variant: newVariant };
-      target.subtotal = Math.max(0, (target.product.sell_price - newItemDiscount) * newQty);
+      if (target.modifiers || newVariant.trim()) {
+        target.modifiers = { ...target.modifiers, variant: newVariant };
+      }
+      if (isManualOverride) {
+        target.itemDiscount = newItemDiscount;
+        target.promoSavings = newItemDiscount * newQty;
+        target.promoCode = undefined;
+        target.promoSourceType = undefined;
+        target.promoMechanic = undefined;
+        target.promoBadge = newItemDiscount > 0 ? '[MANUAL DISC]' : undefined;
+        target.manualDiscountReason = newItemDiscount > 0 ? discountMeta?.reason : undefined;
+        target.manualDiscountAuthorizedBy = newItemDiscount > 0 ? discountMeta?.authorizedBy : undefined;
+        target.freeBonusQty = 0;
+        target.freeBonusLabel = undefined;
+        target.promoHint = undefined;
+        target.subtotal = Math.round(Math.max(0, target.product.sell_price - newItemDiscount) * newQty);
+      }
       next[editingItemIndex] = target;
-      return next;
+      return recalculatePosCart(next);
     });
+    if (discountMeta?.reason) {
+      addAuditLog({
+        action: `[DISKON MANUAL ITEM POS] Rp ${newItemDiscount.toLocaleString('id-ID')}/unit • Alasan: ${discountMeta.reason} • Otorisasi: ${discountMeta.authorizedBy || 'Kasir Mandiri'}`,
+        module: 'POS / Kasir',
+        user: activeUser?.name || 'Kasir',
+      });
+    }
     setEditingItemIndex(null);
-    showToast(language === 'ID' ? 'Item belanja diperbarui' : 'Cart item updated');
+    showToast('Item belanja diperbarui');
   };
 
-  // Global Hardware Scanner & Enterprise Shortcuts (F2, F3, F4, F10, F12, Esc) Listener
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // 1. Shortcut [F2]: Focus barcode scanner input
-      if (e.key === 'F2') {
-        e.preventDefault();
-        focusBarcodeInput();
-        return;
-      }
-
-      // 2. Shortcut [F3] / [F1]: Open Manual Product Search
-      if (e.key === 'F3' || e.key === 'F1') {
-        e.preventDefault();
-        setIsManualSearchOpen(true);
-        return;
-      }
-
-      // 3. Shortcut [F4] atau tombol Asterisk [*]: Melompatkan kursor ke input Qty item terakhir yang aktif
-      if (e.key === 'F4' || e.key === '*' || e.code === 'NumpadMultiply') {
-        const target = e.target as HTMLElement;
-        const isTargetInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
-        if (e.key === 'F4' || !isTargetInput || target === barcodeInputRef.current) {
-          e.preventDefault();
-          if (cart.length > 0) {
-            const lastIdx = cart.length - 1;
-            const inputEl = document.getElementById(`pos-qty-input-${lastIdx}`) as HTMLInputElement | null;
-            if (inputEl) {
-              inputEl.focus();
-              inputEl.select();
-            }
-          } else {
-            showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
-          }
-          return;
-        }
-      }
-
-      // Shortcut [F6]: Tahan Antrean Keranjang Belanja (Hold Cart)
-      if (e.key === 'F6') {
-        e.preventDefault();
-        handleOpenHoldModal();
-        return;
-      }
-
-      // Shortcut [F7]: Panggil Kembali Antrean Tertahan (Recall Cart)
-      if (e.key === 'F7') {
-        e.preventDefault();
-        setIsHeldOrdersModalOpen(true);
-        return;
-      }
-
-      // 4. Shortcut [F10]: Alihkan fokus kursor ke input nominal "Diterima"
-      if (e.key === 'F10') {
-        e.preventDefault();
-        if (cart.length > 0) {
-          setPaymentMethod('CASH');
-          focusCashInput();
-        } else {
-          showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
-        }
-        return;
-      }
-
-      // 5. Shortcut [F12]: Buka Laci Kasir (Cash Drawer ESC/POS Trigger)
-      if (e.key === 'F12') {
-        e.preventDefault();
-        handleManualOpenDrawer();
-        return;
-      }
-
-      // 6. Shortcut [Escape]: Fungsi batalkan/tutup (Tutup modal terbuka -> Batalkan pilihan baris keranjang -> Kembalikan kursor ke input [F2])
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        if (selectedCartIndex !== null) {
-          setSelectedCartIndex(null);
-        }
-        if (isPaymentConfirmOpen) {
-          setIsPaymentConfirmOpen(false);
-        }
-        if (isManualSearchOpen) {
-          setIsManualSearchOpen(false);
-        }
-        if (isQrisModalOpen) {
-          setIsQrisModalOpen(false);
-        }
-        if (isHeldOrdersModalOpen) {
-          setIsHeldOrdersModalOpen(false);
-        }
-        if (isHoldCartModalOpen) {
-          setIsHoldCartModalOpen(false);
-        }
-        if (isSupervisorVoidModalOpen) {
-          setIsSupervisorVoidModalOpen(false);
-          setVoidingCartItem(null);
-        }
-        if (isDiscountModalOpen) {
-          setIsDiscountModalOpen(false);
-        }
-        if (isKotModalOpen) {
-          setIsKotModalOpen(false);
-        }
-        if (isFnbModalOpen) {
-          setIsFnbModalOpen(false);
-        }
-        if (editingItemIndex !== null) {
-          setEditingItemIndex(null);
-        }
-        if (isReceiptModalOpen) {
-          closeReceipt();
-        }
-        if (isCustomerDropdownOpen) {
-          setIsCustomerDropdownOpen(false);
-        }
-        if (document.activeElement instanceof HTMLElement) {
-          document.activeElement.blur();
-        }
-        focusBarcodeInput();
-        return;
-      }
-
-      // Enter saat modal konfirmasi pembayaran terbuka langsung memproses & mencetak struk
-      if (e.key === 'Enter' && isPaymentConfirmOpen) {
-        e.preventDefault();
-        executeSaleCheckout();
-        return;
-      }
-
-      const isAnyModalOpen =
-        isPaymentConfirmOpen ||
-        isManualSearchOpen ||
-        isQrisModalOpen ||
-        isHeldOrdersModalOpen ||
-        isHoldCartModalOpen ||
-        isSupervisorVoidModalOpen ||
-        isDiscountModalOpen ||
-        isKotModalOpen ||
-        isFnbModalOpen ||
-        isReceiptModalOpen ||
-        isCustomerDropdownOpen ||
-        isNewCustomerModalOpen ||
-        isUnlockModalOpen ||
-        isHybridPinModalOpen ||
-        isVoidConfirmOpen;
-
-      const target = e.target as HTMLElement;
-
-      // Enter saat keranjang terisi dan tidak sedang di input tertentu: otomatis alihkan ke input nominal "Diterima"
-      // HANYA aktif pada mode Kasir Retail / Non-F&B.
-      // Pada mode F&B / Resto, pertahankan alur pilih meja dan tambah pesanan tanpa auto-focus ke pembayaran tunai saat Enter ditekan pada menu.
-      if (e.key === 'Enter' && !isAnyModalOpen && cart.length > 0) {
-        const isTargetInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
-        if (!isTargetInput && !isFnbTerminal && !isFnbPhotoMenuMode) {
-          e.preventDefault();
-          setPaymentMethod('CASH');
-          focusCashInput();
-          return;
-        }
-      }
-
-      // 7. Navigasi Keranjang Cepat [ArrowUp] / [ArrowDown]
-      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !isAnyModalOpen && cart.length > 0) {
-        const isTargetInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
-        const isBarcodeInput = target === barcodeInputRef.current;
-        const isQtyInput = target?.id && target.id.startsWith('pos-qty-input-');
-
-        if (!isTargetInput || isBarcodeInput || isQtyInput) {
-          e.preventDefault();
-          if (isBarcodeInput) {
-            barcodeInputRef.current?.blur();
-          }
-
-          let nextIdx: number;
-          if (e.key === 'ArrowDown') {
-            nextIdx = selectedCartIndex === null ? 0 : Math.min(cart.length - 1, selectedCartIndex + 1);
-          } else {
-            nextIdx = selectedCartIndex === null ? cart.length - 1 : Math.max(0, selectedCartIndex - 1);
-          }
-          setSelectedCartIndex(nextIdx);
-
-          if (isQtyInput) {
-            const nextQtyInput = document.getElementById(`pos-qty-input-${nextIdx}`) as HTMLInputElement | null;
-            if (nextQtyInput) {
-              nextQtyInput.focus();
-              nextQtyInput.select();
-            }
-          }
-          return;
-        }
-      }
-
-      // 8. Hapus Baris Item Terpilih [Delete] atau [Backspace]
-      if (
-        (e.key === 'Delete' || e.key === 'Backspace') &&
-        !isAnyModalOpen &&
-        selectedCartIndex !== null &&
-        selectedCartIndex >= 0 &&
-        selectedCartIndex < cart.length
-      ) {
-        const isTargetInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-        if (!isTargetInput) {
-          e.preventDefault();
-          handleRequestRemoveItem(selectedCartIndex);
-          return;
-        }
-      }
-
-      // 9. Shortcut [+] dan [-] Menambah / Mengurangi Qty Item Terpilih
-      if (!isAnyModalOpen && selectedCartIndex !== null && selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
-        const isTargetInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-        if (!isTargetInput) {
-          if (e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') {
-            e.preventDefault();
-            handleUpdateQty(selectedCartIndex, 1);
-            return;
-          }
-          if (e.key === '-' || e.key === '_' || e.code === 'NumpadSubtract') {
-            e.preventDefault();
-            handleUpdateQty(selectedCartIndex, -1);
-            return;
-          }
-        }
-      }
-
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-
-      // Shortcut [Spacebar]: Buka / Tutup Rincian Daftar Belanja secara instan
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault();
-        setIsCartExpanded((prev) => !prev);
-        return;
-      }
-
-      const currentTime = Date.now();
-      if (currentTime - lastKeyTimeRef.current > 100) {
-        barcodeBufferRef.current = '';
-      }
-      lastKeyTimeRef.current = currentTime;
-
-      if (e.key === 'Enter') {
-        if (barcodeBufferRef.current.length >= 3) {
-          const scannedCode = barcodeBufferRef.current.trim();
-          const match = activeProducts.find(
-            (p) =>
-              p.barcode === scannedCode ||
-              (p.plu && p.plu.toLowerCase() === scannedCode.toLowerCase()) ||
-              (p.id && p.id.toLowerCase() === scannedCode.toLowerCase())
-          );
-          if (match) {
-            handleAddToCart(match, 1);
-            focusBarcodeInput();
-          } else {
-            const rawMatch = products.find(
-              (p) =>
-                (p.itemType === 'RAW_MATERIAL' ||
-                  (p.id || '').toLowerCase().startsWith('ing-') ||
-                  (p.id || '').toLowerCase().startsWith('raw-') ||
-                  (p.category || '').toLowerCase().includes('bahan baku') ||
-                  (p.category || '').toLowerCase().includes('bahan mentah')) &&
-                (p.barcode === scannedCode ||
-                  (p.plu && p.plu.toLowerCase() === scannedCode.toLowerCase()) ||
-                  (p.id && p.id.toLowerCase() === scannedCode.toLowerCase()))
-            );
-            if (rawMatch) {
-              showToast(
-                language === 'ID'
-                  ? `❌ Item [${rawMatch.name}] adalah BAHAN BAKU mentah dan TIDAK DAPAT dijual di kasir!`
-                  : `❌ Item [${rawMatch.name}] is RAW MATERIAL and CANNOT be sold at POS cashier!`
-              );
-            } else {
-              const discontinuedMatch = products.find(
-                (p) =>
-                  String(p.status || '').toUpperCase() === 'DISCONTINUED' &&
-                  (p.barcode === scannedCode ||
-                    (p.plu && p.plu.toLowerCase() === scannedCode.toLowerCase()) ||
-                    (p.id && p.id.toLowerCase() === scannedCode.toLowerCase()))
-              );
-              if (discontinuedMatch) {
-                showToast(
-                  language === 'ID'
-                    ? `Produk [${discontinuedMatch.name}] berstatus DISCONTINUED dan disembunyikan dari kasir!`
-                    : `Product [${discontinuedMatch.name}] is DISCONTINUED and hidden from POS!`
-                );
-              } else {
-                showToast(
-                  language === 'ID'
-                    ? `Barcode [${scannedCode}] tidak ditemukan!`
-                    : `Barcode [${scannedCode}] not found!`
-                );
-              }
-            }
-            focusBarcodeInput();
-          }
-          barcodeBufferRef.current = '';
-        }
-      } else if (e.key.length === 1) {
-        barcodeBufferRef.current += e.key;
-      }
-    };
-
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [
-    products,
-    activeProducts,
-    isRegisterOpen,
-    language,
-    cart,
-    selectedCartIndex,
-    isPaymentConfirmOpen,
-    isManualSearchOpen,
-    isReceiptModalOpen,
-    isQrisModalOpen,
-    isHeldOrdersModalOpen,
-    isDiscountModalOpen,
-    isKotModalOpen,
-    isFnbModalOpen,
-    editingItemIndex,
-    isCustomerDropdownOpen,
-    isFnbTerminal,
-    isFnbPhotoMenuMode,
-  ]);
-
-  // Auto-scroll baris keranjang yang sedang terpilih ke area pandang aktif
-  useEffect(() => {
-    if (selectedCartIndex !== null) {
-      const rowId = isFnbPhotoMenuMode
-        ? `fnb-cart-row-${selectedCartIndex}`
-        : `pos-cart-row-${selectedCartIndex}`;
-      const el = document.getElementById(rowId);
-      if (el) {
-        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
-    }
-  }, [selectedCartIndex, isFnbPhotoMenuMode]);
-
-  // Listener for Hold / Penundaan Transaksi dari Struk Belanja
-  useEffect(() => {
-    const handleHoldFromReceiptEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ sale: any }>;
-      const sale = customEvent.detail?.sale;
-      if (sale && sale.items && sale.items.length > 0) {
-        setCart(sale.items);
-        if (sale.customer_id) {
-          const matchedCust = customers.find((c) => c.id === sale.customer_id);
-          if (matchedCust) setSelectedCustomer(matchedCust);
-        }
-        showToast(
-          language === 'ID'
-            ? 'Item nota dikembalikan ke keranjang belanja kasir untuk penambahan produk.'
-            : 'Receipt items returned to cart for additional shopping.'
-        );
-      }
-    };
-
-    window.addEventListener('pos-hold-from-receipt', handleHoldFromReceiptEvent);
-    return () => {
-      window.removeEventListener('pos-hold-from-receipt', handleHoldFromReceiptEvent);
-    };
-  }, [customers, language]);
-
-  // F&B Categories & Filtered Products:
-  // KASIR 02 (F&B / Resto): default HANYA menampilkan kategori Makanan, Minuman, dan Snack.
-  // Jika toggle 'Semua Kategori' aktif: kasir dapat mengakses seluruh kategori.
   const fnbCategories = useMemo(() => {
     if (showAllCategories) {
       const cats = new Set<string>();
-      activeProducts.forEach((p) => {
-        if (p.category) cats.add(p.category);
-      });
+      activeProducts.forEach((p) => { if (p.category) cats.add(p.category); });
       return ['ALL', ...Array.from(cats)];
     }
     return ['ALL', 'Kopi', 'Non-Kopi / Segar', 'Makanan Utama', 'Pastry & Bakery', 'Paket Hemat'];
   }, [activeProducts, showAllCategories]);
 
   const filteredFnbProducts = useMemo(() => {
-    const fnbList = activeProducts.filter((p) => p.itemType === 'MENU_FB' || p.businessModel === 'fnb');
-    const sourceList = showAllCategories
-      ? activeProducts
-      : (fnbList.length > 0 ? fnbList : activeProducts);
+    const fnbFromActive = activeProducts.filter(
+      (p) =>
+        (p.itemType === 'MENU_FB' || p.businessModel === 'fnb' || (p.id || '').startsWith('FNB-')) &&
+        p.itemType !== 'RAW_MATERIAL' &&
+        !(p.id || '').startsWith('RM-FNB-') &&
+        !(p.id || '').startsWith('ING-')
+    );
+
+    // Pastikan seluruh 18 Menu F&B (FNB_MENU_ITEMS) selalu tersedia lengkap
+    const mergedMap = new Map<string, Product>();
+    FNB_MENU_ITEMS.forEach((item) => mergedMap.set(item.id, item));
+    FNB_RESTAURANT_PRODUCTS.forEach((item) => mergedMap.set(item.id, item));
+    fnbFromActive.forEach((item) => {
+      const canonical = mergedMap.get(item.id);
+      mergedMap.set(item.id, canonical ? { ...canonical, ...item, category: canonical.category || item.category, image: item.image || canonical.image } : item);
+    });
+
+    const fullFnbCatalog = Array.from(mergedMap.values());
+    const sourceList = showAllCategories && isHybridMode ? [...fullFnbCatalog, ...activeProducts.filter((p) => !mergedMap.has(p.id))] : fullFnbCatalog;
 
     return sourceList.filter((product) => {
-      if (product.itemType === 'RAW_MATERIAL') return false;
-
-      // Sembunyikan kategori ritel / minimarket
-      if (!showAllCategories) {
-        const cat = (product.category || '').toLowerCase();
-        const name = (product.name || '').toLowerCase();
-        if (
-          cat.includes('instan') ||
-          cat.includes('biskuit') ||
-          cat.includes('dishwashing') ||
-          cat.includes('canned') ||
-          cat.includes('energy') ||
-          cat.includes('soft drink') ||
-          cat.includes('sabun') ||
-          cat.includes('deterjen') ||
-          cat.includes('snack & biskuit') ||
-          name.includes('deterjen') ||
-          name.includes('dishwashing')
-        ) {
-          return false;
-        }
+      if (
+        product.itemType === 'RAW_MATERIAL' ||
+        (product.id || '').startsWith('RM-FNB-') ||
+        (product.id || '').startsWith('ING-')
+      ) {
+        return false;
       }
-
-      const catLower = (product.category || '').toLowerCase();
+      const cat = (product.category || '').toLowerCase();
+      const selCat = selectedFnbCategory.toLowerCase();
       const matchCat =
         selectedFnbCategory === 'ALL' ||
         product.category === selectedFnbCategory ||
-        (selectedFnbCategory === 'Kopi' &&
-          (catLower.includes('kopi') || catLower.includes('coffee'))) ||
-        (selectedFnbCategory === 'Non-Kopi / Segar' &&
-          (catLower.includes('non-kopi') || catLower.includes('segar') || catLower.includes('beverage') || catLower.includes('tea') || catLower.includes('teh') || catLower.includes('jus'))) ||
-        (selectedFnbCategory === 'Makanan Utama' &&
-          (catLower.includes('utama') || catLower.includes('main course') || catLower.includes('makanan') || catLower.includes('nasi') || catLower.includes('mie'))) ||
-        (selectedFnbCategory === 'Pastry & Bakery' &&
-          (catLower.includes('pastry') || catLower.includes('bakery') || catLower.includes('roti') || catLower.includes('snack'))) ||
-        (selectedFnbCategory === 'Paket Hemat' &&
-          (catLower.includes('paket') || catLower.includes('hemat') || catLower.includes('combo')));
+        (selCat === 'kopi' && cat.includes('kopi') && !cat.includes('non-kopi')) ||
+        (selCat.includes('non-kopi') && (cat.includes('segar') || cat.includes('non-kopi') || (cat.includes('minuman') && !cat.includes('kopi')))) ||
+        (selCat.includes('pastry') && (cat.includes('pastry') || cat.includes('bakery') || cat.includes('snack'))) ||
+        (selCat.includes('makanan') && cat.includes('makanan')) ||
+        (selCat.includes('paket') && cat.includes('paket'));
 
       const matchSearch =
         !fnbSearchQuery ||
@@ -2496,525 +3452,737 @@ export const PosModule: React.FC = () => {
         (product.category || '').toLowerCase().includes(fnbSearchQuery.toLowerCase());
       return matchCat && matchSearch;
     });
-  }, [activeProducts, showAllCategories, selectedFnbCategory, fnbSearchQuery]);
+  }, [activeProducts, showAllCategories, isHybridMode, selectedFnbCategory, fnbSearchQuery]);
 
-  // Calculations
-  const subtotal = useMemo(() => {
-    return cart.reduce((acc, item) => acc + (item?.subtotal || 0), 0);
-  }, [cart]);
+  const subtotalBeforePromo = useMemo(
+    () =>
+      cart.reduce((acc, item) => {
+        const unitGross = item?.originalUnitPrice ?? (item?.isRetailUnit && item?.product?.priceSecondary ? item.product.priceSecondary : item?.product?.sell_price || 0);
+        const totalUnitsValued = (item?.quantity || 0) + (item?.freeBonusQty || 0);
+        return acc + Math.round(unitGross * totalUnitsValued);
+      }, 0),
+    [cart]
+  );
+  const totalPromoSavings = useMemo(
+    () =>
+      cart.reduce((acc, item) => {
+        const lineSavings = item?.promoSavings ?? ((item?.itemDiscount || 0) * (item?.quantity || 0));
+        return acc + Math.round(lineSavings);
+      }, 0),
+    [cart]
+  );
+  const totalFreeBonusCount = useMemo(
+    () => cart.reduce((acc, item) => acc + (item?.freeBonusQty || 0), 0),
+    [cart]
+  );
+  const pwpOffers = useMemo(
+    () => (isFnbTerminal ? [] : getAvailablePwpOffers(cart, activeProducts, domainPromoCampaigns)),
+    [cart, activeProducts, isFnbTerminal, domainPromoCampaigns]
+  );
+  const subtotal = useMemo(() => cart.reduce((acc, item) => acc + (item?.subtotal || 0), 0), [cart]);
+  const calculatedDiscount = useMemo(() => (discountType === 'PERCENT' ? Math.round((subtotal * discountPercent) / 100) : Math.min(subtotal, discountAmount)), [subtotal, discountType, discountPercent, discountAmount]);
+  const totalAllDiscounts = useMemo(() => totalPromoSavings + calculatedDiscount, [totalPromoSavings, calculatedDiscount]);
+  const taxAmount = useMemo(() => (isTaxIncluded ? Math.round(Math.max(0, subtotal - calculatedDiscount) * 0.11) : 0), [subtotal, calculatedDiscount, isTaxIncluded]);
+  const activeShippingFee = deliveryPolicy === 'FRANGKO' || deliveryMethod === 'FLEET_DELIVERY' ? Math.max(0, Number(shippingFee) || 0) : 0;
+  const rawGrandTotal = useMemo(() => Math.max(0, subtotal - calculatedDiscount + taxAmount + activeShippingFee), [subtotal, calculatedDiscount, taxAmount, activeShippingFee]);
+  const cashRoundingDiff = useMemo(() => (paymentMethod === 'CASH' ? Math.round(rawGrandTotal / 100) * 100 - rawGrandTotal : 0), [rawGrandTotal, paymentMethod]);
+  const grandTotal = useMemo(() => (paymentMethod === 'CASH' ? Math.round(rawGrandTotal / 100) * 100 : rawGrandTotal), [rawGrandTotal, paymentMethod]);
+  const changeAmount = useMemo(() => (paymentMethod === 'CASH' ? Math.max(0, cashGiven - grandTotal) : 0), [cashGiven, grandTotal, paymentMethod]);
+  const totalCartItemCount = useMemo(() => cart.reduce((acc, i) => acc + (i?.quantity || 0), 0), [cart]);
 
-  const calculatedDiscount = useMemo(() => {
-    if (discountType === 'PERCENT') {
-      return Math.round((subtotal * discountPercent) / 100);
+  // Kalkulasi Real-Time Split Payment & Kasbon/DP (+14 Hari)
+  const splitTotalEntered = useMemo(
+    () => Math.max(0, Math.round((Number(splitCashAmount) || 0) + (Number(splitNonCashAmount) || 0))),
+    [splitCashAmount, splitNonCashAmount]
+  );
+  const splitShortfall = useMemo(
+    () => Math.max(0, grandTotal - splitTotalEntered),
+    [grandTotal, splitTotalEntered]
+  );
+  const isSplitReadyToPay = useMemo(
+    () => grandTotal > 0 && splitShortfall === 0,
+    [grandTotal, splitShortfall]
+  );
+  const effectiveKasbonDp = useMemo(
+    () =>
+      Math.max(
+        0,
+        Math.min(
+          grandTotal,
+          Math.round(
+            Number(
+              isLaundryTerminal && laundryPaymentStatus === 'DP' && kasbonDpAmount === 0
+                ? laundryDpAmount
+                : kasbonDpAmount
+            ) || 0
+          )
+        )
+      ),
+    [grandTotal, isLaundryTerminal, laundryPaymentStatus, laundryDpAmount, kasbonDpAmount]
+  );
+  const kasbonRemainingPiutang = useMemo(
+    () => Math.max(0, grandTotal - effectiveKasbonDp),
+    [grandTotal, effectiveKasbonDp]
+  );
+  const kasbonDefaultDueInfo = useMemo(() => {
+    const due = new Date();
+    due.setDate(due.getDate() + 14);
+    const iso = due.toISOString().slice(0, 10);
+    const display = due.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    return { iso, display, tempoDays: 14 };
+  }, []);
+  const resolvedTopBarCustomerName = useMemo(
+    () =>
+      (
+        selectedCustomer?.name ||
+        (isLaundryTerminal && laundryCustomerName.trim() ? laundryCustomerName.trim() : '') ||
+        customerSearchQuery.trim()
+      ).trim(),
+    [selectedCustomer?.name, isLaundryTerminal, laundryCustomerName, customerSearchQuery]
+  );
+
+  const handleSelectSplitPayment = () => {
+    setPaymentMethod('SPLIT');
+    if (grandTotal > 0 && splitCashAmount === 0 && splitNonCashAmount === 0) {
+      const defaultCash = Math.floor(grandTotal / 2);
+      setSplitCashAmount(defaultCash);
+      setSplitNonCashAmount(grandTotal - defaultCash);
     }
-    return Math.min(subtotal, discountAmount);
-  }, [subtotal, discountType, discountPercent, discountAmount]);
+  };
 
-  const taxAmount = useMemo(() => {
-    if (!isTaxIncluded) return 0;
-    const taxable = Math.max(0, subtotal - calculatedDiscount);
-    return Math.round(taxable * 0.11);
-  }, [subtotal, calculatedDiscount, isTaxIncluded]);
-
-  // Total Tagihan Murni (sebelum pembulatan kasir)
-  const rawGrandTotal = useMemo(() => {
-    return Math.max(0, subtotal - calculatedDiscount + taxAmount);
-  }, [subtotal, calculatedDiscount, taxAmount]);
-
-  // Cash Rounding ke Rp 100 terdekat untuk metode CASH, sedangkan Non-Tunai (QRIS / EDC) menggunakan nominal murni
-  const cashRoundingDiff = useMemo(() => {
-    if (paymentMethod !== 'CASH') return 0;
-    const rounded = Math.round(rawGrandTotal / 100) * 100;
-    return rounded - rawGrandTotal;
-  }, [rawGrandTotal, paymentMethod]);
-
-  const grandTotal = useMemo(() => {
-    if (paymentMethod === 'CASH') {
-      return Math.round(rawGrandTotal / 100) * 100;
+  const handleSelectKasbonPayment = () => {
+    if (!isKasbonAllowedForSector) return;
+    setPaymentMethod('KREDIT / TEMPO (AR)');
+    if (isLaundryTerminal) {
+      setLaundryPaymentStatus(effectiveKasbonDp > 0 ? 'DP' : 'BAYAR_AMBIL');
     }
-    return rawGrandTotal;
-  }, [rawGrandTotal, paymentMethod]);
-
-  const changeAmount = useMemo(() => {
-    if (paymentMethod !== 'CASH') return 0;
-    return Math.max(0, cashGiven - grandTotal);
-  }, [cashGiven, grandTotal, paymentMethod]);
-
-  const totalCartItemCount = useMemo(() => {
-    return cart.reduce((acc, i) => acc + (i?.quantity || 0), 0);
-  }, [cart]);
-
-  // Terminal Selection click handler (Enforces Lock & Security PIN, and Shift Check)
-  const handleTerminalCardClick = (term: Terminal) => {
-    let targetTerm: Terminal = { ...term };
-    if (!term.businessModel) {
-      if (term.id === 'T-07' || term.name === 'KASIR 07') {
-        targetTerm = {
-          ...term,
-          colorHex: '#38bdf8',
-          businessModel: 'Elektronik & Gawai',
-          subLabel: 'Data Master',
-        };
-      } else if (term.id === 'T-08' || term.name === 'KASIR 08') {
-        targetTerm = {
-          ...term,
-          colorHex: '#84cc16',
-          businessModel: 'Bengkel & Otomotif',
-          subLabel: 'Data Master',
-        };
-      } else if (term.code === 'KASIR-02' || term.name === 'KASIR 02' || term.id === 'T-02') {
-        targetTerm = {
-          ...term,
-          id: term.id || 'T-02',
-          name: 'KASIR 02',
-          code: 'KASIR-02',
-          businessModel: 'Kuliner & Resto (F&B)',
-          colorHex: term.colorHex || '#10B981',
-        };
-      }
+    if (!resolvedTopBarCustomerName) {
+      setTimeout(() => {
+        const el = document.getElementById('pos-top-customer-search-input') as HTMLInputElement | null;
+        if (el) el.focus();
+      }, 40);
     }
+  };
 
-    if (term.isLocked || !activeUser) {
-      setTerminalToUnlock(targetTerm);
-      setIsUnlockModalOpen(true);
+  const fashionAdvisorCommission = useMemo(() => {
+    if (!selectedFashionAdvisor) return 0;
+    const rate = Number(selectedFashionAdvisor.fashionCommissionRate ?? 2) || 0;
+    return Math.round((grandTotal * rate) / 100);
+  }, [selectedFashionAdvisor, grandTotal]);
+
+  const handleApplyQuickFashionNoteDiscount = () => {
+    const rawVal = Math.max(0, Number(quickDiscVal) || 0);
+    if (rawVal <= 0) {
+      setDiscountType('PERCENT');
+      setDiscountPercent(0);
+      setDiscountAmount(0);
+      setManualDiscountReason('');
+      setManualDiscountAuthorizedBy('');
+      setIsQuickFashionDiscOpen(false);
+      showToast('Diskon manual nota dihapus.');
       return;
     }
-
-    // Set registerId & receipt prefix (KASIR-02 mandiri vs POS)
-    if (targetTerm.code === 'KASIR-02' || targetTerm.name === 'KASIR 02') {
-      setReceiptNumber(`TRX-KASIR02-${Date.now().toString().slice(-6)}`);
-    } else {
-      setReceiptNumber(`TRX-POS-${Date.now().toString().slice(-6)}`);
-    }
-
-    setActiveTerminal(targetTerm);
-
-    // Cek apakah terminal tersebut sudah memiliki sesi shift aktif
-    const hasActiveShift = Boolean(
-      activeShift &&
-      activeShift.status === 'OPEN' &&
-      (activeShift.terminalId === targetTerm.id || activeShift.terminalName === targetTerm.name)
-    );
-
-    if (!hasActiveShift) {
-      // Modal input shift kasir hanya boleh muncul saat pengguna mengklik kartu terminal spesifik ("Buka Kasir →") dan terminal tersebut belum memiliki sesi shift aktif
-      setIsOpenShiftModalOpen(true);
-    } else {
-      const ind = getTerminalIndustry(targetTerm);
-      setCart(INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail);
-      setIsRegisterOpen(true);
-    }
-  };
-
-  // Dual-Mode Kasir Bantuan Handler untuk Terminal 02
-  const handleOpenKasir02 = (rawT: Terminal) => {
-    const kasir02Term: Terminal = {
-      ...rawT,
-      id: rawT.id || 'T-02',
-      name: 'KASIR 02',
-      code: 'KASIR-02',
-      businessModel: 'Ritel & Kasir Bantuan (Back-End)',
-      colorHex: '#00f2fe',
-      isLocked: rawT.isLocked,
-    };
-    handleTerminalCardClick(kasir02Term);
-  };
-
-  // Handler Logout Kasir / Keluar dari Layar Register
-  const handleCashierLogout = () => {
-    setIsRegisterOpen(false);
-    setIsFullscreen(false);
-    // Kembalikan teks Topbar menjadi "POS & CASHIER (TERMINAL)"
-    setActiveUser(null);
-    setCurrentUser(null);
-    showToast(
-      language === 'ID'
-        ? 'Kasir telah logout. Profil Topbar kembali ke status POS & CASHIER (TERMINAL).'
-        : 'Cashier logged out. Topbar profile returned to POS & CASHIER (TERMINAL).'
-    );
-  };
-
-  // Terminal Unlock Success Callback
-  const handleUnlockSuccess = (term: Terminal, user?: UserType) => {
-    toggleTerminalLock(term.id, false);
-    const unlocked = { ...term, isLocked: false };
-    setActiveTerminal(unlocked);
-
-    const termName = (unlocked.name || '').toUpperCase();
-    const termCode = (unlocked.code || '').toUpperCase();
-    const termId = (unlocked.id || '').toUpperCase();
-
-    let targetCashier: UserType | undefined = user;
-    let matchedName = 'Andi Pratama';
-    let matchedRole = 'Kasir 01';
-    let matchedEmail = 'andi.pos01@jacs-erp.com';
-    let matchedId = 'emp-001';
-
-    if (termName.includes('02') || termCode.includes('02') || termId === 'T-02') {
-      matchedName = 'Maya Indah';
-      matchedRole = 'Kasir 02';
-      matchedEmail = 'maya.pos02@jacs-erp.com';
-      matchedId = 'emp-002';
-    } else if (termName.includes('03') || termCode.includes('03') || termId === 'T-03') {
-      matchedName = 'Rian Hidayat';
-      matchedRole = 'Kasir 03';
-      matchedEmail = 'rian.pos03@jacs-erp.com';
-      matchedId = 'emp-003';
-    } else if (termName.includes('04') || termCode.includes('04') || termId === 'T-04') {
-      matchedName = 'Siti Aminah';
-      matchedRole = 'Kasir 04';
-      matchedEmail = 'siti.pos04@jacs-erp.com';
-      matchedId = 'emp-004';
-    }
-
-    if (!targetCashier || targetCashier.role !== 'Kasir') {
-      const existingUser = users.find((u) => u.name === matchedName);
-      if (existingUser) {
-        targetCashier = existingUser;
-      } else {
-        targetCashier = {
-          user_id: matchedId,
-          id: matchedId,
-          name: matchedName,
-          email: matchedEmail,
-          division: 'POS & Kasir',
-          role: 'Kasir',
-          status: 'Active',
-          pin: '1234',
-          avatar: null,
-          avatarUrl: null,
-        };
+    const effPct =
+      quickDiscType === 'PERCENT'
+        ? Math.min(100, rawVal)
+        : subtotal > 0
+        ? (rawVal / subtotal) * 100
+        : 100;
+    const needsSpv = effPct > 15;
+    if (needsSpv && !quickDiscSpvName) {
+      const spvMap: Record<string, string> = {
+        '1234': 'Spv. Hendra (Store Supervisor)',
+        '8888': 'Spv. Bambang (Area Manager)',
+      };
+      const matchedSpv = spvMap[quickDiscPin.trim()];
+      if (!matchedSpv) {
+        setQuickDiscPinError('Diskon > 15% wajib PIN Supervisor (1234 / 8888).');
+        return;
       }
+      setQuickDiscSpvName(matchedSpv);
     }
+    const approver = needsSpv
+      ? quickDiscSpvName ||
+        (quickDiscPin.trim() === '8888'
+          ? 'Spv. Bambang (Area Manager)'
+          : 'Spv. Hendra (Store Supervisor)')
+      : 'Kasir Mandiri (≤ 15%)';
 
-    if (targetCashier) {
-      setCurrentUser(targetCashier);
-      setActiveUser(targetCashier);
-    }
-    setIsUnlockModalOpen(false);
-    setTerminalToUnlock(null);
-    showToast(
-      language === 'ID'
-        ? `Terminal ${term.name} berhasil dibuka! Kasir bertugas: ${targetCashier.name} (${matchedRole})`
-        : `Terminal ${term.name} unlocked! Cashier: ${targetCashier.name} (${matchedRole})`
-    );
-
-    const hasActiveShift = Boolean(
-      activeShift &&
-      activeShift.status === 'OPEN' &&
-      (activeShift.terminalId === unlocked.id || activeShift.terminalName === unlocked.name)
-    );
-
-    if (!hasActiveShift) {
-      setIsOpenShiftModalOpen(true);
+    setDiscountType(quickDiscType);
+    if (quickDiscType === 'PERCENT') {
+      setDiscountPercent(Math.min(100, rawVal));
     } else {
-      const ind = getTerminalIndustry(unlocked);
-      setCart(INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail);
-      setIsRegisterOpen(true);
+      setDiscountAmount(rawVal);
     }
+    setManualDiscountReason(quickDiscReason);
+    setManualDiscountAuthorizedBy(approver);
+    setQuickDiscPinError(null);
+    setIsQuickFashionDiscOpen(false);
+    addAuditLog({
+      action: `[DISKON NOTA BUTIK] ${quickDiscType === 'PERCENT' ? `${rawVal}%` : `Rp ${rawVal.toLocaleString('id-ID')}`} • Alasan: ${quickDiscReason} • Otorisasi: ${approver}`,
+      module: 'POS / Kasir',
+      user: activeUser?.name || 'Kasir',
+    });
+    showToast(`Diskon nota diterapkan (${approver})`, 'success');
   };
 
-  // Toggle all terminals lock - Unlock All
-  const areAllLocked = terminals.every((t) => t.isLocked);
-  const handleToggleAllTerminals = () => {
-    setAllTerminalsLock(false);
-  };
-
-
-
-  // Hold order directly from Payment Confirmation Modal (Saves to Pending Orders & Clears Register)
-  const handleHoldOrderFromModal = () => {
-    if (cart.length === 0) return;
-
-    const defaultName = selectedCustomer
-      ? `${selectedCustomer.name}`
-      : `${language === 'ID' ? 'Antrean' : 'Customer'} #${heldOrders.length + 1}`;
-    
-    const customerName = window.prompt(
-      language === 'ID'
-        ? 'Nama Pelanggan / Catatan Antrean untuk Ditunda (Hold):'
-        : 'Customer Name / Hold Note:',
-      defaultName
+  // Langsung membuka terminal POS + Penguncian Perangkat (Station Binding via localStorage)
+  const handleTerminalCardClick = (term: Terminal) => {
+    const targetStationCode = normalizeStationCode(term.stationCode || term.id || term.code);
+    const matchingStation = activeStations.find((s) => s.stationCode === targetStationCode);
+    const isBoundHere = Boolean(
+      boundStation && activeStations.some((s) => s.stationCode === boundStation.stationCode)
     );
 
-    if (customerName === null) return;
-
-    const newHeld: HeldOrder = {
-      id: `HOLD-${Date.now()}`,
-      name: customerName.trim() || defaultName,
-      timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-      items: [...cart],
-      total: grandTotal,
-      customer: selectedCustomer,
-      priceTier: selectedPriceTier,
-    };
-
-    setHeldOrders((prev) => [...prev, newHeld]);
-    setIsPaymentConfirmOpen(false);
-    resetToNewTransaction();
-    showToast(
-      language === 'ID'
-        ? `Transaksi "${newHeld.name}" berhasil ditunda (HOLD) ke daftar antrean!`
-        : `Order "${newHeld.name}" moved to held queue!`
-    );
-  };
-
-  // Open Payment Confirmation & Receipt Modal
-  const handleCheckout = () => {
-    if (cart.length === 0) {
+    if (isBoundHere && boundStation && boundStation.stationCode !== targetStationCode) {
       showToast(
-        language === 'ID'
-          ? 'Pilih minimal 1 produk untuk transaksi!'
-          : 'Please select at least 1 item to checkout!'
+        `Perangkat ini terkunci pada loket ${boundStation.stationCode}. Klik "Lepas Kunci Perangkat" terlebih dahulu untuk pindah loket.`,
+        'warning'
       );
       return;
     }
 
-    // Jika metode pembayaran QRIS, langsung tampilkan modal QRIS Dinamis
-    if (paymentMethod === 'QRIS') {
-      setIsQrisModalOpen(true);
+    bindPosStation({
+      stationCode: targetStationCode,
+      stationName: term.name,
+      posType: matchingStation?.posType || term.posType,
+      boundAt: new Date().toISOString(),
+      boundBy: (currentUser || activeUser)?.name || 'Kasir',
+    });
+
+    const unlockedTerm: Terminal = {
+      ...term,
+      id: targetStationCode,
+      stationCode: targetStationCode,
+      code: targetStationCode,
+      isLocked: false,
+    };
+
+    setReceiptNumber(peekStationReceiptNumber(targetStationCode));
+    setActiveTerminal(unlockedTerm);
+    setHasExplicitLobbyReturn(false);
+
+    const stationShift = getOpenShiftForStation(targetStationCode);
+    if (!stationShift) {
+      setIsOpenShiftModalOpen(true);
+    } else {
+      setIsRegisterOpen(true);
+    }
+  };
+
+  const handleSwitchDeviceStation = (targetCard: PosIdentityCard) => {
+    const targetCode = targetCard.stationCode;
+    const matchingStation = activeStations.find((s) => s.stationCode === targetCode);
+
+    bindPosStation({
+      stationCode: targetCode,
+      stationName: targetCard.posName,
+      posType: matchingStation?.posType,
+      boundAt: new Date().toISOString(),
+      boundBy: (currentUser || activeUser)?.name || 'Kasir',
+    });
+
+    const switchedTerm: Terminal = {
+      id: targetCode,
+      stationCode: targetCode,
+      name: targetCard.posName,
+      code: targetCode,
+      location: targetCard.posTypeLabel,
+      isActive: true,
+      activeOrdersToday: 0,
+      businessModel: targetCard.posTypeLabel,
+      businessType: targetCard.posTypeLabel,
+      modelType: targetCard.modelType,
+      isLocked: false,
+      role: targetCard.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
+      terminalType: targetCard.isHybrid ? 'BACK_END' : 'FRONT_END',
+    };
+
+    setReceiptNumber(peekStationReceiptNumber(targetCode));
+    setActiveTerminal(switchedTerm);
+    setHasExplicitLobbyReturn(true);
+    setIsRegisterOpen(false);
+    setIsStationPickerOpen(false);
+    showToast(`Perangkat dipindahkan ke loket ${targetCode} (${targetCard.posTypeLabel}).`, 'success');
+  };
+
+  const handleCashierLogout = () => {
+    setHasExplicitLobbyReturn(true);
+    setIsRegisterOpen(false);
+    setIsFullscreen(false);
+    showToast('Kembali ke Lobby Terminal POS.');
+  };
+
+  const handleHoldOrderFromModal = () => {
+    if (cart.length === 0) return;
+    setIsPaymentConfirmOpen(false);
+    setIsHoldCartModalOpen(true);
+  };
+
+  const resolvedFleetLabel =
+    selectedFleetType === 'DUMP_TRUCK'
+      ? 'Dump Truck (±6.5 m³)'
+      : selectedFleetType === 'TRUCK_ENGKEL'
+      ? 'Truk Engkel (±3.0 m³)'
+      : 'Pick-up (±1.2 m³)';
+
+  // Akuntansi Manajemen Depo Bangunan: Margin Floor Guard & Pemisahan Jurnal Logistik
+  const buildingCartAccounting = useMemo(() => {
+    const isFleetOrder = deliveryFleetActive || deliveryMethod === 'FLEET_DELIVERY' || deliveryPolicy === 'FRANGKO';
+    const itemsBelowMarginFloor = cart.filter(
+      (item) => (isBuildingTerminal || isBuildingMaterialProduct(item.product)) && Boolean(item.isMarginBelowFloor)
+    );
+    const hasMarginViolation = itemsBelowMarginFloor.length > 0;
+    const isCheckoutLockedByMargin = hasMarginViolation && !posMarginFloorAuthorized;
+
+    const loadingFeeAmt = calculateBuildingLoadingFeeTotal(cart);
+    const fleetExpenseAmt = estimateFleetDeliveryExpense(selectedFleetType, deliveryPolicy, isFleetOrder);
+    const fleetDeliveryCostAmt =
+      isBuildingTerminal || isFleetOrder ? fleetExpenseAmt : 0;
+
+    const totalMaterialCogs = cart.reduce((acc, item) => {
+      const unitCogs =
+        item.costPrice !== undefined && item.costPrice > 0
+          ? item.costPrice
+          : Number(item.product?.cost_price) > 0
+          ? Number(item.product.cost_price)
+          : Math.round((Number(item.product?.sell_price) || 0) * 0.78);
+      return acc + Math.round(unitCogs * (item.quantity || 1));
+    }, 0);
+
+    const materialRevenueAmt = Math.max(0, grandTotal - loadingFeeAmt);
+    const grossProfitMaterial = materialRevenueAmt - totalMaterialCogs;
+    const netProfitAfterShipping = grossProfitMaterial + loadingFeeAmt - fleetDeliveryCostAmt;
+    const totalCubicDeductionM3 = Number(
+      cart.reduce((acc, item) => acc + (item.cubicDeductionM3 || 0), 0).toFixed(2)
+    );
+
+    return {
+      itemsBelowMarginFloor,
+      hasMarginViolation,
+      isCheckoutLockedByMargin,
+      loadingFeeAmt,
+      fleetDeliveryCostAmt,
+      fleetExpenseLabel: resolvedFleetLabel,
+      totalMaterialCogs,
+      materialRevenueAmt,
+      grossProfitMaterial,
+      netProfitAfterShipping,
+      totalCubicDeductionM3,
+    };
+  }, [
+    cart,
+    isBuildingTerminal,
+    posMarginFloorAuthorized,
+    deliveryFleetActive,
+    deliveryMethod,
+    deliveryPolicy,
+    selectedFleetType,
+    grandTotal,
+  ]);
+
+  const handleAutoFixCartSafeMargin = () => {
+    setCart((prev) =>
+      prev.map((item) => {
+        if (!item.isMarginBelowFloor) return item;
+        const unitCost =
+          item.costPrice !== undefined && item.costPrice > 0
+            ? item.costPrice
+            : Number(item.product?.cost_price) > 0
+            ? Number(item.product.cost_price)
+            : Math.round((Number(item.product?.sell_price) || 0) * 0.78);
+        const safePrice = getMinSafeSellingPrice(unitCost, 3);
+        const evalSafe = evaluateTierMarginGuard(safePrice, unitCost, 3);
+        return {
+          ...item,
+          product: { ...item.product, sell_price: Math.max(item.product.sell_price, safePrice) },
+          customPrice: safePrice,
+          itemDiscount: Math.max(0, (item.product.sell_price || safePrice) - safePrice),
+          subtotal: Math.round(safePrice * item.quantity),
+          grossMarginPercent: evalSafe.marginPercent,
+          isMarginBelowFloor: false,
+        };
+      })
+    );
+    showToast('Harga item telah disesuaikan otomatis ke batas aman Margin ≥ 3% di atas HPP.');
+  };
+
+  const handleQrisPaymentSuccess = () => {
+    if (buildingCartAccounting.isCheckoutLockedByMargin) {
+      showToast('⚠️ Transaksi dikunci! Terdapat item dengan harga di bawah HPP atau Margin < 3%. Aktifkan Otorisasi Khusus atau sesuaikan harga.', 'warning');
       return;
     }
+    setIsQrisModalOpen(false);
+    const isFleetOrder = deliveryFleetActive || deliveryMethod === 'FLEET_DELIVERY' || deliveryPolicy === 'FRANGKO';
+    const committedReceiptNumber = commitStationReceiptNumber(activeStationCode);
+    const isLaundryDeferred = isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL';
+    const resolvedPaidQris = isLaundryTerminal
+      ? laundryPaymentStatus === 'BAYAR_AMBIL'
+        ? 0
+        : laundryPaymentStatus === 'DP'
+        ? Math.max(0, Math.min(grandTotal, Number(laundryDpAmount) || 0))
+        : grandTotal
+      : grandTotal;
+    const resolvedRemainingQris = Math.max(0, grandTotal - resolvedPaidQris);
+    const laundryTagCode = `TAG-${String(committedReceiptNumber).replace(/[^A-Z0-9]/gi, '').slice(-4)}`;
+    const resolvedLaundryCustName =
+      selectedCustomer?.name ||
+      (isLaundryTerminal && laundryCustomerName.trim() ? laundryCustomerName.trim() : undefined);
+    const resolvedLaundryCustPhone =
+      selectedCustomer?.phone ||
+      (isLaundryTerminal && laundryCustomerPhone.trim() ? laundryCustomerPhone.trim() : undefined);
 
-    if (paymentMethod === 'CASH') {
-      if (!cashGiven || cashGiven <= 0) {
-        setCashGiven(grandTotal);
-      } else if (cashGiven < grandTotal) {
+    processPayment({
+      items: cart,
+      total: grandTotal,
+      paymentMethod: 'QRIS',
+      cashTendered: resolvedPaidQris,
+      changeDue: 0,
+      shiftId: activeStationShift?.status === 'OPEN' ? activeStationShift.id : undefined,
+      customerId: selectedCustomer?.id,
+      customerName: resolvedLaundryCustName,
+      customerPhone: resolvedLaundryCustPhone,
+      timestamp: new Date().toISOString(),
+      terminalId: activeStationCode,
+      stationCode: activeStationCode,
+      businessType: activeTerminal.businessType || activeTerminal.businessModel || activeTerminal.modelType,
+      receiptNumber: committedReceiptNumber,
+      cashierName: activeUser?.name || 'Kasir',
+      subtotalBeforeDiscount: subtotalBeforePromo,
+      discount: totalAllDiscounts,
+      promoSavingsTotal: totalPromoSavings,
+      cartVoucherDiscount: calculatedDiscount,
+      fnbOrderMode: isFnbModeActive ? fnbOrderMode : undefined,
+      fnbTableNo: isFnbModeActive && fnbOrderMode === 'Dine-In' ? fnbTableNo : undefined,
+      vehiclePlate,
+      mechanicName,
+      stylistId: selectedServiceStylist?.id,
+      stylistName: selectedServiceStylist?.name || stylistName,
+      stylistCommissionRate: selectedServiceStylist?.commissionRate,
+      serviceCommissionTotal: serviceCartCommissionSummary?.totalCommission || undefined,
+      petOrClientName,
+      deliveryFleetActive: isFleetOrder,
+      deliveryPolicy,
+      fleetType: isFleetOrder ? selectedFleetType : undefined,
+      fleetVehicleName: isFleetOrder ? resolvedFleetLabel : undefined,
+      deliveryDestination: deliveryDestination || selectedCustomer?.store_address,
+      shippingFee: activeShippingFee,
+      loadingFee: buildingCartAccounting.loadingFeeAmt,
+      materialRevenue: buildingCartAccounting.materialRevenueAmt,
+      fleetDeliveryCost: buildingCartAccounting.fleetDeliveryCostAmt,
+      netProfitAfterShipping: buildingCartAccounting.netProfitAfterShipping,
+      dpAmount: isLaundryDeferred ? resolvedPaidQris : undefined,
+      remainingBalance: resolvedRemainingQris,
+      priceTier: getActiveTransactionPriceTierLabel(),
+      isContractorMode,
+      fashionAdvisorId: selectedFashionAdvisor?.id,
+      fashionAdvisorName: selectedFashionAdvisor?.name,
+      fashionAdvisorCommission: selectedFashionAdvisor ? fashionAdvisorCommission : undefined,
+      manualDiscountReason: manualDiscountReason || undefined,
+      manualDiscountAuthorizedBy: manualDiscountAuthorizedBy || undefined,
+      ...(isLaundryTerminal
+        ? {
+            isLaundryOrder: true,
+            laundryTotalPieces: Math.max(1, laundryTotalPieces || 1),
+            laundryConditionNotes: laundryConditionNotes.trim() || '-',
+            laundryEstimatedDoneAt: computedLaundrySla.iso,
+            laundrySlaLabel: computedLaundrySla.label,
+            laundrySlaHours: computedLaundrySla.hours,
+            laundryPaymentStatus,
+            laundryBagTagCode: laundryTagCode,
+            laundryRackNumber: stylistName.trim() || undefined,
+            laundryWasherId: laundryWasherId || undefined,
+            laundryWasherName: laundryStaffChoices.find((e) => e.id === laundryWasherId)?.name,
+            laundrySpecialistId: laundrySpecialistId || undefined,
+            laundrySpecialistName: laundryStaffChoices.find((e) => e.id === laundrySpecialistId)?.name,
+          }
+        : {}),
+    });
+    if (isFleetOrder) {
+      setLastCompletedDoItems([...cart]);
+      setLastDoReceiptNumber(committedReceiptNumber);
+      setIsDoModalOpen(true);
+    }
+    setPosMarginFloorAuthorized(false);
+    resetToNewTransaction();
+    showToast(`Pembayaran QRIS Berhasil (${committedReceiptNumber})!`);
+  };
+
+  const handleDirectPayF10 = (
+    overrideCashTendered?: number,
+    overrideMethod?: string,
+    creditMeta?: { dpAmount: number; tempoDays: number; dueDate: string; remainingBalance: number }
+  ) => {
+    if (cart.length === 0) {
+      showToast('Keranjang belanja masih kosong!');
+      return;
+    }
+    if (buildingCartAccounting.isCheckoutLockedByMargin) {
+      showToast('⚠️ Transaksi dikunci! Terdapat item dengan harga di bawah HPP atau Margin < 3%. Aktifkan Otorisasi Khusus atau sesuaikan harga.', 'warning');
+      return;
+    }
+    const totalTagihan = grandTotal;
+    const effectiveMethod = overrideMethod || paymentMethod;
+    const isSplitMode = effectiveMethod === 'SPLIT';
+    const isCreditAr =
+      !isSplitMode &&
+      (effectiveMethod === 'KREDIT / TEMPO (AR)' ||
+        effectiveMethod === 'KREDIT' ||
+        effectiveMethod === 'KASBON' ||
+        effectiveMethod === 'AR_CREDIT');
+    const isLaundryDeferred =
+      !isSplitMode && isLaundryTerminal && (laundryPaymentStatus !== 'LUNAS_AWAL' || isCreditAr);
+
+    if (isSplitMode) {
+      const enteredCash = Math.max(0, Math.round(Number(splitCashAmount) || 0));
+      const enteredNonCash = Math.max(0, Math.round(Number(splitNonCashAmount) || 0));
+      if (enteredCash + enteredNonCash < totalTagihan) {
+        const kurang = totalTagihan - (enteredCash + enteredNonCash);
         showToast(
-          language === 'ID'
-            ? 'Jumlah uang yang dibayarkan kurang dari Total Belanja!'
-            : 'Cash paid is less than the Grand Total!'
+          `⚠️ Nominal Split Payment belum lunas 100%! Masih kurang Rp ${kurang.toLocaleString('id-ID')}.`,
+          'warning'
         );
-        const inputEl = document.getElementById('pos-cash-given-input') as HTMLInputElement | null;
-        if (inputEl) {
-          inputEl.focus();
-          inputEl.select();
-        }
         return;
       }
     }
 
-    setIsPaymentConfirmOpen(true);
-  };
+    const resolvedCustomerNameForOrder =
+      selectedCustomer?.name ||
+      (isLaundryTerminal && laundryCustomerName.trim() ? laundryCustomerName.trim() : '') ||
+      customerSearchQuery.trim();
 
-  // Callback saat pembayaran QRIS berhasil diverifikasi
-  const handleQrisPaymentSuccess = () => {
-    setIsQrisModalOpen(false);
-    const itemsSummary = cart
-      .map(
-        (item) =>
-          `${item.product.name}${
-            item.modifiers ? ` (${item.modifiers.orderType} ${item.modifiers.tableNumber})` : ''
-          } (${item.quantity}x)`
-      )
-      .join(', ');
-
-    const calculatedPoints = selectedCustomer ? Math.floor(grandTotal / 10000) : 0;
-
-    const paymentPayload: PaymentPayload = {
-      items: cart,
-      total: grandTotal,
-      paymentMethod: 'QRIS',
-      cashTendered: grandTotal,
-      changeDue: 0,
-      shiftId: activeShift?.status === 'OPEN' ? activeShift.id : undefined,
-      customerId: selectedCustomer?.id,
-      timestamp: new Date().toISOString(),
-      terminalId: activeTerminal.id,
-      businessType: activeTerminal.businessType || activeTerminal.businessModel || activeTerminal.modelType,
-      receiptNumber: receiptNumber,
-      cashierName: activeUser?.name || 'Kasir',
-    };
-
-    processPayment(paymentPayload);
-
-    if (selectedCustomer) {
-      addAuditLog(
-        `POS Checkout QRIS Member: "${selectedCustomer.name}" (${selectedCustomer.phone || selectedCustomer.id}) Struk #${receiptNumber} Total Rp ${grandTotal.toLocaleString('id-ID')} [Tier: ${getTierLabel(selectedPriceTier)}, Poin +${calculatedPoints}]`,
-        'Customer Loyalty',
-        'INFO'
-      );
-    }
-    if (deliveryMethod === 'FLEET_DELIVERY') {
-      setLastCompletedDoItems([...cart]);
-      setLastDoReceiptNumber(receiptNumber);
-      setIsDoModalOpen(true);
-    }
-    // Transaksi QRIS tercatat resmi ke saldo settlement tanpa trigger laci kasir
-    resetToNewTransaction();
-    showToast(
-      language === 'ID'
-        ? 'Pembayaran QRIS Berhasil! Auto-journal Kas Masuk [Bank QRIS] & Jurnal HPP dibukukan ke Finance.'
-        : 'QRIS payment verified! Auto-journal Cash In [Bank QRIS] & COGS recorded in Finance.'
-    );
-  };
-
-  // Handler Langsung Eksekusi Transaksi Kasir [Bayar [F10]] (APS POS5 Integration)
-  const handleDirectPayF10 = (overrideCashTendered?: number) => {
-    if (cart.length === 0) {
-      showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
-      return;
-    }
-
-    const totalTagihan = grandTotal;
-    const isCreditAr =
-      paymentMethod === 'KREDIT / TEMPO (AR)' ||
-      paymentMethod === 'KREDIT' ||
-      paymentMethod === 'AR_CREDIT';
-
-    if (isCreditAr && !selectedCustomer) {
+    if ((isCreditAr || isLaundryDeferred) && !resolvedCustomerNameForOrder) {
       showToast(
-        language === 'ID'
-          ? 'Pilih Pelanggan / Member terlebih dahulu untuk transaksi Kredit / Tempo (AR)!'
-          : 'Please select a customer for Credit / AR transaction!'
+        '⚠️ Wajib mengisi / memilih Nama Pelanggan di bar atas untuk transaksi Kasbon / DP!',
+        'warning'
       );
-      setIsPaymentConfirmOpen(true);
+      const topInput = document.getElementById('pos-top-customer-search-input') as HTMLInputElement | null;
+      if (topInput) {
+        topInput.focus();
+      }
       return;
     }
 
-    const selectedPaymentMethod =
-      isCreditAr
-        ? 'KREDIT / TEMPO (AR)'
-        : paymentMethod === 'QRIS'
-        ? 'QRIS'
-        : paymentMethod === 'EDC_DEBIT'
-        ? 'Debit'
-        : 'Tunai';
-
-    // Nilai dari input Diterima
+    const selectedPaymentMethod = isSplitMode
+      ? 'SPLIT'
+      : isCreditAr || isLaundryDeferred
+      ? 'KREDIT / TEMPO (AR)'
+      : effectiveMethod === 'QRIS'
+      ? 'QRIS'
+      : effectiveMethod === 'EDC_DEBIT'
+      ? 'Debit'
+      : 'Tunai';
     const effectiveGiven = overrideCashTendered !== undefined ? overrideCashTendered : cashGiven;
-    const cashTendered =
-      paymentMethod === 'CASH'
-        ? (effectiveGiven > 0 ? effectiveGiven : totalTagihan)
-        : totalTagihan;
 
-    // Jika pembayaran tunai dan uang kurang dari total, cegah eksekusi dan beri highlight/peringatan
-    if (paymentMethod === 'CASH' && cashTendered < totalTagihan) {
-      setIsCashUnderpaid(true);
-      showToast(
-        language === 'ID'
-          ? `❌ Uang diterima (Rp ${cashTendered.toLocaleString('id-ID')}) kurang dari Total (Rp ${totalTagihan.toLocaleString('id-ID')})!`
-          : `❌ Amount paid is less than Grand Total!`
+    let cashTendered = totalTagihan;
+    let remainingBalanceVal = 0;
+    let splitCashFinal: number | undefined = undefined;
+    let splitNonCashFinal: number | undefined = undefined;
+
+    if (isSplitMode) {
+      const rawNonCash = Math.max(0, Math.min(totalTagihan, Math.round(Number(splitNonCashAmount) || 0)));
+      const rawCash = Math.max(0, Math.round(Number(splitCashAmount) || 0));
+      splitNonCashFinal = rawNonCash;
+      splitCashFinal = Math.max(0, totalTagihan - rawNonCash);
+      cashTendered = rawCash + rawNonCash;
+      remainingBalanceVal = 0;
+    } else if (isCreditAr) {
+      cashTendered = Math.max(
+        0,
+        Math.min(
+          totalTagihan,
+          Number(creditMeta?.dpAmount ?? effectiveKasbonDp) || 0
+        )
       );
-      focusCashInput();
-      return;
+      remainingBalanceVal =
+        creditMeta?.remainingBalance ?? Math.max(0, totalTagihan - cashTendered);
+    } else if (isLaundryDeferred) {
+      if (laundryPaymentStatus === 'BAYAR_AMBIL' && effectiveKasbonDp === 0) {
+        cashTendered = 0;
+        remainingBalanceVal = totalTagihan;
+      } else {
+        cashTendered = Math.max(
+          0,
+          Math.min(
+            totalTagihan,
+            Number(creditMeta?.dpAmount ?? (kasbonDpAmount > 0 ? kasbonDpAmount : laundryDpAmount)) || 0
+          )
+        );
+        remainingBalanceVal = Math.max(0, totalTagihan - cashTendered);
+      }
+    } else if (effectiveMethod === 'CASH') {
+      cashTendered = effectiveGiven > 0 ? effectiveGiven : totalTagihan;
+      if (cashTendered < totalTagihan) {
+        setIsCashUnderpaid(true);
+        showToast(`❌ Uang diterima (Rp ${cashTendered.toLocaleString('id-ID')}) kurang dari Total!`);
+        focusCashInput();
+        return;
+      }
     }
 
     setIsCashUnderpaid(false);
-
-    // Kembalian yang tertera
     const changeDue =
-      paymentMethod === 'CASH'
+      isSplitMode
+        ? Math.max(0, cashTendered - totalTagihan)
+        : !isCreditAr && !isLaundryDeferred && effectiveMethod === 'CASH'
         ? Math.max(0, cashTendered - totalTagihan)
         : 0;
+    const isFleetOrder = deliveryFleetActive || deliveryMethod === 'FLEET_DELIVERY' || deliveryPolicy === 'FRANGKO';
+    const committedReceiptNumber = commitStationReceiptNumber(activeStationCode);
+    const laundryTagCode = `TAG-${String(committedReceiptNumber).replace(/[^A-Z0-9]/gi, '').slice(-4)}`;
+    const resolvedCustName = resolvedCustomerNameForOrder || undefined;
+    const resolvedCustPhone =
+      selectedCustomer?.phone ||
+      (isLaundryTerminal && laundryCustomerPhone.trim() ? laundryCustomerPhone.trim() : undefined);
+    const resolvedLaundryStatusForSale: LaundryPaymentStatus =
+      isCreditAr || isLaundryDeferred
+        ? remainingBalanceVal > 0
+          ? cashTendered > 0
+            ? 'DP'
+            : 'BAYAR_AMBIL'
+          : 'LUNAS_AWAL'
+        : 'LUNAS_AWAL';
 
-    const payload: PaymentPayload = {
+    processPayment({
       items: cart,
       total: totalTagihan,
       paymentMethod: selectedPaymentMethod,
-      cashTendered: cashTendered,
-      changeDue: changeDue,
-      shiftId: activeShift?.status === 'OPEN' ? activeShift.id : activeShift?.id || 'SHIFT-0001',
+      cashTendered,
+      changeDue,
+      splitCashAmount: splitCashFinal,
+      splitNonCashAmount: splitNonCashFinal,
+      splitNonCashMethod: isSplitMode ? splitNonCashChannel : undefined,
+      shiftId: activeStationShift?.status === 'OPEN' ? activeStationShift.id : undefined,
       customerId: selectedCustomer?.id || 'GUEST',
+      customerName: resolvedCustName,
+      customerPhone: resolvedCustPhone,
       timestamp: new Date().toISOString(),
-      terminalId: activeTerminal.id,
+      terminalId: activeStationCode,
+      stationCode: activeStationCode,
       businessType: activeTerminal.businessType || activeTerminal.businessModel || activeTerminal.modelType,
-      receiptNumber: receiptNumber,
+      receiptNumber: committedReceiptNumber,
       cashierName: activeUser?.name || 'Kasir',
-    };
+      subtotalBeforeDiscount: subtotalBeforePromo,
+      discount: totalAllDiscounts,
+      promoSavingsTotal: totalPromoSavings,
+      cartVoucherDiscount: calculatedDiscount,
+      fnbOrderMode: isFnbModeActive ? fnbOrderMode : undefined,
+      fnbTableNo: isFnbModeActive && fnbOrderMode === 'Dine-In' ? fnbTableNo : undefined,
+      vehiclePlate,
+      mechanicName,
+      stylistId: selectedServiceStylist?.id,
+      stylistName: selectedServiceStylist?.name || stylistName,
+      stylistCommissionRate: selectedServiceStylist?.commissionRate,
+      serviceCommissionTotal: serviceCartCommissionSummary?.totalCommission || undefined,
+      petOrClientName,
+      deliveryFleetActive: isFleetOrder,
+      deliveryPolicy,
+      fleetType: isFleetOrder ? selectedFleetType : undefined,
+      fleetVehicleName: isFleetOrder ? resolvedFleetLabel : undefined,
+      deliveryDestination: deliveryDestination || selectedCustomer?.store_address,
+      shippingFee: activeShippingFee,
+      loadingFee: buildingCartAccounting.loadingFeeAmt,
+      materialRevenue: buildingCartAccounting.materialRevenueAmt,
+      fleetDeliveryCost: buildingCartAccounting.fleetDeliveryCostAmt,
+      netProfitAfterShipping: buildingCartAccounting.netProfitAfterShipping,
+      dpAmount: isCreditAr || isLaundryDeferred ? cashTendered : undefined,
+      tempoDays:
+        isCreditAr || isLaundryDeferred
+          ? creditMeta?.tempoDays ?? kasbonDefaultDueInfo.tempoDays
+          : undefined,
+      dueDate:
+        isCreditAr || isLaundryDeferred
+          ? creditMeta?.dueDate ?? kasbonDefaultDueInfo.iso
+          : undefined,
+      remainingBalance: remainingBalanceVal,
+      priceTier: getActiveTransactionPriceTierLabel(),
+      isContractorMode,
+      fashionAdvisorId: selectedFashionAdvisor?.id,
+      fashionAdvisorName: selectedFashionAdvisor?.name,
+      fashionAdvisorCommission: selectedFashionAdvisor ? fashionAdvisorCommission : undefined,
+      manualDiscountReason: manualDiscountReason || undefined,
+      manualDiscountAuthorizedBy: manualDiscountAuthorizedBy || undefined,
+      ...(isLaundryTerminal
+        ? {
+            isLaundryOrder: true,
+            laundryTotalPieces: Math.max(1, laundryTotalPieces || 1),
+            laundryConditionNotes: laundryConditionNotes.trim() || '-',
+            laundryEstimatedDoneAt: computedLaundrySla.iso,
+            laundrySlaLabel: computedLaundrySla.label,
+            laundrySlaHours: computedLaundrySla.hours,
+            laundryPaymentStatus: resolvedLaundryStatusForSale,
+            laundryBagTagCode: laundryTagCode,
+            laundryRackNumber: stylistName.trim() || undefined,
+            laundryWasherId: laundryWasherId || undefined,
+            laundryWasherName: laundryStaffChoices.find((e) => e.id === laundryWasherId)?.name,
+            laundrySpecialistId: laundrySpecialistId || undefined,
+            laundrySpecialistName: laundryStaffChoices.find((e) => e.id === laundrySpecialistId)?.name,
+          }
+        : {}),
+    });
 
-    // Panggil langsung fungsi processPayment(payload) -> mencatat penjualan dan membuka ReceiptModal
-    processPayment(payload);
-
-    // Otomatis buka laci kasir jika metode pembayaran adalah TUNAI
-    if (paymentMethod === 'CASH' || selectedPaymentMethod === 'Tunai') {
+    if (
+      (isSplitMode && (splitCashFinal || 0) > 0) ||
+      ((isCreditAr || isLaundryDeferred) && cashTendered > 0) ||
+      (!isCreditAr && !isLaundryDeferred && (effectiveMethod === 'CASH' || selectedPaymentMethod === 'Tunai'))
+    ) {
       triggerCashDrawer();
     }
 
-    // Jika transaksi material/armada, buka Surat Jalan DO
     const isBuildingTrx =
-      deliveryMethod === 'FLEET_DELIVERY' ||
+      isFleetOrder ||
       isBuildingTerminal ||
-      cart.some(
-        (c) =>
-          c.product.businessModel === 'building' ||
-          (c.product.id || '').startsWith('MAT-') ||
-          c.product.materialNature === 'BULK_CURAH'
-      );
-
+      (isHybridMode && cart.some((c) => c.product.businessModel === 'building' || (c.product.id || '').startsWith('MAT-')));
     if (isBuildingTrx) {
       setLastCompletedDoItems([...cart]);
-      setLastDoReceiptNumber(receiptNumber);
+      setLastDoReceiptNumber(committedReceiptNumber);
       setIsDoModalOpen(true);
     }
 
-    // Setelah sukses, tampilkan alert/toast "Transaksi Berhasil"
-    showToast('Transaksi Berhasil');
-
-    // Reset input Diterima
-    setCashGiven(0);
-
-    // Kosongkan cart (setCart([])) & reset ke transaksi baru dengan nomor struk baru
-    setCart([]);
-    setSelectedCartIndex(null);
+    setPosMarginFloorAuthorized(false);
+    showToast(
+      isSplitMode
+        ? `Split Payment Berhasil: Tunai Rp ${(splitCashFinal || 0).toLocaleString('id-ID')} + ${splitNonCashChannel} Rp ${(splitNonCashFinal || 0).toLocaleString('id-ID')} (${committedReceiptNumber})`
+        : isCreditAr || isLaundryDeferred
+        ? `Kasbon / DP Tercatat: DP Rp ${cashTendered.toLocaleString('id-ID')} • Sisa Piutang Rp ${remainingBalanceVal.toLocaleString('id-ID')} (${committedReceiptNumber})`
+        : `Transaksi Berhasil (${committedReceiptNumber})`
+    );
     setIsPaymentConfirmOpen(false);
     resetToNewTransaction();
   };
 
-  // Handler Event onKeyDown pada Input "Diterima"
   const handleCashInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // 1. Shortcut Spasi atau 'P' / 'p': Otomatis isi uang pas
     if (e.key === ' ' || e.code === 'Space' || e.key === 'p' || e.key === 'P') {
       e.preventDefault();
       setCashGiven(grandTotal);
       setIsCashUnderpaid(false);
-      showToast(
-        language === 'ID'
-          ? `Uang Pas: Rp ${grandTotal.toLocaleString('id-ID')}`
-          : `Exact Cash: Rp ${grandTotal.toLocaleString('id-ID')}`
-      );
       return;
     }
-
-    // 2. Escape: Kembalikan fokus kursor ke input scan barcode [F2]
     if (e.key === 'Escape') {
       e.preventDefault();
       focusBarcodeInput();
       return;
     }
-
-    // 3. Enter di input Diterima:
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (cart.length === 0) {
-        showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
+      if (cart.length === 0) return;
+      if (paymentMethod === 'SPLIT' || paymentMethod === 'KREDIT / TEMPO (AR)' || (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')) {
+        handleDirectPayF10();
         return;
       }
-
       if (paymentMethod === 'CASH') {
-        const rawTargetVal = e.currentTarget?.value;
-        const inputNum = rawTargetVal !== undefined && rawTargetVal !== '' ? Number(rawTargetVal) : NaN;
-        let effectiveCash = !isNaN(inputNum) && inputNum > 0 ? inputNum : cashGiven;
-
-        // Jika input kosong atau 0, otomatis isi dengan total tagihan (uang pas)
-        if (!effectiveCash || effectiveCash <= 0) {
-          effectiveCash = grandTotal;
-          setCashGiven(grandTotal);
-        }
-
-        // Jika nilai kurang dari total, cegah eksekusi dan beri highlight/peringatan
+        const inputNum = Number(e.currentTarget?.value) || 0;
+        let effectiveCash = inputNum > 0 ? inputNum : cashGiven || grandTotal;
+        setCashGiven(effectiveCash);
         if (effectiveCash < grandTotal) {
           setIsCashUnderpaid(true);
-          showToast(
-            language === 'ID'
-              ? `❌ Uang diterima (Rp ${effectiveCash.toLocaleString('id-ID')}) kurang dari Total (Rp ${grandTotal.toLocaleString('id-ID')})!`
-              : `❌ Cash tendered (Rp ${effectiveCash.toLocaleString('id-ID')}) is less than Total (Rp ${grandTotal.toLocaleString('id-ID')})!`
-          );
           focusCashInput();
           return;
         }
-
-        // Jika nilai diterima >= total tagihan, langsung eksekusi transaksi dan buka ReceiptModal
         setIsCashUnderpaid(false);
         handleDirectPayF10(effectiveCash);
       } else {
@@ -3023,31 +4191,23 @@ export const PosModule: React.FC = () => {
     }
   };
 
-  // Eksekutor manual tombol [Bayar [F10]]
   const handleManualBayarClick = () => {
     if (cart.length === 0) {
-      showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
+      showToast('Keranjang belanja masih kosong!');
       return;
     }
-
+    if (paymentMethod === 'SPLIT' || paymentMethod === 'KREDIT / TEMPO (AR)' || (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')) {
+      handleDirectPayF10();
+      return;
+    }
     if (paymentMethod === 'CASH') {
-      let effectiveCash = cashGiven;
-      if (!effectiveCash || effectiveCash <= 0) {
-        effectiveCash = grandTotal;
-        setCashGiven(grandTotal);
-      }
-
+      const effectiveCash = cashGiven > 0 ? cashGiven : grandTotal;
+      setCashGiven(effectiveCash);
       if (effectiveCash < grandTotal) {
         setIsCashUnderpaid(true);
-        showToast(
-          language === 'ID'
-            ? `❌ Uang diterima (Rp ${effectiveCash.toLocaleString('id-ID')}) kurang dari Total (Rp ${grandTotal.toLocaleString('id-ID')})!`
-            : `❌ Amount paid is less than Grand Total!`
-        );
         focusCashInput();
         return;
       }
-
       setIsCashUnderpaid(false);
       handleDirectPayF10(effectiveCash);
     } else {
@@ -3055,106 +4215,27 @@ export const PosModule: React.FC = () => {
     }
   };
 
-  // Execute Sale Checkout and Print
-  const executeSaleCheckout = () => {
-    const itemsSummary = cart
-      .map(
-        (item) =>
-          `${item.product.name}${
-            item.modifiers ? ` (${item.modifiers.orderType} ${item.modifiers.tableNumber})` : ''
-          } (${item.quantity}x)`
-      )
-      .join(', ');
-
-    const isCreditAr =
-      paymentMethod === 'KREDIT / TEMPO (AR)' ||
-      paymentMethod === 'KREDIT' ||
-      paymentMethod === 'AR_CREDIT';
-
-    if (isCreditAr && !selectedCustomer) {
-      showToast(
-        language === 'ID'
-          ? 'Pilih Pelanggan / Member terlebih dahulu untuk transaksi Kredit / Tempo (AR)!'
-          : 'Please select a customer for Credit / AR transaction!'
-      );
-      setIsPaymentConfirmOpen(true);
-      return;
-    }
-
-    const calculatedPoints = selectedCustomer ? Math.floor(grandTotal / 10000) : 0;
-
-    const paymentPayload: PaymentPayload = {
-      items: cart,
-      total: grandTotal,
-      paymentMethod: paymentMethod,
-      cashTendered: paymentMethod === 'CASH' ? cashGiven : grandTotal,
-      changeDue: changeAmount,
-      shiftId: activeShift?.status === 'OPEN' ? activeShift.id : undefined,
-      customerId: selectedCustomer?.id,
-      timestamp: new Date().toISOString(),
-      terminalId: activeTerminal.id,
-      businessType: activeTerminal.businessType || activeTerminal.businessModel || activeTerminal.modelType,
-      receiptNumber: receiptNumber,
-      cashierName: activeUser?.name || 'Kasir',
-    };
-
-    processPayment(paymentPayload);
-
-    if (selectedCustomer) {
-      addAuditLog(
-        `POS Checkout Member: "${selectedCustomer.name}" (${selectedCustomer.phone || selectedCustomer.id}) Struk #${receiptNumber} Total Rp ${grandTotal.toLocaleString('id-ID')} [Tier: ${getTierLabel(selectedPriceTier)}, Poin +${calculatedPoints}]`,
-        'Customer Loyalty',
-        'INFO'
-      );
-    }
-
-    // Otomatis buka laci kasir jika metode pembayaran adalah TUNAI (CASH)
-    if (paymentMethod === 'CASH') {
-      triggerCashDrawer();
-      showToast(
-        language === 'ID'
-          ? 'Sinyal pulsa buka laci kasir terkirim ke printer (Kas Fisik Laci)'
-          : 'Cash drawer kick pulse signal sent to printer'
-      );
-    } else if (isCreditAr) {
-      showToast(
-        language === 'ID'
-          ? `Transaksi Kredit / Tempo (AR) #${receiptNumber} Berhasil! Tagihan Piutang Usaha (1-10301) dicatat ke Finance.`
-          : `Credit Sale (AR) #${receiptNumber} recorded! Accounts Receivable registered in Finance.`
-      );
-    } else if (paymentMethod === 'EDC_DEBIT') {
-      showToast(
-        language === 'ID'
-          ? 'Transaksi EDC / Debit berhasil dicatat ke Penerimaan Bank.'
-          : 'EDC / Debit sale recorded to Bank Settlement.'
-      );
-    }
-
-    // Reset state & new receipt number (Buka Surat Jalan DO saat pembayaran selesai jika transaksi armada/bahan bangunan)
-    const isBuildingTrx =
-      deliveryMethod === 'FLEET_DELIVERY' ||
-      isBuildingTerminal ||
-      cart.some(
-        (c) =>
-          c.product.businessModel === 'building' ||
-          (c.product.id || '').startsWith('MAT-') ||
-          c.product.materialNature === 'BULK_CURAH'
-      );
-
-    if (isBuildingTrx) {
-      setLastCompletedDoItems([...cart]);
-      setLastDoReceiptNumber(receiptNumber);
-      setIsDoModalOpen(true);
-    }
-    resetToNewTransaction();
-    setIsPaymentConfirmOpen(false);
-    if (!isCreditAr) {
-      showToast(
-        language === 'ID'
-          ? `Transaksi selesai! Auto-Journal Kas Masuk [${paymentMethod === 'CASH' ? 'Kas Kasir / Laci' : 'Bank QRIS / Settlement'}] & Jurnal HPP dibukukan.`
-          : `Sale completed! Auto-journal Cash In [${paymentMethod === 'CASH' ? 'Cash Drawer' : 'Bank Settlement'}] & COGS recorded.`
-      );
-    }
+  const executeSaleCheckout = (
+    overrideMethod?: string,
+    creditMeta?: { dpAmount: number; tempoDays: number; dueDate: string; remainingBalance: number }
+  ) => {
+    const activeMethod = overrideMethod || paymentMethod;
+    const isCredit =
+      activeMethod === 'KREDIT / TEMPO (AR)' ||
+      activeMethod === 'KREDIT' ||
+      activeMethod === 'AR_CREDIT';
+    const isLaundryDeferred = isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL';
+    handleDirectPayF10(
+      isCredit || isLaundryDeferred
+        ? creditMeta?.dpAmount ?? (laundryPaymentStatus === 'DP' ? laundryDpAmount : 0)
+        : activeMethod === 'CASH'
+        ? cashGiven > 0
+          ? cashGiven
+          : grandTotal
+        : grandTotal,
+      overrideMethod,
+      creditMeta
+    );
   };
 
   const isLight = theme === 'light';
@@ -3164,2123 +4245,2690 @@ export const PosModule: React.FC = () => {
       id="module-pos"
       className={`transition-all duration-200 ${
         isRegisterOpen
-          ? `fixed inset-0 z-30 h-screen flex flex-col overflow-hidden p-3 ${
-              isLight ? 'bg-slate-100 text-slate-900' : 'bg-[#0d1117] text-white'
+          ? `${
+              isLaundryTerminal
+                ? 'min-h-[calc(100vh-8.75rem)] flex flex-col overflow-y-auto'
+                : 'h-[calc(100vh-8.75rem)] min-h-[520px] flex flex-col overflow-hidden'
+            } rounded-2xl border p-2.5 sm:p-3 ${
+              isLight ? 'bg-slate-100 border-slate-200 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
             }`
           : isFullscreen
-          ? 'fixed inset-0 z-50 bg-[#0d1117] text-white p-3 sm:p-4 overflow-y-auto'
-          : 'min-h-[calc(100vh-140px)] space-y-4 relative'
+          ? 'space-y-3 relative p-3 sm:p-4 rounded-2xl bg-[#0d1117] text-white'
+          : 'space-y-3 relative'
       }`}
     >
       {/* ========================================================= */}
-      {/* 1. HALAMAN DEPAN: 10 TERMINAL KASIR MINIMALIS & BERSIH   */}
+      {/* 1. HALAMAN DEPAN: 1 KARTU TERMINAL UTUH PERANGKAT AKTIF    */}
       {/* ========================================================= */}
       {!isRegisterOpen ? (
-        <div className="space-y-3 animate-in fade-in duration-150">
-          {/* Top Cashier Bar Header & Global Controls */}
+        (() => {
+          const hasValidDeviceBinding = Boolean(
+            boundStation && activeStations.some((s) => s.stationCode === boundStation.stationCode)
+          );
+          const activeDeviceIdentity =
+            visiblePosIdentities.find((item) =>
+              hasValidDeviceBinding
+                ? item.stationCode === boundStation?.stationCode
+                : item.stationCode === activeStationCode
+            ) || visiblePosIdentities[0];
+          const singleActiveIdentities = activeDeviceIdentity ? [activeDeviceIdentity] : [];
+
+          return (
+        <div className="space-y-4 animate-in fade-in duration-150">
+          {/* Header Bar Ringkas */}
           <div
-            className={`p-2.5 sm:p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-2 mb-3 shadow-sm ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            className={`px-3.5 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] text-slate-900'
+                : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-white'
             }`}
           >
-            {/* Sisi Kiri: Badge [POS] + Judul "Terminal Kasir / Cashier Terminals" + Badge Industri */}
-            <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-              <div className="w-8 h-8 rounded-xl bg-[#0052FF]/15 border border-[#0052FF]/40 text-[#0052FF] dark:text-[#58a6ff] flex items-center justify-center font-black text-xs shrink-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-mono font-normal text-xs shrink-0">
                 POS
               </div>
-              <h2
-                className={`text-base font-black tracking-wide shrink-0 ${
-                  isLight ? 'text-slate-900' : 'text-white'
-                }`}
-              >
-                {language === 'ID' ? 'Terminal Kasir' : 'Cashier Terminals'}
-              </h2>
-              {/* Badge Industri */}
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border flex items-center gap-1 shrink-0 ${
-                  isLight
-                    ? 'bg-slate-100 text-slate-700 border-slate-300'
-                    : 'bg-[#0d1117] text-gray-300 border-[#30363d]'
-                }`}
-              >
-                🏢 {businessProfile?.category || (language === 'ID' ? 'Modern Retail' : 'Modern Retail')}
-              </span>
-              {/* Badge Arsitektur Kasir Terpilih */}
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 shrink-0 ${
-                  (businessProfile?.cashierArchitecture || 'CENTRALIZED_FRONTEND') === 'CENTRALIZED_FRONTEND'
-                    ? 'bg-blue-600/15 text-blue-400 border-blue-500/30'
-                    : 'bg-cyan-600/15 text-cyan-300 border-cyan-500/30'
-                }`}
-                title={
-                  (businessProfile?.cashierArchitecture || 'CENTRALIZED_FRONTEND') === 'CENTRALIZED_FRONTEND'
-                    ? (language === 'ID' ? 'Kasir Terpusat (Front-End Only)' : 'Centralized Cashier (Front-End Only)')
-                    : (language === 'ID' ? 'Hybrid (Front-End + Back-End Admin/Gudang)' : 'Hybrid (Front-End + Back-End Admin/Logistics)')
-                }
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                <span>
-                  {(businessProfile?.cashierArchitecture || 'CENTRALIZED_FRONTEND') === 'CENTRALIZED_FRONTEND'
-                    ? (language === 'ID' ? 'Kasir Terpusat' : 'Centralized')
-                    : 'Hybrid'}
-                </span>
-              </span>
+              <div>
+                <h2 className="text-base leading-6 font-medium tracking-tight">
+                  {language === 'ID' ? 'Terminal Point of Sale' : 'Point of Sale Terminals'}
+                </h2>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Arsitektur: <strong className="text-emerald-600 dark:text-emerald-400">{getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}</strong>
+                  {' • '}
+                  Loket Perangkat: <strong className="font-mono text-cyan-600 dark:text-cyan-300">{activeDeviceIdentity?.stationCode || 'POS-01'}</strong>
+                  {visiblePosIdentities.length > 1 ? ` (dari ${visiblePosIdentities.length} loket terdaftar)` : ''}
+                </p>
+              </div>
             </div>
 
-            {/* Sisi Kanan: Tombol Kunci/Buka Semua Kasir dan Tambah Terminal */}
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
-              {/* Tombol Kunci / Buka Semua Kasir */}
-              <button
-                id="btn-toggle-all-lock"
-                onClick={handleToggleAllTerminals}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${
-                  areAllLocked
-                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30'
-                    : 'bg-rose-500/15 text-rose-400 border-rose-500/30 hover:bg-rose-500/25'
-                }`}
-              >
-                {areAllLocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-                <span>
-                  {areAllLocked
-                    ? language === 'ID'
-                      ? 'Buka Semua'
-                      : 'Unlock All'
-                    : language === 'ID'
-                    ? 'Kunci Semua'
-                    : 'Lock All'}
+            <div className="flex items-center gap-2 flex-wrap">
+              {hasValidDeviceBinding && boundStation && (
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-semibold border flex items-center gap-1.5 ${
+                    isLight
+                      ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                      : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
+                  }`}
+                >
+                  <Monitor className="w-3 h-3" />
+                  <span>PC Terikat: {boundStation.stationCode}</span>
                 </span>
-              </button>
+              )}
 
-              {/* Status Kuota Unit Kasir Terkunci (Super Admin Configuration) */}
+              {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                <button
+                  type="button"
+                  id="btn-switch-pc-station"
+                  onClick={() => openPosMgmtPinPrompt({ type: 'SWITCH_STATION' })}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] leading-4 font-semibold border flex items-center gap-1.5 cursor-pointer transition ${
+                    isLight
+                      ? 'bg-slate-100 hover:bg-cyan-50 text-slate-800 hover:text-cyan-800 border-slate-300 hover:border-cyan-400'
+                      : 'bg-slate-800 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 border-slate-700 hover:border-cyan-500/40'
+                  }`}
+                >
+                  <ArrowLeftRight className="w-3 h-3 text-cyan-500" />
+                  <span>Ganti Loket PC</span>
+                </button>
+              )}
+
               <div
-                id="badge-pos-locked-quota"
-                className={`px-3 py-1 rounded-xl text-xs font-mono font-bold border flex items-center gap-1.5 select-none ${
-                  isLight
-                    ? 'bg-slate-100 text-slate-700 border-slate-300'
-                    : 'bg-[#0d1117] text-slate-300 border-[#30363d]'
+                className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-normal tracking-widest border flex items-center gap-1.5 select-none ${
+                  isLight ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40'
                 }`}
-                title="Jumlah unit kasir aktif murni terkunci mengikuti konfigurasi Profil Entitas Usaha di Super Admin Console"
               >
-                <Lock className="w-3.5 h-3.5 text-amber-500" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span>
-                  {language === 'ID'
-                    ? `Kuota: ${businessProfile?.posUnitCount || 1} Kasir Aktif`
-                    : `Quota: ${businessProfile?.posUnitCount || 1} Active Cashiers`}
+                  {`${visiblePosIdentities.length} LOKET TERDAFTAR`}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* CASHIER TERMINAL GRID (FILTERED BY INDUSTRY & UNIT COUNT) */}
-          {(() => {
-            // Helper filter industri dari BusinessEntityProfile
-            const profileCat = (businessProfile?.category || '').toLowerCase();
-            const allowedIndustry: TerminalIndustry | 'ALL' = (() => {
-              if (profileCat.includes('multi-industry') || profileCat === '' || profileCat.includes('semua') || profileCat.includes('all')) {
-                return 'ALL';
+          {/* 1 Kartu Terminal Utuh Milik Perangkat Aktif (Tanpa Kartu Terkunci Lain di Bawahnya) */}
+          <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto pt-2">
+            {singleActiveIdentities.map((item) => {
+              const isSelected = activeTerminal?.id === item.stationCode || activeTerminal?.stationCode === item.stationCode;
+              const isHovered = hoveredTerminalId === item.stationCode;
+              const isFocused = isSelected || isHovered;
+              const isSplitWideLayout = true;
+
+              const isThisDeviceStation = hasValidDeviceBinding && boundStation?.stationCode === item.stationCode;
+              const isLockedToOtherStation = false;
+
+              const termObj: Terminal = {
+                id: item.stationCode,
+                stationCode: item.stationCode,
+                name: item.posName,
+                code: item.stationCode,
+                location: item.posTypeLabel,
+                isActive: true,
+                activeOrdersToday: 0,
+                businessModel: item.posTypeLabel,
+                businessType: item.posTypeLabel,
+                modelType: item.modelType,
+                isLocked: isLockedToOtherStation,
+                role: item.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
+                terminalType: item.isHybrid ? 'BACK_END' : 'FRONT_END',
+              };
+
+              const skuCount =
+                item.modelType === 'fnb'
+                  ? Math.max(
+                      FNB_MENU_ITEMS.length,
+                      filterProductsByTerminal(products, termObj, false).length
+                    )
+                  : filterProductsByTerminal(products, termObj, false).length;
+
+              const primaryModel = businessDomainConfig.primaryBusinessModel;
+
+              let descriptiveSubtitle =
+                'Terminal Transaksi Ritel Terpadu • Pemindaian Barcode Cepat, Kontrol Stok Unit/Box & Cetak Struk 80mm';
+              let featureBadges: string[] = [
+                'Barcode Scanner',
+                'Multi-Satuan',
+                'Real-Time Stok',
+              ];
+              let quickShortcuts = 'F2 Scan · F3 Cari · F10 Bayar';
+
+              if (item.code === 'POS-GROSIR' || item.id === 'T-03') {
+                descriptiveSubtitle =
+                  'Terminal Grosir & Distribusi B2B • Multi-Tier Harga Karton/Dus, Aturan MOQ & Penjualan Kredit/Tempo';
+                featureBadges = [
+                  'Multi-Tier Grosir',
+                  'Aturan MOQ & Tempo',
+                  'Satuan Pcs/Box/Karton',
+                ];
+                quickShortcuts = 'F2 Scan · F3 Katalog · F10 Checkout';
+              } else if (item.modelType === 'fnb' || item.code === 'POS-FNB' || item.id === 'T-02') {
+                descriptiveSubtitle =
+                  'Terminal Kasir Kuliner F&B Terpadu • Menu Foto Interaktif, Dine-In/Takeaway, Nomor Meja & Resep BOM';
+                featureBadges = [
+                  'Menu Foto Cepat',
+                  'Meja & Dine-In',
+                  'Potong BOM Otomatis',
+                ];
+                quickShortcuts = 'F3 Menu · KOT Dapur · F10 Bayar';
+              } else if (item.modelType === 'building' || item.code === 'POS-BUILD' || item.id === 'T-05') {
+                descriptiveSubtitle =
+                  'Terminal Depo Bahan Bangunan & Material • Konversi Curah m³/Ret Armada, DO Frangko/Loco & Proteksi Margin';
+                featureBadges = [
+                  'Konversi Curah m³/Ret',
+                  'Armada DO Frangko',
+                  'Guardrail Margin',
+                ];
+                quickShortcuts = 'F3 Material · Mode Kontraktor · F10 DO';
+              } else if (item.modelType === 'laundry' || primaryModel === 'LAUNDRY') {
+                descriptiveSubtitle =
+                  'Terminal Kasir Laundry & Binatu Multi-Satuan • Timbangan Digital USB/HID, Potong Tare, Min. Berat & Durasi SLA';
+                featureBadges = [
+                  'Timbangan Digital',
+                  '4 Satuan (kg/pcs/psg/m²)',
+                  'Auto Min. & SLA',
+                ];
+                quickShortcuts = 'Timbang USB/HID · F3 Layanan · F10 Bayar';
+              } else if (item.modelType === 'salon' || item.code === 'POS-SERVICE' || item.id === 'T-08') {
+                descriptiveSubtitle =
+                  'Terminal Jasa & Layanan Profesional • Order Pelanggan, Penugasan Stylist/Petugas & Cetak Nota Layanan';
+                featureBadges = [
+                  'Order Jasa & Nota',
+                  'Penugasan Stylist/Staf',
+                  'Real-Time Layanan',
+                ];
+                quickShortcuts = 'F3 Layanan · Input Staf · F10 Bayar';
+              } else if (item.modelType === 'fashion' || primaryModel === 'FASHION_BUTIK') {
+                descriptiveSubtitle =
+                  'Terminal Butik & Fashion Terpadu • Pemilih Varian Ukuran/Warna, Scan Hangtag & Cetak Struk 80mm';
+                featureBadges = [
+                  'Scan Hangtag',
+                  'Varian Ukuran/Warna',
+                  'Real-Time Stok',
+                ];
+              } else if (primaryModel === 'TOKO_OBAT_KESEHATAN') {
+                descriptiveSubtitle =
+                  'Terminal Transaksi Ritel Terpadu • Pemindaian Barcode Cepat, Kontrol Stok Unit/Box & Cetak Struk 80mm';
+                featureBadges = [
+                  'Barcode Scanner',
+                  'Multi-Satuan',
+                  'Real-Time Stok',
+                ];
+              } else if (primaryModel === 'TOKO_KOSMETIK_KECANTIKAN') {
+                descriptiveSubtitle =
+                  'Terminal Ritel Kosmetik & Kecantikan • Pemindaian Barcode Cepat, Kontrol Expired FEFO & Promo Bundling';
+                featureBadges = [
+                  'Barcode Scanner',
+                  'Multi-Satuan',
+                  'Real-Time Stok',
+                ];
+              } else if (primaryModel === 'TOKO_ATK') {
+                descriptiveSubtitle =
+                  'Terminal Ritel Alat Tulis & Kantor • Transaksi Cepat Satuan/Pak, Diskon Member & Cetak Struk 80mm';
+                featureBadges = [
+                  'Barcode Scanner',
+                  'Multi-Satuan',
+                  'Real-Time Stok',
+                ];
+              } else if (primaryModel === 'PET_SHOP') {
+                descriptiveSubtitle =
+                  'Terminal Pet Shop & Kebutuhan Hewan • Pemindaian SKU Pakan & Aksesoris, Multi-Satuan & Riwayat Member';
+                featureBadges = [
+                  'Barcode Scanner',
+                  'Multi-Satuan',
+                  'Real-Time Stok',
+                ];
               }
-              if (profileCat.includes('f&b') || profileCat.includes('restoran') || profileCat.includes('cafe') || profileCat.includes('kuliner')) {
-                return 'fnb';
-              }
-              if (profileCat.includes('farmasi') || profileCat.includes('apotek') || profileCat.includes('pharmacy') || profileCat.includes('pet') || profileCat.includes('hewan')) {
-                return 'pharmacy';
-              }
-              if (profileCat.includes('fashion') || profileCat.includes('butik') || profileCat.includes('busana') || profileCat.includes('apparel')) {
-                return 'fashion';
-              }
-              if (profileCat.includes('elektronik') || profileCat.includes('gadget') || profileCat.includes('komputer') || profileCat.includes('electronics')) {
-                return 'electronics';
-              }
-              if (profileCat.includes('bengkel') || profileCat.includes('otomotif') || profileCat.includes('automotive') || profileCat.includes('workshop')) {
-                return 'workshop';
-              }
-              if (profileCat.includes('bangunan') || profileCat.includes('material') || profileCat.includes('depo') || profileCat.includes('building') || profileCat.includes('hardware')) {
-                return 'building';
-              }
-              if (profileCat.includes('salon') || profileCat.includes('barber') || profileCat.includes('grooming')) {
-                return 'salon';
-              }
-              if (profileCat.includes('modern retail') || profileCat.includes('supermarket') || profileCat.includes('minimarket') || profileCat.includes('retail') || profileCat.includes('ritel') || profileCat.includes('grosir')) {
-                return 'retail';
-              }
-              return 'ALL'; // Fallback
-            })();
 
-            // 1. Ambil batas kuota kasir aktif dari Profil Bisnis (Super Admin & Tombol Tambah Terminal)
-            const maxUnits = Math.max(1, Math.min(10, businessProfile?.posUnitCount ?? (allowedIndustry === 'ALL' ? 8 : 1)));
+              const stationShift = getOpenShiftForStation(item.stationCode);
+              const isShiftOpen = Boolean(stationShift && stationShift.status === 'OPEN');
 
-            // 2. Kloning Industri Toko (Bukan Urutan Modul):
-            // Jika toko bertipe Modern Retail (atau industri spesifik lainnya), semua kartu kasir
-            // (KASIR 01, KASIR 02, dst.) dikloning menggunakan tipe industri toko tersebut,
-            // tanpa pernah menampilkan industri lain (seperti F&B).
-            type DisplayedTerminalItem = {
-              terminal: Terminal;
-              theme: PosTerminalCardTheme;
-            };
-
-            const displayedItems: DisplayedTerminalItem[] = (() => {
-              const isHybridMode =
-                businessProfile?.cashierArchitecture === 'HYBRID_FRONT_BACK' ||
-                businessProfile?.cashierArchitecture === 'HYBRID_FRONT_BACKEND';
-
-              if (allowedIndustry === 'ALL') {
-                return terminals.slice(0, maxUnits).map((rawTerm, idx) => {
-                  const theme = POS_TERMINAL_CARD_THEMES[rawTerm.id] || {
-                    emoji: '🛒',
-                    icon: ShoppingCart,
-                    iconColor: 'text-cyan-600 dark:text-cyan-400',
-                    cardTitleId: 'JacS Kasir',
-                    cardTitleEn: 'Cashier JacS',
-                    subtitle: '(retail & wholesaler)',
-                    businessModel: rawTerm.businessModel || 'Retail & Wholesaler Modern',
-                    descId: 'Kasir ritel modern, toko kelontong, minimarket & grosir.',
-                    descEn: 'Modern retail checkout, grocery store & wholesale.',
-                    borderClass: 'border-cyan-500/40 hover:border-cyan-400',
-                    buttonColor: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950',
-                  };
-
-                  const cfg = businessProfile?.terminalConfigs?.find((c) => c.id === rawTerm.id);
-                  const effectiveRole = cfg?.role || rawTerm.role || (isHybridMode && idx === 1 ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY');
-
-                  return {
-                    terminal: {
-                      ...rawTerm,
-                      businessModel: theme.businessModel,
-                      location: theme.businessModel,
-                      role: effectiveRole,
-                      terminalType: effectiveRole === 'HYBRID_BACKEND' ? 'BACK_END' : 'FRONT_END',
-                    },
-                    theme,
-                  };
-                });
-              }
-
-              // Industri Spesifik Toko: Kloning template industri toko ke seluruh unit kasir aktif
-              const tpl = INDUSTRY_CLONE_TEMPLATES[allowedIndustry] || INDUSTRY_CLONE_TEMPLATES.retail;
-
-              return Array.from({ length: maxUnits }).map((_, idx) => {
-                const slotNum = idx + 1;
-                const numStr = String(slotNum).padStart(2, '0');
-                const termId = `T-${numStr}`;
-                const termCode = `POS-${numStr}`;
-                const termName = `KASIR ${numStr}`;
-
-                // Pertahankan status lock atau atribut runtime jika ada terminal yang tersimpan
-                const existing = terminals.find((t) => t.id === termId) || terminals[idx];
-                const cfg = businessProfile?.terminalConfigs?.find((c) => c.id === termId);
-                const effectiveRole = cfg?.role || existing?.role || (isHybridMode && idx === 1 ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY');
-
-                const clonedTerminal: Terminal = {
-                  id: termId,
-                  name: termName,
-                  code: termCode,
-                  colorHex: tpl.colorHex,
-                  neonBorderClass: tpl.neonBorderClass,
-                  neonBgClass: tpl.neonBgClass,
-                  neonTextClass: tpl.neonTextClass,
-                  location: tpl.location,
-                  isActive: existing ? existing.isActive : true,
-                  activeOrdersToday: existing ? existing.activeOrdersToday : 0,
-                  businessModel: tpl.businessModel,
-                  businessType: tpl.businessModel,
-                  subLabel: 'Data Master',
-                  modelType: tpl.modelType,
-                  isLocked: existing !== undefined ? Boolean(existing.isLocked) : true,
-                  allowAllCategories: existing ? existing.allowAllCategories : false,
-                  terminalType: effectiveRole === 'HYBRID_BACKEND' ? 'BACK_END' : 'FRONT_END',
-                  role: effectiveRole,
-                };
-
-                const cardTheme: PosTerminalCardTheme = {
-                  emoji: tpl.emoji,
-                  icon: tpl.icon,
-                  iconColor: tpl.iconColor,
-                  cardTitleId: tpl.cardTitleId,
-                  cardTitleEn: tpl.cardTitleEn,
-                  subtitle: tpl.subtitle,
-                  businessModel: tpl.businessModel,
-                  descId: tpl.descId,
-                  descEn: tpl.descEn,
-                  borderClass: tpl.borderClass,
-                  buttonColor: tpl.buttonColor,
-                };
-
-                return {
-                  terminal: clonedTerminal,
-                  theme: cardTheme,
-                };
-              });
-            })();
-
-            // 3. Susun container adaptif sesuai jumlah kasir aktif (1, 2, 3, 4+)
-            const isSingle = displayedItems.length === 1;
-            const isDouble = displayedItems.length === 2;
-
-            const containerClass =
-              isSingle
-                ? 'w-full max-w-xl mx-auto py-8'
-                : isDouble
-                ? 'grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl mx-auto py-4'
-                : displayedItems.length === 3
-                ? 'grid grid-cols-1 md:grid-cols-3 gap-5 w-full max-w-6xl mx-auto py-2'
-                : displayedItems.length === 4
-                ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-6xl mx-auto py-2'
-                : 'grid grid-cols-2 md:grid-cols-4 gap-3.5 w-full max-w-6xl mx-auto py-2';
-
-            return (
-              <div className={containerClass}>
-                {displayedItems.map(({ terminal: term, theme }, tIdx) => {
-                  // Status Kunci Terminal: Konsisten membaca dari AppContext / localStorage
-                  const isLocked = Boolean(term.isLocked);
-                  const isSelected = activeTerminal.id === term.id;
-                  const cardTitle = language === 'EN' ? theme.cardTitleEn : theme.cardTitleId;
-                  const cardDesc = language === 'EN' ? theme.descEn : theme.descId;
-                  const isHybridUnit = term.role === 'HYBRID_BACKEND';
-
-                  // Tentukan warna aksen per slot kasir: KASIR 01 = Cyan, KASIR 02 = Amber, KASIR 03 = Emerald, KASIR 04 = Purple
-                  const match = term.id.match(/\d+/);
-                  const slotIndex = match ? Math.max(0, parseInt(match[0], 10) - 1) : tIdx;
-                  const accent = CASHIER_SLOT_ACCENTS[slotIndex % CASHIER_SLOT_ACCENTS.length];
-
-                  // Styling proporsional adaptif (1 kartu besar, 2 kartu seimbang, 3-4 kartu rapi)
-                  const cardPaddingClass = isSingle
-                    ? 'p-6 sm:p-8 rounded-3xl min-h-[350px]'
-                    : isDouble
-                    ? 'p-5 sm:p-6 rounded-2xl min-h-[290px]'
-                    : 'p-3.5 sm:p-4 rounded-2xl';
-
-                  const iconBoxClass = isSingle
-                    ? 'w-20 h-20 rounded-2xl mb-4 text-4xl'
-                    : isDouble
-                    ? 'w-16 h-16 rounded-2xl mb-3 text-3xl'
-                    : 'w-12 h-12 rounded-xl mb-2 text-2xl';
-
-                  const titleClass = isSingle
-                    ? 'text-2xl font-black mb-1.5'
-                    : isDouble
-                    ? 'text-lg font-black mb-1'
-                    : 'text-base font-black mb-0.5';
-
-                  const subtitleClass = isSingle
-                    ? 'text-sm font-bold text-slate-600 dark:text-slate-300'
-                    : 'text-xs font-bold text-slate-600 dark:text-slate-300';
-
-                  const buttonClass = isSingle
-                    ? 'w-full mt-6 py-3 px-6 rounded-xl text-sm font-black'
-                    : isDouble
-                    ? 'w-full mt-4 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold'
-                    : 'w-full mt-2 py-1.5 px-3 rounded-lg text-[11px] font-bold';
-
-                  return (
-                    <div
-                      key={`term-${term.id}-${tIdx}`}
-                      id={`card-terminal-${term.code.toLowerCase()}`}
-                      onMouseEnter={() => setHoveredTerminalId(term.id)}
-                      onMouseLeave={() => setHoveredTerminalId(null)}
-                      onClick={() => {
-                        handleTerminalCardClick(term);
-                      }}
-                      className={`relative border-2 ${cardPaddingClass} flex flex-col justify-between h-full select-none cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-2xl ${
-                        isLight ? accent.bgClassLight : accent.bgClassDark
-                      } ${accent.borderClass} ${accent.glowClass} ${isSelected ? accent.ringClass : ''}`}
-                    >
-                      {/* Konten Atas: Baris Status & Terminal Code */}
-                      <div>
-                        <div className="flex items-center justify-between w-full mb-3 gap-1.5 flex-wrap">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={`font-black ${isSingle ? 'text-sm px-4 py-1.5' : 'text-xs px-3 py-1'} rounded-full border font-mono ${accent.badgeBg} ${accent.badgeText} ${accent.badgeBorder}`}>
-                              {term.name}
-                            </span>
-                            {isHybridUnit && (
-                              <span
-                                className={`${isSingle ? 'text-xs px-2.5 py-1' : 'text-[10px] px-2 py-0.5'} font-black rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 font-mono tracking-tight shadow-xs`}
-                                title="Kasir Front-End + Hak Akses Back-End Admin/ERP"
-                              >
-                                HYBRID BACK-END
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {isLocked ? (
-                              <span className={`text-amber-900 dark:text-amber-200 bg-amber-100 dark:bg-amber-950/60 border border-amber-400 dark:border-amber-600 font-bold ${isSingle ? 'text-xs px-3.5 py-1.5' : 'text-xs px-3 py-1'} rounded-full flex items-center gap-1.5 font-mono`}>
-                                <Lock className={`${isSingle ? 'w-3.5 h-3.5' : 'w-3 h-3'} text-amber-600 dark:text-amber-400`} />
-                                {language === 'ID' ? 'TERKUNCI' : 'LOCKED'}
-                              </span>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                <span className={`text-emerald-900 dark:text-emerald-200 bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-400 dark:border-emerald-600 font-bold ${isSingle ? 'text-xs px-3.5 py-1.5' : 'text-xs px-3 py-1'} rounded-full flex items-center gap-1.5 font-mono`}>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  ONLINE
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleTerminalLock(term.id, true);
-                                    showToast(
-                                      language === 'ID'
-                                        ? `Terminal ${term.name} telah dikunci`
-                                        : `Terminal ${term.name} is locked`
-                                    );
-                                  }}
-                                  className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition cursor-pointer"
-                                  title="Kunci Terminal ini"
-                                >
-                                  <Unlock className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Wadah Ikon Solid & Kontras Tegas Sesuai Aksen Kasir */}
-                        <div className={`${iconBoxClass} ${isLight ? accent.iconBgLight : accent.iconBgDark} border-2 ${accent.iconBorder} shadow-sm flex items-center justify-center mx-auto`}>
-                          <span
-                            className={`font-black select-none ${accent.iconColor}`}
-                            role="img"
-                            aria-label={cardTitle}
-                          >
-                            {theme.emoji}
-                          </span>
-                        </div>
-
-                        {/* Tipografi & Judul Kartu: Cashier JacS + Sub-judul peruntukan */}
-                        <div className="text-center px-1 mb-1">
-                          <h3 className={`${titleClass} text-slate-950 dark:text-white text-center tracking-tight`}>
-                            {cardTitle}
-                          </h3>
-                          <p className={`${subtitleClass} text-center lowercase tracking-wide mt-0.5`}>
-                            {theme.subtitle}
-                          </p>
-                          <div className="my-2 py-1.5 px-2 rounded-xl bg-slate-100 dark:bg-[#0d1117] border border-slate-200 dark:border-slate-800 text-center font-mono text-[11px] text-slate-700 dark:text-slate-300 space-y-0.5">
-                            <div className="font-bold flex items-center justify-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                              <span>Status: Standby</span>
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                              Total Sesi: Rp 0 / 0 Transaksi
-                            </div>
-                          </div>
-                          {isSingle ? (
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
-                              {cardDesc}
-                            </p>
-                          ) : (
-                            <p className="hidden">
-                              {cardDesc}
-                            </p>
-                          )}
-                        </div>
+              return (
+                <div
+                  key={item.stationCode}
+                  onMouseEnter={() => setHoveredTerminalId(item.stationCode)}
+                  onMouseLeave={() => setHoveredTerminalId(null)}
+                  onClick={() => handleTerminalCardClick(termObj)}
+                  className={`group relative border rounded-2xl select-none transition-all duration-300 ${
+                    isLockedToOtherStation
+                      ? 'opacity-65 cursor-not-allowed'
+                      : 'cursor-pointer hover:-translate-y-0.5'
+                  } ${
+                    isSplitWideLayout
+                      ? 'w-full max-w-5xl mx-auto p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8'
+                      : 'p-5 flex flex-col justify-between gap-4'
+                  } ${
+                    isLight
+                      ? isThisDeviceStation
+                        ? 'bg-emerald-50/40 border-emerald-500 shadow-[0_0_24px_rgba(16,185,129,0.18)]'
+                        : isFocused
+                        ? 'bg-white border-cyan-500 shadow-[0_0_28px_rgba(6,182,212,0.24)]'
+                        : 'bg-white border-cyan-500/45 shadow-[0_4px_20px_rgba(6,182,212,0.10)] hover:border-cyan-500 hover:shadow-[0_0_28px_rgba(6,182,212,0.24)]'
+                      : isThisDeviceStation
+                      ? 'bg-slate-900/95 border-emerald-400/75 shadow-[0_0_28px_rgba(16,185,129,0.20)]'
+                      : isFocused
+                      ? 'bg-slate-900/95 border-cyan-400/70 shadow-[0_0_32px_rgba(34,211,238,0.20)]'
+                      : 'bg-slate-900/95 border-cyan-500/30 shadow-[0_6px_24px_rgba(6,182,212,0.07)] hover:border-cyan-400/65 hover:shadow-[0_0_32px_rgba(34,211,238,0.18)]'
+                  }`}
+                >
+                  {/* SISI KIRI: Identitas Terminal, Sub-Judul Deskriptif & 3 Badge Fitur Aktif */}
+                  <div className="flex-1 min-w-0 space-y-4">
+                    {/* Baris Atas: Kapsul Kode Loket POS-XX, Jenis Usaha, & Status Binding */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`text-xs leading-4 px-2.5 py-1 rounded-lg border font-mono font-bold tracking-wider transition-colors duration-200 ${
+                            isThisDeviceStation
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                              : isFocused
+                              ? isLight
+                                ? 'bg-cyan-50 text-cyan-700 border-cyan-400/80'
+                                : 'bg-cyan-500/15 text-cyan-300 border-cyan-400/60'
+                              : isLight
+                              ? 'bg-slate-100 text-slate-700 border-slate-300'
+                              : 'bg-slate-800/90 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          {item.stationCode}
+                        </span>
+                        <span
+                          className={`text-[11px] leading-4 px-2 py-1 rounded-lg border font-mono font-medium ${
+                            isLight
+                              ? 'bg-slate-50 text-slate-600 border-slate-200'
+                              : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
+                          }`}
+                        >
+                          INV-{item.receiptPrefixTag}-...
+                        </span>
+                        <span
+                          className={`text-[11px] leading-4 px-2.5 py-1 rounded-lg border font-medium ${
+                            isLight
+                              ? 'bg-slate-50 text-slate-700 border-slate-200'
+                              : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
+                          }`}
+                        >
+                          {activeBusinessModelDef.label}
+                        </span>
                       </div>
 
-                      {/* Tombol Buka Terminal Sesuai Warna Aksen Unik */}
-                      <div className="mt-auto">
-                        {isLocked ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTerminalCardClick(term);
-                            }}
-                            className={`${buttonClass} transition-all text-center flex items-center justify-center gap-2 ${accent.buttonColor} cursor-pointer active:scale-95 shadow-md opacity-90 hover:opacity-100`}
-                          >
-                            <Unlock className={isSingle ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
-                            <span>{language === 'ID' ? 'Buka PIN →' : 'Unlock PIN →'}</span>
-                          </button>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {isThisDeviceStation && (
+                          <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35 font-mono">
+                            PC INI
+                          </span>
+                        )}
+                        {item.isHybrid && (
+                          <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-mono">
+                            HYBRID
+                          </span>
+                        )}
+                        {stationShift && stationShift.status === 'OPEN' && stationShift.isPaused ? (
+                          <span className="text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/35 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                            <Coffee className="w-3 h-3" />
+                            ISTIRAHAT
+                          </span>
+                        ) : stationShift && stationShift.status === 'OPEN' ? (
+                          <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            ONLINE
+                          </span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTerminalCardClick(term);
-                            }}
-                            className={`${buttonClass} transition-all text-center flex items-center justify-center gap-2 ${accent.buttonColor} cursor-pointer active:scale-95 shadow-md`}
-                          >
-                            <span>{language === 'ID' ? (!activeUser ? 'Buka PIN →' : 'Buka Terminal →') : (!activeUser ? 'Unlock PIN →' : 'Open Terminal →')}</span>
-                          </button>
+                          <span className="text-slate-600 dark:text-slate-300 bg-slate-500/10 border border-slate-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                            <Clock className="w-3 h-3" />
+                            BELUM BUKA SHIFT
+                          </span>
                         )}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
+
+                    {/* Ikon Besar + Judul Terminal + Sub-judul Deskriptif */}
+                    <div className="flex items-start gap-4">
+                      <div
+                        className={`w-14 h-14 rounded-2xl shrink-0 border flex items-center justify-center transition-all duration-300 ${
+                          isFocused
+                            ? isLight
+                              ? 'bg-cyan-50 border-cyan-400/80 shadow-[0_0_18px_rgba(34,211,238,0.28)]'
+                              : 'bg-cyan-500/15 border-cyan-400/60 shadow-[0_0_20px_rgba(34,211,238,0.28)]'
+                            : isLight
+                            ? 'bg-slate-100 border-slate-200'
+                            : 'bg-slate-800/80 border-slate-700/80'
+                        }`}
+                      >
+                        <span className="text-2xl select-none transition-transform duration-300 group-hover:scale-110" role="img">
+                          {item.emoji}
+                        </span>
+                      </div>
+
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <h3
+                          className={`font-semibold tracking-tight transition-colors duration-200 ${
+                            isSplitWideLayout ? 'text-xl sm:text-2xl leading-tight' : 'text-lg leading-6'
+                          } ${
+                            isLight
+                              ? isFocused
+                                ? 'text-cyan-950'
+                                : 'text-slate-900'
+                              : isFocused
+                              ? 'text-white'
+                              : 'text-slate-100'
+                          }`}
+                        >
+                          {item.posName}
+                        </h3>
+                        <p
+                          className={`text-xs sm:text-sm leading-relaxed ${
+                            isLight ? 'text-slate-600' : 'text-slate-300/90'
+                          }`}
+                        >
+                          {descriptiveSubtitle}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 3 Badge Fitur Aktif */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {featureBadges.map((badgeLabel, badgeIdx) => {
+                        const BadgeIcon =
+                          badgeIdx === 0 ? Barcode : badgeIdx === 1 ? Layers : Boxes;
+                        return (
+                          <span
+                            key={badgeLabel}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-medium transition-colors ${
+                              isLight
+                                ? 'bg-cyan-50/80 text-cyan-800 border-cyan-200 group-hover:border-cyan-300'
+                                : 'bg-cyan-500/10 text-cyan-200 border-cyan-500/25 group-hover:border-cyan-400/45'
+                            }`}
+                          >
+                            <BadgeIcon className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                            <span>{badgeLabel}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* SISI KANAN: Panel Metrik Mini + Tombol Buka Terminal Besar & Menonjol */}
+                  <div
+                    className={`shrink-0 flex flex-col justify-between gap-3.5 ${
+                      isSplitWideLayout
+                        ? 'w-full lg:w-[340px] lg:border-l lg:pl-7 border-slate-200 dark:border-slate-800'
+                        : 'w-full border-t pt-3.5 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    {/* Panel Metrik Mini */}
+                    <div
+                      className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
+                        isLight
+                          ? 'bg-slate-50/90 border-slate-200/90'
+                          : 'bg-slate-950/75 border-slate-800/90'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                          <Clock className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                          <span>Status Shift</span>
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold border ${
+                            isShiftOpen && stationShift?.isPaused
+                              ? isLight
+                                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                              : isShiftOpen
+                              ? isLight
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                              : isLight
+                              ? 'bg-slate-100 text-slate-700 border-slate-300'
+                              : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              isShiftOpen && stationShift?.isPaused
+                                ? 'bg-amber-500'
+                                : isShiftOpen
+                                ? 'bg-emerald-500 animate-pulse'
+                                : 'bg-slate-400'
+                            }`}
+                          />
+                          {isShiftOpen && stationShift?.isPaused
+                            ? `Istirahat (${stationShift?.cashierName || 'Kasir'})`
+                            : isShiftOpen
+                            ? `Aktif (${stationShift?.cashierName || 'Kasir'})`
+                            : 'Siap Buka Shift'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                          <Package className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                          <span>Katalog SKU Aktif</span>
+                        </span>
+                        <span className={`font-mono font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          {skuCount.toLocaleString('id-ID')} SKU
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-800/80">
+                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                          <Keyboard className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                          <span>Pintasan Cepat</span>
+                        </span>
+                        <span
+                          className={`font-mono text-[11px] font-medium ${
+                            isLight ? 'text-cyan-700' : 'text-cyan-300'
+                          }`}
+                        >
+                          {quickShortcuts}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tombol Buka Terminal + Pintasan Istirahat & Ganti Loket */}
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        disabled={isLockedToOtherStation}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTerminalCardClick(termObj);
+                        }}
+                        className={`w-full py-3.5 px-6 rounded-xl text-sm leading-5 font-semibold transition-all duration-200 text-center flex items-center justify-center gap-2 ${
+                          isLockedToOtherStation
+                            ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : isFocused
+                            ? 'bg-gradient-to-r from-cyan-400 to-sky-400 text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
+                            : 'bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 shadow-[0_0_16px_rgba(6,182,212,0.32)] group-hover:shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
+                        }`}
+                      >
+                        <span>
+                          {language === 'ID'
+                            ? `Buka ${item.stationCode} →`
+                            : `Open ${item.stationCode} →`}
+                        </span>
+                      </button>
+
+                      {(isShiftOpen || visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                        <div className="flex items-center gap-2">
+                          {isShiftOpen && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleStationBreak(item.stationCode);
+                              }}
+                              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                                stationShift?.isPaused
+                                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400'
+                                  : isLight
+                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/35'
+                              }`}
+                            >
+                              {stationShift?.isPaused ? (
+                                <>
+                                  <Play className="w-3.5 h-3.5" />
+                                  <span>Lanjut Online</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Coffee className="w-3.5 h-3.5" />
+                                  <span>Istirahat</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPosMgmtPinPrompt({ type: 'SWITCH_STATION' });
+                              }}
+                              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                                isLight
+                                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                  : 'bg-slate-800/80 hover:bg-slate-800 text-slate-200 border-slate-700'
+                              }`}
+                            >
+                              <ArrowLeftRight className="w-3.5 h-3.5 text-cyan-500" />
+                              <span>Ganti Loket PC</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
+          );
+        })()
       ) : (
         /* ========================================================================= */
         /* 2. ARSITEKTUR LAYAR KERJA KASIR (ZERO SCROLL VIEWPORT 1 LAYAR PENUH)      */
         /* ========================================================================= */
         <div className="h-full flex flex-col overflow-hidden w-full">
-          {/* ===================================================================== */}
-          {/* BILAH ATAS: ULTRA-TIPIS SEJAJAR 1 BARIS HORIZONTAL (TINGGI MAX 48PX) */}
-          {/* ===================================================================== */}
+          {/* BILAH ATAS */}
           <div
             id="bar-pos-top-control"
-            className={`h-12 max-h-12 flex-shrink-0 mb-1.5 px-2.5 sm:px-3 rounded-xl border flex items-center justify-between gap-2 shadow-xs transition-colors select-none overflow-x-auto no-scrollbar ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            className={`min-h-11 flex-shrink-0 mb-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border flex flex-wrap items-center justify-between gap-1.5 transition-all duration-200 select-none ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] text-slate-900'
+                : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-white'
             }`}
           >
-            {/* SISI KIRI: TOMBOL KELUAR, STATUS TERMINAL, INPUT BARCODE [F2], TOMBOL [F3 CARI], & TIER MINI */}
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Tombol Navigasi Kembali di Header Kasir (Pojok Paling Kiri) */}
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
               <button
                 id="btn-back-to-terminals-top-left"
                 type="button"
                 onClick={handleCashierLogout}
-                className={`px-3 py-1.5 rounded-xl border font-black text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-sm active:scale-95 ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800 hover:text-slate-950'
-                    : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-gray-200 hover:text-white'
+                title={language === 'ID' ? 'Kembali ke Lobby Terminal' : 'Back to Terminal Lobby'}
+                className={`px-2 py-1 rounded-lg border font-medium text-xs leading-4 flex items-center gap-1 transition-all duration-200 cursor-pointer shrink-0 shadow-sm active:scale-[0.99] ${
+                  isLight ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-gray-200'
                 }`}
-                title="Keluar / Kembali ke Terminal Kasir"
               >
-                <ArrowLeft className="w-3.5 h-3.5 text-[#0052FF] dark:text-[#58a6ff]" />
-                <span>{language === 'ID' ? 'Keluar / Ganti Kasir' : 'Exit / Switch Register'}</span>
+                <ArrowLeft className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                <span className="hidden sm:inline">
+                  {language === 'ID' ? 'Lobby Terminal' : 'Terminal Lobby'}
+                </span>
               </button>
 
-              {/* Badge Status Terminal & Online / Offline Mode */}
-              <div className="flex items-center gap-1.5 shrink-0 pr-1">
+              <div className="flex items-center gap-1 shrink-0 pr-0.5">
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/35">
+                  {activeStationCode}
+                </span>
                 {isOnline ? (
                   <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" title="Scanner & Kasir Cloud Online" />
-                    <span className="font-bold text-xs font-mono text-slate-800 dark:text-white hidden sm:inline">
-                      {activeTerminal.name}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                      ONLINE (Cloud Connected)
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-normal text-xs font-mono hidden xl:inline max-w-[85px] truncate">{activeTerminal?.name}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      ONLINE
                     </span>
                     {offlineQueue.length > 0 && (
                       <button
                         type="button"
-                        id="btn-pos-manual-sync-register-bar"
                         onClick={async () => {
-                          const res = await syncOfflineTransactions();
-                          showToast(res.message);
+                          await syncOfflineTransactions();
                         }}
-                        className="px-2 py-0.5 rounded text-[9px] font-mono font-black bg-amber-500 hover:bg-amber-400 text-slate-900 transition cursor-pointer flex items-center gap-1 shadow-xs"
-                        title="Kirim dan sinkronkan transaksi offline sekarang"
+                        className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all duration-200 cursor-pointer flex items-center gap-1 active:scale-[0.99]"
                       >
                         <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                        <span>Sinkronkan Sekarang (Sync Cloud) ({offlineQueue.length})</span>
+                        <span>Sync ({offlineQueue.length})</span>
                       </button>
                     )}
                   </>
                 ) : (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shadow-[0_0_8px_rgba(245,158,11,0.8)]" title="Mode Offline Aktif" />
-                    <span className="font-bold text-xs font-mono text-amber-500 dark:text-amber-300 hidden sm:inline">
-                      {activeTerminal.name}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
-                      <WifiOff className="w-3 h-3 text-amber-400" />
-                      OFFLINE MODE (Local Storage Active)
-                    </span>
-                    {offlineQueue.length > 0 && (
-                      <div className="flex items-center gap-1">
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-amber-500 text-slate-950">
-                          [ {offlineQueue.length} Transaksi Tertunda ]
-                        </span>
-                        <button
-                          type="button"
-                          id="btn-pos-manual-sync-register-bar-offline"
-                          onClick={async () => {
-                            const res = await syncOfflineTransactions();
-                            showToast(res.message);
-                          }}
-                          className="px-2 py-0.5 rounded text-[9px] font-mono font-black bg-amber-400 hover:bg-amber-300 text-slate-950 transition cursor-pointer flex items-center gap-1 shadow-xs"
-                          title="Kirim dan sinkronkan transaksi offline sekarang"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                          <span>Sinkronkan Sekarang (Sync Cloud)</span>
-                        </button>
-                      </div>
-                    )}
-                  </>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center gap-1">
+                    <WifiOff className="w-3 h-3 text-amber-400" />
+                    OFFLINE
+                  </span>
                 )}
-                <span className="text-[10px] text-gray-400 font-mono hidden xl:inline">• {language === 'EN' ? 'Master Data' : 'Data Master'}</span>
               </div>
 
-              {/* Akses Menu ERP / Backend Khusus KASIR 02 (Hybrid Back-End) */}
-              {(activeTerminal.role === 'HYBRID_BACKEND' ||
-                activeTerminal.id === 'T-02' ||
-                activeTerminal.code === 'POS-02' ||
-                activeTerminal.code === 'KASIR-02' ||
-                (businessProfile?.cashierArchitecture === 'HYBRID_FRONT_BACK' && activeTerminal.id === 'T-02')) && (
-                <div className="relative shrink-0" ref={hybridMenuRef}>
-                  <button
-                    id="btn-pos-hybrid-erp-access"
-                    type="button"
-                    onClick={() => setIsHybridMenuOpen(!isHybridMenuOpen)}
-                    className="px-2.5 py-1.5 rounded-xl border border-amber-500/80 bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.4)] cursor-pointer active:scale-95 transition"
-                    title="Akses Back-End / Menu ERP dengan Verifikasi PIN (Khusus Terminal Kasir 02 Hybrid)"
+              <div className="relative shrink-0" ref={hybridMenuRef}>
+                <button
+                  id="btn-pos-hybrid-erp-access"
+                  type="button"
+                  onClick={() => setIsHybridMenuOpen(!isHybridMenuOpen)}
+                  className="px-2 py-1 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-medium text-xs leading-4 flex items-center gap-1 shadow-sm cursor-pointer transition-all duration-200 active:scale-[0.99]"
+                >
+                  <span>ERP</span>
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+
+                {isHybridMenuOpen && (
+                  <div
+                    className={`absolute left-0 top-full mt-2 z-50 w-64 rounded-xl border-2 border-amber-500/50 shadow-2xl p-2 ${
+                      isLight ? 'bg-white text-slate-900' : 'bg-slate-900 text-white'
+                    }`}
                   >
-                    <KeyRound className="w-3.5 h-3.5 text-slate-950" />
-                    <span className="font-extrabold tracking-tight">Menu Backend / ERP 🔐</span>
-                    <ChevronDown className={`w-3 h-3 text-slate-950 transition-transform duration-200 ${isHybridMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {/* Dropdown Menu Akses ERP / Backend */}
-                  {isHybridMenuOpen && (
-                    <div
-                      className={`absolute left-0 top-full mt-2 z-50 w-72 sm:w-80 rounded-2xl border-2 border-amber-500/50 shadow-2xl p-2.5 animate-in fade-in zoom-in-95 ${
-                        isLight ? 'bg-white text-slate-900 shadow-amber-500/10' : 'bg-[#161b22] text-white shadow-black/80'
-                      }`}
-                    >
-                      <div className="px-2 py-1.5 border-b border-amber-500/30 mb-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-black uppercase font-mono tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                            <Shield className="w-3.5 h-3.5" />
-                            KASIR 02: AKSES HYBRID
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30">
-                            PIN PROTECTED
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
-                          Terminal kasir memiliki otorisasi ganda. Membuka modul ERP &amp; Administrasi memerlukan otentikasi PIN.
-                        </p>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-1 text-xs">
-                        {([
-                          { id: 'dashboard' as ActiveNavModule, label: 'Dashboard Eksekutif', icon: LayoutDashboard, desc: 'Laporan omzet, laba & performa penjualan' },
-                          { id: 'warehouse' as ActiveNavModule, label: 'Gudang & Inventori', icon: Boxes, desc: 'Manajemen stok, mutasi gudang & opname' },
-                          { id: 'finance' as ActiveNavModule, label: 'Keuangan & Akuntansi', icon: Coins, desc: 'Buku kas, jurnal kasir & laporan keuangan' },
-                          { id: 'purchasing' as ActiveNavModule, label: 'Pengadaan & Purchasing', icon: ShoppingCart, desc: 'Purchase Order, penerimaan barang & supplier' },
-                          { id: 'hr' as ActiveNavModule, label: 'SDM & Personalia', icon: Users, desc: 'Absensi karyawan, shift kerja & payroll' },
-                          { id: 'master-data' as ActiveNavModule, label: 'Master Data & Katalog', icon: Package, desc: 'Katalog SKU produk, barcode & harga grosir' },
-                          { id: 'admin' as ActiveNavModule, label: 'Super Admin Console', icon: Building2, desc: 'Pengaturan entitas bisnis & arsitektur kasir' },
-                        ] as const).map((mod) => {
-                          const ModIcon = mod.icon;
-                          return (
-                            <button
-                              key={mod.id}
-                              type="button"
-                              onClick={() => handleRequestHybridNavigation(mod)}
-                              className={`w-full text-left p-2 rounded-xl border flex items-center gap-2.5 transition cursor-pointer ${
-                                isLight
-                                  ? 'hover:bg-amber-50/80 border-slate-200 hover:border-amber-400 text-slate-800'
-                                  : 'hover:bg-[#21262d] border-[#30363d] hover:border-amber-500/50 text-slate-200'
-                              }`}
-                            >
-                              <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                                <ModIcon className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="font-bold text-xs flex items-center justify-between">
-                                  <span>{mod.label}</span>
-                                  <ArrowRight className="w-3 h-3 opacity-60" />
-                                </div>
-                                <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                                  {mod.desc}
-                                </div>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Opsi Tampilkan Sidebar Menu ERP (Side-by-side) */}
-                      <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => handleRequestHybridNavigation({ id: 'admin' as ActiveNavModule, label: 'Navigasi Sidebar Menu ERP' })}
-                          className="w-full py-1.5 px-2.5 rounded-xl font-bold text-[11px] bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white border border-slate-300 dark:border-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                        >
-                          <span>Tampilkan Sidebar Menu ERP</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
-                      </div>
+                    <div className="grid grid-cols-1 gap-1 text-xs leading-5">
+                      {([
+                        { id: 'executive' as ActiveNavModule, label: 'Eksekutif & Manajerial', icon: LayoutDashboard },
+                        { id: 'warehouse' as ActiveNavModule, label: 'Gudang & Inventori', icon: Boxes },
+                        { id: 'finance' as ActiveNavModule, label: 'Keuangan & Akuntansi', icon: Coins },
+                        { id: 'purchasing' as ActiveNavModule, label: 'Pengadaan & Purchasing', icon: ShoppingCart },
+                        { id: 'hr' as ActiveNavModule, label: 'SDM & Personalia', icon: Users },
+                        { id: 'master-data' as ActiveNavModule, label: 'Data Master', icon: Package },
+                      ] as const).map((mod) => {
+                        const ModIcon = mod.icon;
+                        return (
+                          <button
+                            key={mod.id}
+                            type="button"
+                            onClick={() => handleDirectHybridNavigation(mod)}
+                            className={`w-full text-left p-1.5 rounded-lg border flex items-center gap-2 transition cursor-pointer active:scale-[0.99] ${
+                              isLight ? 'hover:bg-amber-50 border-slate-200' : 'hover:bg-slate-800 border-slate-800'
+                            }`}
+                          >
+                            <ModIcon className="w-3.5 h-3.5 text-amber-500" />
+                            <span className="font-normal text-xs leading-5 flex-1">{mod.label}</span>
+                            <ArrowRight className="w-3 h-3 opacity-60" />
+                          </button>
+                        );
+                      })}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
 
-              {/* Input Scan Barcode [F2] (Lebar Wajar w-56 sm:w-64) */}
-              <form onSubmit={handleBarcodeSubmit} className="relative w-52 sm:w-64 shrink-0">
-                <Barcode className="w-3.5 h-3.5 text-[#0052FF] dark:text-[#58a6ff] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              {/* Input Scan Barcode [F2] */}
+              <form onSubmit={handleBarcodeSubmit} className="relative w-36 sm:w-44 xl:w-52 shrink-0">
+                <Barcode className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   ref={barcodeInputRef}
                   type="text"
-                  placeholder={language === 'ID' ? 'Scan Barcode [F2]...' : 'Scan Barcode [F2]...'}
+                  placeholder="Scan Barcode [F2]..."
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !barcodeInput.trim()) {
-                      e.preventDefault();
-                      if (cart.length > 0 && !isFnbTerminal && !isFnbPhotoMenuMode) {
-                        setPaymentMethod('CASH');
-                        focusCashInput();
-                      } else if (!isFnbTerminal && !isFnbPhotoMenuMode) {
-                        showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
-                      }
-                      return;
-                    }
-                    if (e.key === '*' || e.code === 'NumpadMultiply') {
-                      e.preventDefault();
-                      if (cart.length > 0) {
-                        const lastIdx = cart.length - 1;
-                        const inputEl = document.getElementById(`pos-qty-input-${lastIdx}`) as HTMLInputElement | null;
-                        if (inputEl) {
-                          inputEl.focus();
-                          inputEl.select();
-                        }
-                      } else {
-                        showToast(language === 'ID' ? 'Keranjang belanja masih kosong!' : 'Cart is empty!');
-                      }
-                    }
-                  }}
-                  className={`w-full text-xs pl-8 pr-12 py-1.5 rounded-lg outline-none font-medium border transition ${
+                  className={`w-full text-xs leading-4 pl-7 pr-8 py-1 rounded-lg outline-none font-normal border transition ${
                     isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF] focus:bg-white'
-                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500 placeholder:text-slate-400/80 placeholder:italic'
+                      : 'bg-slate-950 border-slate-800 text-white focus:border-cyan-500 placeholder:text-slate-500 placeholder:italic'
                   }`}
                 />
-                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  {barcodeInput && (
-                    <button
-                      type="button"
-                      onClick={() => setBarcodeInput('')}
-                      className="text-gray-400 hover:text-white p-0.5 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                  <span className="px-1 py-0.2 rounded bg-blue-500/15 border border-blue-500/30 text-[#0052FF] dark:text-[#58a6ff] text-[9px] font-mono font-bold">
-                    F2
-                  </span>
-                </div>
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 px-1 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 text-[9px] font-mono font-normal">
+                  F2
+                </span>
               </form>
 
-              {/* Tombol [F3 Cari] */}
               <button
                 type="button"
                 onClick={() => setIsManualSearchOpen(true)}
-                className="px-2.5 py-1.5 bg-[#0052FF] hover:bg-[#0043d1] text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition cursor-pointer shrink-0 active:scale-95"
-                title="Cari Katalog Produk Manual [F3 / F1]"
+                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs leading-4 font-normal flex items-center gap-1 cursor-pointer shrink-0 transition-all duration-200 active:scale-[0.99]"
               >
-                <Search className="w-3.5 h-3.5" />
+                <Search className="w-3 h-3" />
                 <span className="hidden sm:inline">Cari</span>
-                <span className="text-[10px] opacity-80 font-mono">[F3]</span>
+                <span className="text-[10px] opacity-80 font-mono font-normal">[F3]</span>
               </button>
 
-              {/* Toggle Switch 'Semua Kategori' (Buka Seluruh Katalog Multi-Industri) */}
-              <div
-                id="toggle-pos-all-categories"
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs shrink-0 select-none transition ${
-                  showAllCategories
-                    ? isLight
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900 shadow-xs'
-                      : 'bg-indigo-950/60 border-indigo-500/50 text-indigo-300 shadow-xs'
-                    : isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                    : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-gray-400'
-                }`}
-                title={
-                  showAllCategories
-                    ? language === 'ID'
-                      ? 'Mode SEMUA KATEGORI aktif: seluruh katalog produk terbuka. Klik untuk kembali ke filter terminal.'
-                      : 'ALL CATEGORIES active: full catalog unlocked. Click to return to terminal filter.'
-                    : language === 'ID'
-                    ? `Filter kategori aktif: default industri [${activeTerminal.name}]. Klik untuk membuka SEMUA kategori.`
-                    : `Active category filter: default industry [${activeTerminal.name}]. Click to unlock ALL categories.`
-                }
-              >
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showAllCategories}
-                  onClick={() => {
-                    const nextVal = !showAllCategories;
-                    setShowAllCategories(nextVal);
-                    showToast(
-                      nextVal
-                        ? language === 'ID'
-                          ? '🌐 Mode "Semua Kategori" AKTIF: seluruh katalog produk terbuka'
-                          : '🌐 "All Categories" ACTIVE: full product catalog unlocked'
-                        : language === 'ID'
-                        ? `🔒 Filter default industri terminal [${activeTerminal.name}] aktif kembali`
-                        : `🔒 Terminal default industry filter [${activeTerminal.name}] restored`
-                    );
-                  }}
-                  className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                    showAllCategories ? 'bg-indigo-600' : isLight ? 'bg-slate-300' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                      showAllCategories ? 'translate-x-3' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-                <span className="text-[11px] font-bold hidden md:inline">
-                  {language === 'ID' ? 'Semua Kategori' : 'All Categories'}
-                </span>
-                <span
-                  className={`text-[9px] px-1 py-0.2 rounded font-mono font-black uppercase ${
-                    showAllCategories
-                      ? 'bg-indigo-500 text-white'
-                      : isLight
-                      ? 'bg-slate-200 text-slate-600'
-                      : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {showAllCategories ? 'ON' : 'OFF'}
-                </span>
-              </div>
-
-              {/* Tombol Tier [Ecer] [Member] [Grosir] Berdampingan Langsung Tanpa Menindih Kolom Scan - KHUSUS RETAIL & WHOLESALER */}
               {isRetailWholesalerTerminal && (
-                <div
-                  className={`flex items-center p-0.5 rounded-lg border-2 gap-1 text-xs font-semibold shrink-0 ${
-                    isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
-                  }`}
-                >
-                {/* Ecer */}
-                <button
-                  type="button"
-                  onClick={() => handleSelectPriceTier('RETAIL')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-black transition cursor-pointer border ${
-                    selectedPriceTier === 'RETAIL'
-                      ? 'bg-[#0052FF] text-white border-[#0052FF] shadow-xs'
-                      : isLight
-                      ? 'border-slate-300 text-slate-800 hover:bg-slate-200'
-                      : 'border-slate-700 text-slate-300 hover:bg-slate-800'
-                  }`}
-                  title="Tier 1: Harga Ecer / Retail"
-                >
-                  Ecer
-                </button>
-
-                {/* Member */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (allowedTiers.includes('MEMBER')) {
-                      handleSelectPriceTier('MEMBER');
-                    } else {
-                      showToast(
-                        !selectedCustomer
-                          ? 'Terkunci: Input No. HP Member untuk membuka harga Langganan'
-                          : 'Member ini tidak berhak atas harga Langganan'
-                      );
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-black transition flex items-center gap-1 border ${
-                    selectedPriceTier === 'MEMBER'
-                      ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                      : allowedTiers.includes('MEMBER')
-                      ? isLight
-                        ? 'bg-amber-50 text-amber-900 border-amber-400 hover:bg-amber-100 cursor-pointer'
-                        : 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 cursor-pointer'
-                      : isLight
-                      ? 'border-slate-400 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer'
-                      : 'border-slate-600 bg-slate-800/80 text-slate-300 hover:bg-slate-700 cursor-pointer'
-                  }`}
-                  title={
-                    allowedTiers.includes('MEMBER')
-                      ? 'Tier 2: Harga Langganan / Member'
-                      : 'Terkunci: Scan/Input Member terlebih dahulu'
-                  }
-                >
-                  {allowedTiers.includes('MEMBER') ? (
-                    <Sparkles className="w-3 h-3 text-amber-500 dark:text-amber-300" />
-                  ) : (
-                    <Lock className="w-2.5 h-2.5 text-slate-500" />
-                  )}
-                  <span>Member</span>
-                </button>
-
-                {/* Grosir */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (allowedTiers.includes('WHOLESALE')) {
-                      handleSelectPriceTier('WHOLESALE');
-                    } else {
-                      showToast(
-                        !selectedCustomer
-                          ? 'Terkunci: Harga Grosir khusus member pemilik toko terverifikasi'
-                          : 'Member ini tidak memiliki hak harga Grosir / Toko'
-                      );
-                    }
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-black transition flex items-center gap-1 border ${
-                    selectedPriceTier === 'WHOLESALE'
-                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                      : allowedTiers.includes('WHOLESALE')
-                      ? isLight
-                        ? 'bg-emerald-50 text-emerald-900 border-emerald-400 hover:bg-emerald-100 cursor-pointer'
-                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 cursor-pointer'
-                      : isLight
-                      ? 'border-slate-400 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer'
-                      : 'border-slate-600 bg-slate-800/80 text-slate-300 hover:bg-slate-700 cursor-pointer'
-                  }`}
-                  title={
-                    allowedTiers.includes('WHOLESALE')
-                      ? 'Tier 3: Harga Grosir / Partai Besar'
-                      : 'Terkunci: Khusus Member Mitra Toko Terverifikasi'
-                  }
-                >
-                  {allowedTiers.includes('WHOLESALE') ? (
-                    <Layers className="w-3 h-3 text-emerald-500 dark:text-emerald-300" />
-                  ) : (
-                    <Lock className="w-2.5 h-2.5 text-slate-500" />
-                  )}
-                  <span>Grosir</span>
-                </button>
-              </div>
-            )}
-            </div>
-
-            {/* SISI KANAN: INPUT NO. HP MEMBER (KHUSUS RETAIL & WHOLESALER) DAN TOMBOL AKSI FUNGSI */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              {/* Customer Selector / Chip (Tersedia untuk Seluruh Transaksi POS) */}
-              {selectedCustomer ? (
-                <div
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs shrink-0 max-w-[210px] ${
-                    selectedCustomer.has_store
-                      ? isLight
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                        : 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
-                      : isLight
-                      ? 'bg-blue-50 border-blue-200 text-blue-900'
-                      : 'bg-blue-950/40 border-blue-500/40 text-blue-200'
-                  }`}
-                >
-                  <UserCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                  <div className="truncate">
-                    <div className="flex items-center gap-1">
-                      <span className="font-bold text-[11px] truncate leading-tight">
-                        {selectedCustomer.name}
-                      </span>
-                      <span className="text-[9px] px-1 rounded bg-amber-500/20 text-amber-300 font-mono font-bold shrink-0">
-                        {selectedCustomer.points ?? 0} Pts
-                      </span>
-                    </div>
-                    <span className="text-[9px] text-gray-400 font-mono block leading-tight">
-                      {selectedCustomer.store_name ? `${selectedCustomer.store_name} • ` : ''}{selectedCustomer.phone}
-                    </span>
-                  </div>
+                <div className={`flex items-center p-0.5 rounded-lg border gap-0.5 text-xs font-normal shrink-0 ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-950 border-slate-800'}`}>
                   <button
                     type="button"
-                    onClick={handleClearCustomer}
-                    className="p-0.5 rounded hover:bg-rose-500/20 text-gray-400 hover:text-rose-400 transition cursor-pointer ml-0.5 shrink-0"
-                    title="Lepas member (Kembali ke Pelanggan Umum / Walk-in)"
+                    onClick={() => handleSelectPriceTier('RETAIL')}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-normal cursor-pointer transition-all active:scale-[0.99] ${
+                      selectedPriceTier === 'RETAIL' ? 'bg-cyan-600 text-white shadow-xs' : 'text-slate-500'
+                    }`}
                   >
+                    Ecer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => allowedTiers.includes('MEMBER') ? handleSelectPriceTier('MEMBER') : showToast('Input Member terlebih dahulu')}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-normal cursor-pointer flex items-center gap-1 transition-all active:scale-[0.99] ${
+                      selectedPriceTier === 'MEMBER' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500'
+                    }`}
+                  >
+                    {!allowedTiers.includes('MEMBER') && <Lock className="w-2.5 h-2.5" />}
+                    <span>Member</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => allowedTiers.includes('WHOLESALE') ? handleSelectPriceTier('WHOLESALE') : showToast('Khusus Member Toko Terverifikasi')}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-normal cursor-pointer flex items-center gap-1 transition-all active:scale-[0.99] ${
+                      selectedPriceTier === 'WHOLESALE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500'
+                    }`}
+                  >
+                    {!allowedTiers.includes('WHOLESALE') && <Lock className="w-2.5 h-2.5" />}
+                    <span>Grosir</span>
+                  </button>
+                </div>
+              )}
+
+              {isBuildingTerminal && (
+                <button
+                  type="button"
+                  id="btn-toggle-contractor-mode"
+                  onClick={handleToggleContractorMode}
+                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 cursor-pointer shrink-0 transition-all active:scale-[0.99] ${
+                    isContractorMode
+                      ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400 text-white shadow-sm'
+                      : isLight
+                      ? 'bg-slate-50 hover:bg-amber-50 border-slate-300 text-slate-800'
+                      : 'bg-slate-950 hover:bg-slate-800 border-slate-700 text-slate-300'
+                  }`}
+                  title="Aktifkan jika pelanggan proyek tetap berhak mendapat Harga Tier 3 meski mengambil tambahan item satuan"
+                >
+                  <HardHat className={`w-3.5 h-3.5 ${isContractorMode ? 'text-amber-300' : 'text-amber-500'}`} />
+                  <span>Mode Pelanggan Kontraktor</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
+                      isContractorMode
+                        ? 'bg-black/25 text-white'
+                        : isLight
+                        ? 'bg-slate-200 text-slate-700'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {isContractorMode ? 'ON • TIER 3' : 'OFF'}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+              {selectedCustomer ? (
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-xs shrink-0">
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-500" />
+                  <span className="font-normal text-[11px] truncate max-w-[85px]">{selectedCustomer.name}</span>
+                  <button type="button" onClick={handleClearCustomer} className="text-gray-400 hover:text-rose-400 cursor-pointer p-0.5">
                     <X className="w-3 h-3" />
                   </button>
                 </div>
               ) : (
-                <div className="relative flex items-center shrink-0 w-40 sm:w-48 lg:w-52" ref={customerDropdownRef}>
-                  <UserCheck className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <div className="relative flex items-center shrink-0 w-36 sm:w-40 xl:w-48" ref={customerDropdownRef}>
                   <input
+                    id="pos-top-customer-search-input"
                     type="text"
                     value={customerSearchQuery}
                     onChange={(e) => handleCustomerSearchChange(e.target.value)}
                     onFocus={() => setIsCustomerDropdownOpen(true)}
-                    placeholder="Pelanggan / No. HP Member..."
-                    className={`w-full text-xs pl-7 pr-6 py-1.5 rounded-lg outline-none font-medium border transition ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF] focus:bg-white'
-                        : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
+                    placeholder={
+                      paymentMethod === 'KREDIT / TEMPO (AR)'
+                        ? '* Nama Pelanggan (Wajib)...'
+                        : 'Pelanggan...'
+                    }
+                    className={`w-full text-xs leading-4 px-2 py-1 rounded-lg outline-none font-normal border transition ${
+                      paymentMethod === 'KREDIT / TEMPO (AR)' && !customerSearchQuery.trim()
+                        ? 'border-amber-500 ring-1 ring-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 placeholder:text-amber-600/80 dark:placeholder:text-amber-400/80'
+                        : isLight
+                        ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400/80 placeholder:italic'
+                        : 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-500 placeholder:italic'
                     }`}
                   />
-                  {customerSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomerSearchQuery('')}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-0.5 cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-
-                  {/* Dropdown Hasil Pencarian Member */}
                   {isCustomerDropdownOpen && (
-                    <div
-                      className={`absolute right-0 top-full mt-1.5 z-50 w-80 max-h-72 overflow-y-auto rounded-xl border shadow-2xl p-1.5 animate-in fade-in duration-100 ${
-                        isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-                      }`}
-                    >
-                      {/* Opsi Default: Pelanggan Umum / Walk-in Customer */}
-                      <button
-                        type="button"
-                        onClick={handleClearCustomer}
-                        className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition cursor-pointer mb-1 border-b ${
-                          !selectedCustomer
-                            ? 'bg-blue-500/15 border-blue-500/30 text-blue-300 font-bold'
-                            : isLight
-                            ? 'hover:bg-slate-100 border-slate-200 text-slate-800'
-                            : 'hover:bg-[#21262d] border-gray-700/60 text-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Users className="w-4 h-4 text-gray-400 shrink-0" />
-                          <div>
-                            <div className="font-bold text-xs flex items-center gap-1.5">
-                              <span>Umum / Walk-in Customer</span>
-                              {!selectedCustomer && (
-                                <span className="text-[9px] text-cyan-400 font-mono font-bold">• AKTIF</span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-gray-400">Transaksi non-member reguler (Tier Retail)</div>
-                          </div>
-                        </div>
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-700/50 text-slate-300 border border-slate-600/50 shrink-0">
-                          Retail
-                        </span>
-                      </button>
-
-                      <div className="px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                        Daftar Pelanggan & Member Toko ({customers.length})
-                      </div>
-
-                      {filteredCustomers.length > 0 ? (
-                        filteredCustomers.map((c, cIdx) => {
-                          const rawTier = (c.memberTier || c.tier_level || 'Member').toUpperCase();
-                          const isWholesale = rawTier.includes('GROSIR') || rawTier.includes('WHOLESALE') || c.has_store;
-                          const isSelected = Boolean(selectedCustomer && (selectedCustomer as CustomerMaster).id === c.id);
-                          return (
-                            <button
-                              key={`pos-cust-${c.id || c.code || 'cust'}-${cIdx}`}
-                              type="button"
-                              onClick={() => handleSelectCustomer(c)}
-                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                                isSelected
-                                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-bold'
-                                  : isLight
-                                  ? 'hover:bg-slate-100'
-                                  : 'hover:bg-[#21262d]'
-                              }`}
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="font-bold truncate text-xs flex items-center gap-1.5">
-                                  <span>{c.name}</span>
-                                  {c.store_name && (
-                                    <span className="text-[10px] text-cyan-400 font-medium">
-                                      ({c.store_name})
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-gray-400 font-mono mt-0.5 flex items-center gap-2">
-                                  <span>{c.phone}</span>
-                                  <span className="text-amber-400 font-bold">• {(c.points ?? 0).toLocaleString('id-ID')} Pts</span>
-                                </div>
-                              </div>
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0 ${
-                                  isWholesale
-                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                    : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                                }`}
-                              >
-                                {isWholesale ? 'Grosir' : 'Member'}
-                              </span>
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div className="p-3 text-center text-xs text-gray-400">
-                          Tidak ditemukan member dengan kata kunci tersebut.
-                        </div>
-                      )}
-
-                      {/* Tombol Pendaftaran Cepat Member Baru */}
-                      <div className="pt-1.5 mt-1 border-t border-gray-700/50">
+                    <div className={`absolute right-0 top-full mt-1.5 z-50 w-64 max-h-64 overflow-y-auto rounded-xl border shadow-2xl p-1.5 ${isLight ? 'bg-white border-slate-200' : 'bg-slate-900 border-slate-800'}`}>
+                      {customerSearchQuery.trim() && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setIsCustomerDropdownOpen(false);
-                            setIsNewCustomerModalOpen(true);
-                          }}
-                          className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-bold text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-1.5 transition cursor-pointer"
+                          onClick={() => setIsCustomerDropdownOpen(false)}
+                          className="w-full text-left px-2 py-1.5 mb-1 rounded-lg text-xs font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center justify-between cursor-pointer"
                         >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>+ Daftarkan Pelanggan / Member Baru</span>
+                          <span className="truncate">Gunakan: &ldquo;{customerSearchQuery.trim()}&rdquo;</span>
+                          <span className="text-[10px] font-mono shrink-0">Pilih</span>
                         </button>
-                      </div>
+                      )}
+                      {filteredCustomers.map((c, idx) => (
+                        <button
+                          key={`cust-${c.id}-${idx}`}
+                          type="button"
+                          onClick={() => handleSelectCustomer(c)}
+                          className="w-full text-left px-2 py-1.5 rounded-lg text-xs leading-5 hover:bg-cyan-500/15 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <span className="font-normal">{c.name}</span>
+                          <span className="text-[10px] font-mono text-gray-400">{c.phone}</span>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Tombol Tahan Antrean (Hold Cart) */}
               <button
                 type="button"
-                id="btn-pos-hold-cart"
                 onClick={handleOpenHoldModal}
                 disabled={cart.length === 0}
-                className={`px-2.5 py-1.5 rounded-lg border transition cursor-pointer shrink-0 flex items-center gap-1.5 text-[11px] font-bold ${
-                  cart.length === 0
-                    ? 'opacity-40 cursor-not-allowed border-slate-300 dark:border-slate-800 text-slate-400'
-                    : isLight
-                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-xs'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 shadow-xs'
-                }`}
-                title={language === 'ID' ? 'Tahan keranjang belanja pelanggan antre (Hold Cart)' : 'Hold customer cart'}
+                className="px-2 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300 text-[11px] leading-4 font-normal flex items-center gap-1 cursor-pointer disabled:opacity-40 transition-all duration-200 active:scale-[0.99]"
               >
-                <Pause className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                <span className="hidden sm:inline">{language === 'ID' ? 'Tahan (Hold)' : 'Hold Cart'}</span>
+                <Pause className="w-3 h-3" />
+                <span className="hidden sm:inline">Hold</span>
               </button>
 
-              {/* Tombol Panggil Antrean (Recall Cart) */}
               <button
                 type="button"
-                id="btn-pos-recall-cart"
                 onClick={() => setIsHeldOrdersModalOpen(true)}
-                className={`px-2.5 py-1.5 rounded-lg border transition cursor-pointer shrink-0 flex items-center gap-1.5 text-[11px] font-bold ${
-                  heldOrders.length > 0
-                    ? isLight
-                      ? 'bg-blue-100 hover:bg-blue-200 text-blue-900 border-blue-400 shadow-xs'
-                      : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border-blue-500/50 shadow-xs'
-                    : isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                    : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-gray-700'
-                }`}
-                title={language === 'ID' ? 'Panggil kembali antrean tertahan (Recall Cart)' : 'Recall held orders'}
+                className="px-2 py-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 text-[11px] leading-4 font-normal flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99]"
               >
-                <RotateCcw className="w-3.5 h-3.5 text-[#0052FF] dark:text-[#58a6ff]" />
-                <span>{language === 'ID' ? 'Recall' : 'Recall'}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black ${
-                  heldOrders.length > 0
-                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                    : 'bg-slate-300 dark:bg-gray-700 text-slate-800 dark:text-gray-300'
-                }`}>
-                  {heldOrders.length}
-                </span>
+                <RotateCcw className="w-3 h-3" />
+                <span>Recall ({heldOrders.length})</span>
               </button>
 
-              {/* Promo & Diskon Voucher Ringkas */}
               <button
                 type="button"
                 onClick={() => setIsDiscountModalOpen(true)}
-                className={`px-2 py-1.5 rounded-lg border-2 transition cursor-pointer shrink-0 flex items-center gap-1 text-[11px] font-bold ${
-                  calculatedDiscount > 0
-                    ? 'bg-amber-500 text-black border-amber-600 font-black shadow-xs'
-                    : isLight
-                    ? 'border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100'
-                    : 'border-amber-500/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
-                }`}
-                title="Voucher Promo & Diskon"
+                className="px-2 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300 text-[11px] leading-4 font-normal flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99]"
               >
-                <Tag className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <Tag className="w-3 h-3" />
                 <span className="hidden sm:inline">Promo</span>
-                {calculatedDiscount > 0 && (
-                  <span className="text-[10px] font-mono font-black">
-                    (-{calculatedDiscount.toLocaleString('id-ID')})
-                  </span>
-                )}
               </button>
 
-              {/* [F12 Laci] Buka Laci Kasir */}
               <button
-                id="btn-open-cash-drawer"
                 type="button"
                 onClick={handleManualOpenDrawer}
-                className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                }`}
-                title="Buka Laci Kasir (F12) - ESC/POS Pulsa"
+                className="px-2 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] leading-4 font-normal flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99]"
               >
-                <Inbox className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="hidden md:inline">Laci</span>
-                <span className="font-mono text-[9px] opacity-80">[F12]</span>
+                <Inbox className="w-3 h-3" />
+                <span className="hidden md:inline">Laci [F12]</span>
               </button>
 
-              {/* STATUS SHIFT KASIR (APS POS4: 32_ShiftKasir) */}
-              {activeShift ? (
+              {activeStationShift ? (
                 <div
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[11px] font-mono shrink-0 shadow-xs ${
-                    isLight
-                      ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
-                      : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                  className={`px-2 py-0.5 rounded-lg border text-[10px] font-mono font-semibold shrink-0 flex items-center gap-1 ${
+                    activeStationShift.isPaused
+                      ? 'border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                      : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                   }`}
-                  title={`ID Shift: ${activeShift.id}\nPetugas: ${activeShift.cashierName}\nModal Awal: Rp ${activeShift.initialCash.toLocaleString('id-ID')}\nPenjualan Tunai: Rp ${activeShift.totalCashSales.toLocaleString('id-ID')}\nKas Keluar: Rp ${activeShift.totalExpenses.toLocaleString('id-ID')}\nEstimasi Kas Laci: Rp ${activeShift.expectedCashInDrawer.toLocaleString('id-ID')}`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                  <span className="font-bold text-[10px]">
-                    SHIFT #{activeShift.id.split('-').pop()}
-                  </span>
-                  <span className="opacity-40">|</span>
-                  <span className="text-[10px] hidden xl:inline text-gray-400">
-                    Modal: Rp {(activeShift.initialCash / 1000).toLocaleString('id-ID')}k
-                  </span>
-                  <span className="opacity-40 hidden xl:inline">|</span>
-                  <span className="font-black text-emerald-400">
-                    Laci: Rp {activeShift.expectedCashInDrawer.toLocaleString('id-ID')}
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      activeStationShift.isPaused ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'
+                    }`}
+                  />
+                  <span>
+                    {activeStationShift.isPaused
+                      ? `${activeStationCode}: Istirahat`
+                      : `${activeStationCode}: Online`}
                   </span>
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => setIsOpenShiftModalOpen(true)}
-                  className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0 animate-pulse"
-                  title="Shift kasir belum dibuka! Klik untuk input saldo modal kas awal"
+                  className="px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-normal text-xs leading-4 cursor-pointer transition-all active:scale-[0.99]"
                 >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>Buka Shift</span>
+                  Buka Shift
                 </button>
               )}
 
-              {/* [Tarik Kas / Petty Cash Keluar] Quick Action Button */}
               <button
-                id="btn-pos-petty-cash"
                 type="button"
+                id="btn-pos-station-break"
                 onClick={() => {
-                  if (!activeShift) {
-                    showToast('Buka shift kasir terlebih dahulu sebelum menarik kas!');
+                  if (!activeStationShift) {
+                    showToast('Buka shift terlebih dahulu untuk mengaktifkan mode Istirahat.', 'warning');
                     setIsOpenShiftModalOpen(true);
                     return;
                   }
-                  setIsPettyCashModalOpen(true);
+                  toggleStationBreak(activeStationCode);
                 }}
-                className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+                className={`px-2 py-1 rounded-lg border text-[11px] leading-4 font-medium flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99] shrink-0 ${
+                  activeStationShift?.isPaused
+                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
+                    : 'border-amber-500/45 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300'
                 }`}
-                title="Tarik Kas / Petty Cash Keluar untuk Pengeluaran Darurat Kasir (cth: beli plastik/es)"
+                title={
+                  activeStationShift?.isPaused
+                    ? 'Akhiri mode istirahat dan kembalikan loket ke Online'
+                    : 'Masuk mode Istirahat (status di navbar otomatis berkurang)'
+                }
               >
-                <ArrowUpRight className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden sm:inline">Tarik Kas</span>
-                <span className="text-[9px] opacity-80 font-mono hidden lg:inline">[Petty]</span>
+                {activeStationShift?.isPaused ? (
+                  <>
+                    <Play className="w-3 h-3" />
+                    <span>Lanjut Online</span>
+                  </>
+                ) : (
+                  <>
+                    <Coffee className="w-3 h-3" />
+                    <span>Istirahat</span>
+                  </>
+                )}
               </button>
 
-              {/* [Tutup Shift / End of Day] Header Action Button */}
               <button
-                id="btn-pos-close-shift"
                 type="button"
-                onClick={() => {
-                  if (!activeShift) {
-                    showToast('Tidak ada shift kasir yang sedang aktif.');
-                    setIsOpenShiftModalOpen(true);
-                    return;
-                  }
-                  setIsCloseShiftModalOpen(true);
-                }}
-                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-black flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-sm ${
-                  isLight
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-700'
-                    : 'bg-indigo-600/90 hover:bg-indigo-500 text-white border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.3)]'
-                }`}
-                title="Tutup Shift & Rekonsiliasi Kas (Cash Drawer Closing)"
+                onClick={() => (activeStationShift ? setIsPettyCashModalOpen(true) : setIsOpenShiftModalOpen(true))}
+                className="px-2 py-1 rounded-lg border border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[11px] leading-4 font-normal cursor-pointer transition-all duration-200 active:scale-[0.99] shrink-0"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Tutup Shift & Rekonsiliasi</span>
-                <span className="text-[9px] opacity-80 hidden md:inline">[Closing]</span>
+                Tarik Kas
               </button>
 
-              {/* [Batal] / Void */}
               <button
                 type="button"
-                onClick={() => {
-                  if (cart.length > 0) setIsVoidConfirmOpen(true);
-                }}
+                id="btn-pos-zreport-close-shift"
+                onClick={() => setIsQuickZReportOpen(true)}
+                className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] leading-4 font-medium flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99] shrink-0"
+                title="Ringkasan Tutup Shift (Z-Report) & Hitung Selisih Kas Laci"
+              >
+                <FileSpreadsheet className="w-3 h-3" />
+                <span>Tutup Shift (Z-Report)</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-pos-cancel-cart"
+                onClick={handleRequestCancelCart}
                 disabled={cart.length === 0}
-                className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition cursor-pointer shrink-0 ${
-                  cart.length === 0
-                    ? 'opacity-40 cursor-not-allowed border-transparent text-gray-500'
-                    : 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-500'
+                title={
+                  isKotGraceExpired
+                    ? KOT_EXPIRED_LOCK_MESSAGE
+                    : 'Batalkan / kosongkan keranjang pesanan'
+                }
+                className={`px-2 py-1 rounded-lg border text-[11px] leading-4 font-normal disabled:opacity-40 transition-all duration-200 active:scale-[0.99] shrink-0 ${
+                  isKotGraceExpired
+                    ? 'border-rose-500/30 bg-rose-500/5 text-rose-400/70 opacity-60 cursor-not-allowed'
+                    : 'border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 cursor-pointer'
                 }`}
-                title="Batal Transaksi / Void"
               >
-                <Ban className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Batal</span>
+                Batal
               </button>
 
-              {/* Mode Gelap/Terang */}
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className={`p-1.5 rounded-lg border transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                    : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-gray-300'
-                }`}
-                title={isLight ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'}
-              >
-                {isLight ? <Moon className="w-3.5 h-3.5 text-blue-600" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
-              </button>
-
-              {/* Tombol Logout Kasir & Kembali ke Daftar Terminal */}
-              <button
-                id="btn-back-to-terminals"
-                type="button"
-                onClick={handleCashierLogout}
-                className={`px-2.5 py-1.5 rounded-lg border font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 active:scale-95 ${
-                  isLight
-                    ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
-                    : 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-400'
-                }`}
-                title={language === 'ID' ? 'Logout Kasir & Kembali ke Terminal' : 'Logout Cashier & Exit Register'}
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{language === 'ID' ? 'Logout Kasir' : 'Logout'}</span>
+              <button type="button" onClick={toggleTheme} className="p-1 rounded-lg border border-slate-300 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-[0.99] shrink-0">
+                {isLight ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
               </button>
             </div>
           </div>
 
-          {/* ===================================================================== */}
-          {/* AREA TENGAH: SPLIT VIEW 2-KOLOM (F&B) ATAU TABEL SKU (RETAIL)         */}
-          {/* ===================================================================== */}
-          <div className={`flex-1 min-h-0 mb-1 flex flex-col ${isFnbPhotoMenuMode ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-              {/* JIKA MODE F&B MENU BERGAMBAR AKTIF (SPLIT VIEW 2-KOLOM: 65% KATALOG & 35% KERANJANG/BAYAR) */}
-              {isFnbPhotoMenuMode ? (
-                <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden h-full">
-                  {/* KOLOM KIRI (65% LEBAR LAYAR): KATALOG MENU & KATEGORI */}
-                  <div className="w-full lg:w-[65%] flex flex-col h-full min-h-0 overflow-hidden">
-                    {/* F&B Search & KOT Button Bar */}
-                    <div className={`p-2.5 rounded-xl border flex flex-col gap-2 mb-2 shrink-0 ${
-                      isLight ? 'bg-white border-slate-200 shadow-xs' : 'bg-[#161b22] border-[#30363d]'
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <input
-                            type="text"
-                            placeholder={
-                              language === 'ID'
-                                ? 'Cari nama masakan, minuman, kopi, snack...'
-                                : 'Search dishes, coffee, beverages, snacks...'
-                            }
-                            value={fnbSearchQuery}
-                            onChange={(e) => setFnbSearchQuery(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const firstAvailable = filteredFnbProducts.find((p) => (p.stock ?? 0) > 0) || filteredFnbProducts[0];
-                                if (firstAvailable && (firstAvailable.stock ?? 0) > 0) {
-                                  setSelectedFnbProduct(firstAvailable);
-                                  setIsFnbModalOpen(true);
-                                }
-                              }
-                            }}
-                            className={`w-full text-xs pl-9 pr-3 py-2 rounded-xl outline-none border transition ${
-                              isLight
-                                ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-emerald-500 focus:bg-white'
-                                : 'bg-[#0d1117] border-[#30363d] text-white focus:border-emerald-500'
-                            }`}
-                          />
-                        </div>
-
-                        {/* Tombol Kirim Dapur / Cetak KOT */}
-                        <button
-                          id="btn-open-kot-modal-top"
-                          type="button"
-                          onClick={() => setIsKotModalOpen(true)}
-                          disabled={cart.length === 0}
-                          className={`px-3 py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0 ${
-                            cart.length === 0
-                              ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
-                              : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/20'
-                          }`}
-                          title="Kirim ke Dapur / Cetak KOT"
-                        >
-                          <ChefHat className="w-4 h-4" />
-                          <span className="hidden sm:inline">
-                            {language === 'ID' ? 'KOT Dapur' : 'Print KOT'}
-                          </span>
-                        </button>
+          {/* AREA TENGAH */}
+          <div className={`flex-1 mb-1 flex flex-col ${isFnbPhotoMenuMode || isSalonServiceTerminal || isLaundryTerminal ? 'min-h-0 overflow-hidden' : 'min-h-0 overflow-y-auto'}`}>
+            {isFnbPhotoMenuMode ? (
+              <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden h-full">
+                {/* KOLOM KIRI: KATALOG MENU */}
+                <div className="w-full lg:w-[65%] flex flex-col h-full min-h-0 overflow-hidden">
+                  <div className={`p-2.5 rounded-xl border flex flex-col gap-2 mb-2 shrink-0 ${isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'}`}>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Cari nama masakan, minuman, kopi, snack..."
+                          value={fnbSearchQuery}
+                          onChange={(e) => setFnbSearchQuery(e.target.value)}
+                          className={`w-full text-xs pl-9 pr-3 py-2 rounded-xl outline-none border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'}`}
+                        />
                       </div>
-
-                      {/* Category Filter Chips & Toggle Semua Kategori */}
-                      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5 no-scrollbar text-xs">
-                        <div className="flex gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                          {fnbCategories.map((cat, catIdx) => (
-                            <button
-                              key={`fnb-cat-${cat}-${catIdx}`}
-                              onClick={() => setSelectedFnbCategory(cat)}
-                              className={`px-3 py-1 rounded-xl whitespace-nowrap font-bold text-xs transition cursor-pointer ${
-                                selectedFnbCategory === cat
-                                  ? 'bg-emerald-500 text-black shadow-xs'
-                                  : isLight
-                                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
-                                  : 'bg-[#0d1117] text-gray-400 hover:text-white border border-[#30363d]'
-                              }`}
-                            >
-                              {cat === 'ALL'
-                                ? language === 'ID'
-                                  ? 'Semua Menu'
-                                  : 'All Menu'
-                                : cat}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Toggle Switch 'Semua Kategori' */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = !showAllCategories;
-                            setShowAllCategories(next);
-                            showToast(
-                              next
-                                ? (language === 'ID' ? '🌐 Menampilkan seluruh katalog' : '🌐 All categories unlocked')
-                                : (language === 'ID' ? '🔒 Filter default F&B (Makanan/Minuman/Snack) aktif' : '🔒 Default F&B filter restored')
-                            );
-                          }}
-                          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[11px] font-bold shrink-0 transition cursor-pointer ${
-                            showAllCategories
-                              ? isLight ? 'bg-indigo-50 border-indigo-300 text-indigo-900' : 'bg-indigo-950/60 border-indigo-500/60 text-indigo-300'
-                              : isLight ? 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200' : 'bg-[#0d1117] border-[#30363d] text-gray-400 hover:text-gray-200'
-                          }`}
-                          title="Buka / Kunci seluruh kategori katalog"
-                        >
-                          <span>{language === 'ID' ? 'Semua Kategori' : 'All Categories'}</span>
-                          <span className={`text-[9px] px-1 py-0.2 rounded font-mono font-black ${
-                            showAllCategories ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'
-                          }`}>
-                            {showAllCategories ? 'ON' : 'OFF'}
-                          </span>
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsKotModalOpen(true)}
+                        disabled={cart.length === 0}
+                        className="px-3 py-2 rounded-xl text-xs font-black bg-emerald-500 text-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                      >
+                        <ChefHat className="w-4 h-4" />
+                        <span>KOT Dapur</span>
+                      </button>
                     </div>
-
-                    {/* DAFTAR MENU BERGAMBAR: KOMPAK GRID 3-4 KOLOM, SCROLL VERTIKAL MANDIRI (max-h-[calc(100vh-160px)]) */}
-                    <div className="flex-1 min-h-0 overflow-y-auto max-h-[calc(100vh-160px)] pr-1 scroll-smooth">
-                      {filteredFnbProducts.length === 0 ? (
-                        <div className="h-64 flex flex-col items-center justify-center text-center text-gray-400 space-y-2">
-                          <UtensilsCrossed className="w-10 h-10 opacity-30" />
-                          <p className="text-xs font-semibold">Tidak ada menu yang sesuai kriteria pencarian</p>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3 pb-3 auto-rows-fr">
-                          {filteredFnbProducts.map((product, pIdx) => {
-                            const isOutOfStock = (product.stock ?? 0) <= 0;
-                            return (
-                              <div
-                                key={`fnb-prod-${product.id || product.barcode || 'prod'}-${pIdx}`}
-                                id={`fnb-card-${product.id}`}
-                                onClick={() => {
-                                  if (!isOutOfStock) {
-                                    setSelectedFnbProduct(product);
-                                    setIsFnbModalOpen(true);
-                                  }
-                                }}
-                                className={`group rounded-2xl border flex flex-col h-full justify-between overflow-hidden transition cursor-pointer hover:shadow-md active:scale-[0.98] ${
-                                  isLight
-                                    ? 'bg-white border-slate-200 hover:border-emerald-500 shadow-xs'
-                                    : 'bg-[#161b22] border-[#30363d] hover:border-emerald-500'
-                                } ${isOutOfStock ? 'opacity-50 cursor-not-allowed' : ''}`}
-                              >
-                                {/* 1. Kontainer Gambar Menu (Terkunci & Overflow Hidden) */}
-                                <div className="relative h-24 sm:h-28 max-h-28 w-full overflow-hidden bg-slate-100 dark:bg-[#0d1117] shrink-0">
-                                  {product.image ? (
-                                    <img
-                                      src={product.image}
-                                      alt={product.name}
-                                      referrerPolicy="no-referrer"
-                                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-emerald-500/10 text-emerald-500">
-                                      <UtensilsCrossed className="w-6 h-6" />
-                                    </div>
-                                  )}
-
-                                  {/* Badge Kategori - Terkunci Rapi di Dalam Frame Gambar */}
-                                  <div className="absolute top-2 left-2 max-w-[65%] z-10 pointer-events-none">
-                                    <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-black/80 text-emerald-300 px-2 py-0.5 rounded-md backdrop-blur-xs border border-emerald-500/40 shadow-xs truncate block">
-                                      {product.category}
-                                    </span>
-                                  </div>
-
-                                  {/* Badge Stok - Terkunci Rapi di Dalam Frame Gambar */}
-                                  <div className="absolute top-2 right-2 z-10 pointer-events-none">
-                                    <span className={`text-[9px] sm:text-[10px] font-mono font-bold px-2 py-0.5 rounded-md backdrop-blur-xs shadow-xs ${
-                                      isOutOfStock
-                                        ? 'bg-rose-900/90 text-rose-100 border border-rose-500/60'
-                                        : (product.stock ?? 0) <= 10
-                                        ? 'bg-amber-900/90 text-amber-100 border border-amber-500/60'
-                                        : 'bg-black/80 text-slate-100 border border-white/20'
-                                    }`}>
-                                      {isOutOfStock ? 'Habis' : `Stok: ${product.stock}`}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* 2. Kontainer Teks Terpisah di Bawah Gambar */}
-                                <div className="p-2.5 sm:p-3 flex flex-col justify-between flex-1 gap-2 bg-inherit">
-                                  <div>
-                                    <h4
-                                      title={product.name}
-                                      className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 line-clamp-2 min-h-[2.5rem] leading-snug group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition"
-                                    >
-                                      {product.name}
-                                    </h4>
-                                  </div>
-
-                                  <div className="pt-2 border-t border-slate-200/80 dark:border-[#30363d]/80 flex items-center justify-between mt-auto">
-                                    <div className="text-xs sm:text-sm font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                                      Rp {product.sell_price.toLocaleString('id-ID')}
-                                    </div>
-                                    <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-500 group-hover:text-slate-950 flex items-center justify-center transition font-black text-xs shrink-0 shadow-xs">
-                                      <Plus className="w-3.5 h-3.5" />
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                    <div className="flex gap-1.5 overflow-x-auto pb-0.5 text-xs">
+                      {fnbCategories.map((cat, idx) => (
+                        <button
+                          key={`cat-${cat}-${idx}`}
+                          onClick={() => setSelectedFnbCategory(cat)}
+                          className={`px-3 py-1 rounded-xl whitespace-nowrap font-bold text-xs cursor-pointer ${
+                            selectedFnbCategory === cat ? 'bg-emerald-500 text-black' : 'bg-[#0d1117] text-gray-400 border border-[#30363d]'
+                          }`}
+                        >
+                          {cat === 'ALL' ? 'Semua Menu' : cat}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* KOLOM KANAN (35% LEBAR LAYAR): PANEL KERANJANG BELANJA & PEMBAYARAN STICKY */}
-                  <div className={`w-full lg:w-[35%] flex flex-col h-full max-h-[calc(100vh-160px)] rounded-2xl border shadow-sm overflow-hidden shrink-0 ${
-                    isLight ? 'bg-white border-slate-300' : 'bg-[#161b22] border-[#30363d]'
-                  }`}>
-                    {/* Header Keranjang Belanja */}
-                    <div className={`px-3 py-2 border-b flex items-center justify-between text-xs shrink-0 ${
-                      isLight ? 'bg-slate-100 text-slate-900 border-slate-200' : 'bg-[#0d1117] text-gray-200 border-[#30363d]'
-                    }`}>
-                      <div className="flex items-center gap-1.5 font-bold">
-                        <ShoppingBag className="w-4 h-4 text-[#0052FF] dark:text-[#58a6ff]" />
-                        <span className="font-black text-xs sm:text-sm">Keranjang</span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-black border border-blue-300 dark:border-blue-700">
-                          {cart.length} SKU • {totalCartItemCount} Pcs
+                  <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 pb-3">
+                      {filteredFnbProducts.map((product, idx) => {
+                        const catLower = (product.category || '').toLowerCase();
+                        const catIcon = catLower.includes('kopi') && !catLower.includes('non-kopi')
+                          ? '☕'
+                          : catLower.includes('segar') || catLower.includes('minuman')
+                          ? '🧋'
+                          : catLower.includes('pastry') || catLower.includes('bakery') || catLower.includes('snack')
+                          ? '🥐'
+                          : catLower.includes('paket')
+                          ? '🍱'
+                          : '🍽️';
+                        return (
+                          <div
+                            key={`fnb-${product.id}-${idx}`}
+                            onClick={() => {
+                              setSelectedFnbProduct(product);
+                              setIsFnbModalOpen(true);
+                            }}
+                            className={`group rounded-2xl border overflow-hidden flex flex-col justify-between cursor-pointer transition-all hover:border-emerald-500/50 ${
+                              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
+                            }`}
+                          >
+                            <div>
+                              <div className="relative h-24 w-full overflow-hidden bg-slate-900">
+                                {product.image ? (
+                                  <img
+                                    src={product.image}
+                                    alt={product.name}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-2xl">
+                                    {catIcon}
+                                  </div>
+                                )}
+                                <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-black/75 backdrop-blur-sm border border-white/10 text-[10px] font-semibold text-white flex items-center gap-1">
+                                  <span>{catIcon}</span>
+                                  <span className="truncate max-w-[95px]">{product.category || 'Menu F&B'}</span>
+                                </div>
+                              </div>
+                              <div className="p-2.5 pb-1.5">
+                                <h4 className="text-xs font-bold line-clamp-2 leading-snug">{product.name}</h4>
+                              </div>
+                            </div>
+                            <div className="px-2.5 pb-2.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between gap-1.5">
+                              <span className="text-xs font-black text-emerald-400 font-mono">
+                                Rp {product.sell_price.toLocaleString('id-ID')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleQuickAddFnbProduct(product, e)}
+                                title="Klik cepat masuk keranjang"
+                                className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition shrink-0"
+                              >
+                                <Plus className="w-3 h-3 stroke-[3]" />
+                                <span>Keranjang</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* KOLOM KANAN: KERANJANG & BAYAR */}
+                <div className={`w-full lg:w-[35%] flex flex-col h-full rounded-2xl border overflow-hidden ${isLight ? 'bg-white border-slate-300' : 'bg-[#161b22] border-[#30363d]'}`}>
+                  {/* HEADER KONTROL DINE-IN / TAKEAWAY / DELIVERY & PILIH MEJA */}
+                  <div className={`p-2.5 border-b space-y-2 shrink-0 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'}`}>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="grid grid-cols-3 gap-1 flex-1 bg-black/20 p-1 rounded-xl border border-slate-800">
+                        {(['Dine-In', 'Takeaway', 'Delivery'] as const).map((mode) => {
+                          const isSelected = fnbOrderMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => handleChangeFnbOrderMode(mode)}
+                              className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-emerald-500 text-black shadow-sm'
+                                  : 'text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              {mode}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {fnbOrderMode === 'Dine-In' ? (
+                        <select
+                          value={fnbTableNo}
+                          onChange={(e) => handleChangeFnbTableNo(e.target.value)}
+                          aria-label="Pilih Meja Resto"
+                          className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900'
+                              : 'bg-[#161b22] border-cyan-500/40 text-cyan-300'
+                          }`}
+                        >
+                          {Array.from({ length: 15 }, (_, i) => {
+                            const label = `Meja ${String(i + 1).padStart(2, '0')}`;
+                            return (
+                              <option key={label} value={label}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      ) : (
+                        <span
+                          id="fnb-no-table-badge"
+                          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold inline-flex items-center gap-1.5 shrink-0 ${
+                            fnbOrderMode === 'Delivery'
+                              ? isLight
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
+                                : 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                              : isLight
+                              ? 'bg-amber-50 border-amber-300 text-amber-800'
+                              : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          }`}
+                        >
+                          {fnbOrderMode === 'Delivery' ? (
+                            <>
+                              <Truck className="w-3.5 h-3.5 shrink-0" />
+                              <span>Tanpa Meja • Kurir</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                              <span>Tanpa Meja • Bungkus</span>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-gray-400 px-1">
+                      <span>
+                        Mode Pesanan: <strong className="text-emerald-400">{fnbOrderMode}</strong> •{' '}
+                        <strong className="text-cyan-400">
+                          {fnbOrderMode === 'Dine-In'
+                            ? fnbTableNo
+                            : fnbOrderMode === 'Delivery'
+                            ? 'Tanpa Meja • Kurir'
+                            : 'Tanpa Meja • Bungkus'}
+                        </strong>
+                      </span>
+                      <span className="font-mono tabular-nums">{cart.reduce((s, i) => s + i.quantity, 0)} Porsi/Item</span>
+                    </div>
+                    {hasAnyKotSentItem && kotSentAt && (
+                      <div
+                        id="fnb-kot-grace-badge"
+                        className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-mono font-medium flex items-center justify-between gap-2 tabular-nums ${
+                          isKotGraceExpired
+                            ? isLight
+                              ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : 'bg-rose-500/15 border-rose-500/45 text-rose-300'
+                            : kotRemainingMs <= 60 * 1000
+                            ? isLight
+                              ? 'bg-amber-50 border-amber-300 text-amber-800'
+                              : 'bg-amber-500/15 border-amber-500/45 text-amber-300'
+                            : isLight
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                            : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                          {isKotGraceExpired ? (
+                            <Lock className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <Clock className="w-3.5 h-3.5 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {isKotGraceExpired
+                              ? 'KOT Terkunci (> 5 Menit - Sedang Dimasak)'
+                              : `KOT Terkirim • Sisa Waktu Revisi: ${kotRemainingLabel}`}
+                          </span>
                         </span>
                       </div>
+                    )}
+                  </div>
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={handleOpenHoldModal}
-                          disabled={cart.length === 0}
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer ${
-                            cart.length === 0
-                              ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400'
-                              : isLight
-                              ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                              : 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
-                          }`}
-                          title="Tahan keranjang pesanan meja/pelanggan (Hold Cart)"
-                        >
-                          <Pause className="w-2.5 h-2.5" />
-                          <span>Hold</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setIsHeldOrdersModalOpen(true)}
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer ${
-                            heldOrders.length > 0
-                              ? isLight
-                                ? 'bg-blue-100 text-blue-900 border-blue-300 font-black'
-                                : 'bg-blue-500/20 text-blue-300 border-blue-500/40 font-black'
-                              : isLight
-                              ? 'text-slate-600 border-slate-300'
-                              : 'text-gray-400 border-gray-700'
-                          }`}
-                          title="Panggil pesanan tertahan (Recall Cart)"
-                        >
-                          <RotateCcw className="w-2.5 h-2.5" />
-                          <span>Recall ({heldOrders.length})</span>
-                        </button>
-
-                        {cart.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setIsVoidConfirmOpen(true)}
-                            className="text-rose-500 hover:text-rose-600 font-bold text-[11px] flex items-center gap-1 cursor-pointer ml-1"
-                            title="Batalkan / Kosongkan Keranjang"
-                          >
-                            <Ban className="w-3 h-3" />
-                            <span>Kosongkan</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Bar Pemilih Pelanggan & Tier Transaksi POS Terintegrasi */}
-                    {selectedCustomer ? (
-                      <div className={`px-3 py-2 border-b flex items-center justify-between gap-2 shrink-0 ${
-                        selectedCustomer.has_store
-                          ? isLight
-                            ? 'bg-emerald-50/80 border-emerald-200'
-                            : 'bg-emerald-950/30 border-emerald-800/50'
-                          : isLight
-                          ? 'bg-blue-50/80 border-blue-200'
-                          : 'bg-blue-950/30 border-blue-800/50'
-                      }`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 shadow-xs ${
-                            selectedCustomer.has_store
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-[#0052FF] text-white'
-                          }`}>
-                            <UserCheck className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0">
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                    {cart.map((item, idx) => {
+                      const savings = item.promoSavings ?? ((item.itemDiscount || 0) * item.quantity);
+                      const isSentKotItem = isItemSentToKot(item);
+                      const isLockedKotItem =
+                        isKotGraceExpired &&
+                        isSentKotItem &&
+                        item.quantity <= (item.kotSentQty ?? item.quantity);
+                      const isToppingLocked = isKotGraceExpired && isSentKotItem;
+                      const mods = item.modifiers;
+                      const hasToppingsOrNotes = Boolean(
+                        (mods?.toppings && mods.toppings.length > 0) ||
+                          mods?.spicyLabel ||
+                          (mods?.sugarIceLabel && mods.sugarIceLabel !== 'Normal') ||
+                          mods?.notes
+                      );
+                      return (
+                        <div key={`fnb-cart-${idx}`} className="p-2 rounded-xl border border-slate-800 flex items-start justify-between text-xs gap-2">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-black text-xs text-slate-900 dark:text-white truncate">
-                                {selectedCustomer.name}
-                              </span>
-                              <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border uppercase shrink-0 ${
-                                selectedPriceTier === 'WHOLESALE'
-                                  ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
-                                  : selectedPriceTier === 'MEMBER'
-                                  ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border-cyan-500/40'
-                                  : 'bg-slate-200 text-slate-700 border-slate-300'
-                              }`}>
-                                {selectedPriceTier === 'WHOLESALE' ? 'Tier Grosir' : selectedPriceTier === 'MEMBER' ? 'Tier Member' : 'Tier Retail'}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-slate-500 dark:text-gray-400 font-mono flex items-center gap-2">
-                              <span>{selectedCustomer.store_name ? `${selectedCustomer.store_name} • ` : ''}{selectedCustomer.phone}</span>
-                              <span className="text-amber-500 dark:text-amber-300 font-bold">
-                                ★ {(selectedCustomer.points ?? 0).toLocaleString('id-ID')} Pts
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 shrink-0" ref={cartCustomerDropdownRef}>
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsCartCustomerDropdownOpen(!isCartCustomerDropdownOpen);
-                                setCustomerSearchQuery('');
-                              }}
-                              className="px-2 py-1 rounded text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-gray-200 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
-                              title="Ganti Pelanggan / Member"
-                            >
-                              Ganti
-                            </button>
-
-                            {/* Dropdown Ganti Member */}
-                            {isCartCustomerDropdownOpen && (
-                              <div className={`absolute right-0 top-full mt-1.5 z-50 w-72 sm:w-80 max-h-72 overflow-y-auto rounded-xl border shadow-2xl p-2 animate-in fade-in duration-100 ${
-                                isLight ? 'bg-white border-slate-200 text-slate-900 shadow-slate-300' : 'bg-[#161b22] border-[#30363d] text-white shadow-black'
-                              }`}>
-                                <div className="relative mb-2">
-                                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                  <input
-                                    autoFocus
-                                    type="text"
-                                    value={customerSearchQuery}
-                                    onChange={(e) => handleCustomerSearchChange(e.target.value)}
-                                    placeholder="Cari nama, No. HP, atau kode..."
-                                    className={`w-full text-xs pl-7 pr-6 py-1.5 rounded-lg outline-none font-medium border ${
-                                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                                    }`}
-                                  />
-                                  {customerSearchQuery && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setCustomerSearchQuery('')}
-                                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-0.5 cursor-pointer"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={handleClearCustomer}
-                                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer mb-1 border-b ${
-                                    isLight ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-[#21262d] text-gray-200'
+                              <span className="font-bold truncate">{item.product.name}</span>
+                              {item.kotSent && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                                    isKotGraceExpired
+                                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/35'
+                                      : 'bg-amber-500/20 text-amber-300 border-amber-500/35'
                                   }`}
                                 >
-                                  <div className="flex items-center gap-2">
-                                    <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                    <div>
-                                      <span className="font-bold text-xs block">Umum / Walk-in Customer</span>
-                                      <span className="text-[10px] text-gray-400">Non-member reguler (Tier Retail)</span>
-                                    </div>
+                                  {isKotGraceExpired ? 'KOT 🔒' : 'KOT'}
+                                </span>
+                              )}
+                              {item.promoBadge && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                  {item.promoBadge}
+                                </span>
+                              )}
+                            </div>
+                            {/* Sub-baris Topping, Level Pedas / Gula-Es, & Catatan */}
+                            {hasToppingsOrNotes && (
+                              <div className="mt-0.5 pl-1.5 border-l-2 border-emerald-500/40 space-y-0.5 text-[10px] leading-snug">
+                                {mods?.toppings && mods.toppings.length > 0 && (
+                                  <div className={isLight ? 'text-emerald-700 font-medium' : 'text-emerald-300 font-medium'}>
+                                    +{' '}
+                                    {mods.toppingDetails && mods.toppingDetails.length > 0
+                                      ? mods.toppingDetails
+                                          .map((t) =>
+                                            t.price > 0
+                                              ? `${t.name} (+Rp ${t.price.toLocaleString('id-ID')})`
+                                              : t.name
+                                          )
+                                          .join(', ')
+                                      : mods.toppings.join(', ')}
                                   </div>
-                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-700/50 text-slate-300">
-                                    Retail
-                                  </span>
-                                </button>
-
-                                <div className="px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                                  Daftar Member ({customers.length})
-                                </div>
-
-                                {filteredCustomers.length > 0 ? (
-                                  filteredCustomers.map((c, cIdx) => {
-                                    const rawTier = (c.memberTier || c.tier_level || 'Member').toUpperCase();
-                                    const isWholesale = rawTier.includes('GROSIR') || rawTier.includes('WHOLESALE') || c.has_store;
-                                    return (
-                                      <button
-                                        key={`cart-cust-switch-${c.id}-${cIdx}`}
-                                        type="button"
-                                        onClick={() => handleSelectCustomer(c)}
-                                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                                          selectedCustomer?.id === c.id
-                                            ? 'bg-cyan-500/20 text-cyan-300 font-bold'
-                                            : isLight ? 'hover:bg-slate-100 text-slate-900' : 'hover:bg-[#21262d] text-gray-200'
-                                        }`}
-                                      >
-                                        <div className="min-w-0 pr-2">
-                                          <div className="font-bold truncate text-xs flex items-center gap-1">
-                                            <span>{c.name}</span>
-                                            {c.store_name && (
-                                              <span className="text-[10px] text-cyan-500 font-normal">
-                                                ({c.store_name})
-                                              </span>
-                                            )}
-                                          </div>
-                                          <div className="text-[10px] text-gray-400 font-mono mt-0.5 flex items-center gap-2">
-                                            <span>{c.phone}</span>
-                                            <span className="text-amber-400 font-bold">★ {(c.points ?? 0).toLocaleString('id-ID')} Pts</span>
-                                          </div>
-                                        </div>
-                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0 ${
-                                          isWholesale
-                                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                                            : 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                                        }`}>
-                                          {isWholesale ? 'Grosir' : 'Member'}
-                                        </span>
-                                      </button>
-                                    );
-                                  })
-                                ) : (
-                                  <div className="p-3 text-center text-xs text-gray-400">
-                                    Tidak ditemukan member yang cocok
+                                )}
+                                {(mods?.spicyLabel ||
+                                  (mods?.sugarIceLabel && mods.sugarIceLabel !== 'Normal')) && (
+                                  <div className={isLight ? 'text-amber-700' : 'text-amber-300'}>
+                                    {[
+                                      mods?.spicyLabel ? `Pedas: ${mods.spicyLabel}` : null,
+                                      mods?.sugarIceLabel && mods.sugarIceLabel !== 'Normal'
+                                        ? mods.sugarIceLabel
+                                        : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(' • ')}
+                                  </div>
+                                )}
+                                {mods?.notes && (
+                                  <div className={isLight ? 'text-slate-600 italic' : 'text-slate-400 italic'}>
+                                    Catatan: &quot;{mods.notes}&quot;
                                   </div>
                                 )}
                               </div>
                             )}
+                            <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                              <span className="tabular-nums">
+                                {item.quantity}x @ Rp {item.product.sell_price.toLocaleString('id-ID')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenQuickTopping(idx)}
+                                title={
+                                  isToppingLocked
+                                    ? KOT_TOPPING_LOCK_MESSAGE
+                                    : isSentKotItem
+                                    ? 'Ubah Topping / Catatan (Wajib PIN Supervisor)'
+                                    : 'Tambah / Ubah Topping & Catatan'
+                                }
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9.5px] font-semibold transition ${
+                                  isToppingLocked
+                                    ? 'border-slate-700/60 bg-slate-800/40 text-slate-500 opacity-60 cursor-not-allowed'
+                                    : hasToppingsOrNotes
+                                    ? isLight
+                                      ? 'border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 cursor-pointer'
+                                      : 'border-emerald-500/45 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 cursor-pointer'
+                                    : isLight
+                                    ? 'border-cyan-400/70 bg-cyan-50 text-cyan-800 hover:bg-cyan-100 cursor-pointer'
+                                    : 'border-cyan-500/35 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 cursor-pointer'
+                                }`}
+                              >
+                                {isToppingLocked ? (
+                                  <Lock className="w-2.5 h-2.5" />
+                                ) : (
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                )}
+                                <span>+ Topping</span>
+                              </button>
+                              {(item.freeBonusQty || 0) > 0 && (
+                                <span className="text-cyan-400 font-mono font-semibold">
+                                  (+ Gratis {item.freeBonusQty})
+                                </span>
+                              )}
+                              {savings > 0 && (
+                                <span className="text-emerald-400 font-mono">
+                                  (Hemat Rp {savings.toLocaleString('id-ID')})
+                                </span>
+                              )}
+                            </div>
+                            {item.promoHint && (
+                              <div className="text-[9px] text-amber-400/90 truncate mt-0.5">
+                                {item.promoHint}
+                              </div>
+                            )}
                           </div>
+                          <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                            <div className="inline-flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateQty(idx, -1)}
+                                className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] transition ${
+                                  isLockedKotItem
+                                    ? 'border-slate-700/60 bg-slate-800/40 text-slate-500 opacity-50 cursor-not-allowed'
+                                    : isLight
+                                    ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800 cursor-pointer'
+                                    : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white cursor-pointer'
+                                }`}
+                                title={isLockedKotItem ? KOT_EXPIRED_LOCK_MESSAGE : 'Kurangi Qty'}
+                              >
+                                <Minus className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateQty(idx, 1)}
+                                className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] cursor-pointer transition ${
+                                  isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                }`}
+                                title="Tambah Qty (Add-on)"
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                            <span className="font-mono font-bold text-emerald-400 tabular-nums">Rp {item.subtotal.toLocaleString('id-ID')}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRequestRemoveItem(idx)}
+                              className={
+                                isKotGraceExpired && isSentKotItem
+                                  ? 'text-rose-500/40 cursor-not-allowed'
+                                  : 'text-rose-500 hover:text-rose-400 cursor-pointer'
+                              }
+                              title={
+                                isKotGraceExpired && isSentKotItem
+                                  ? KOT_EXPIRED_LOCK_MESSAGE
+                                  : 'Hapus Item'
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 space-y-1.5 shrink-0">
+                    {totalAllDiscounts > 0 && (
+                      <div className="flex justify-between items-center text-[11px] text-emerald-500 font-mono">
+                        <span>Total Hemat Promo</span>
+                        <span>-Rp {totalAllDiscounts.toLocaleString('id-ID')}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center text-sm leading-5 font-medium">
+                      <span className="text-slate-500 dark:text-slate-400">TOTAL</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-mono font-semibold text-base sm:text-lg">
+                        Rp {grandTotal.toLocaleString('id-ID')}
+                      </span>
+                    </div>
 
-                          <button
-                            type="button"
-                            onClick={handleClearCustomer}
-                            className="px-1.5 py-1 rounded text-[10px] font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 transition cursor-pointer"
-                            title="Lepas Member (Kembali ke Umum / Walk-in)"
+                    {/* Input Nominal Ringkas F&B (Tunai / Split) — Tanpa Kasbon di F&B */}
+                    {paymentMethod === 'SPLIT' ? (
+                      <div className="p-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 space-y-1">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <label className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 block">
+                              Nominal Tunai (1-10101):
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={splitCashAmount || ''}
+                              onChange={(e) => {
+                                const val = Math.max(0, Number(e.target.value) || 0);
+                                setSplitCashAmount(val);
+                              }}
+                              placeholder="0"
+                              className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                                isLight
+                                  ? 'border-emerald-500/60 bg-white text-slate-900'
+                                  : 'border-emerald-500/50 bg-slate-950 text-white'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300">
+                                Non-Tunai ({splitNonCashChannel}):
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next =
+                                    splitNonCashChannel === 'QRIS'
+                                      ? 'DEBIT'
+                                      : splitNonCashChannel === 'DEBIT'
+                                      ? 'TRANSFER'
+                                      : 'QRIS';
+                                  setSplitNonCashChannel(next);
+                                }}
+                                className="text-[9px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
+                                title="Klik untuk ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
+                              >
+                                Ubah
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                value={splitNonCashAmount || ''}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setSplitNonCashAmount(val);
+                                }}
+                                placeholder="0"
+                                className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                                  isLight
+                                    ? 'border-indigo-500/60 bg-white text-slate-900'
+                                    : 'border-indigo-500/50 bg-slate-950 text-white'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
+                                }
+                                className="h-7 px-1.5 rounded text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
+                                title="Isi otomatis sisa kekurangan"
+                              >
+                                Sisa
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono pt-0.5">
+                          <span className="text-slate-500 dark:text-slate-400">
+                            Status Split (1-10101 + 1-10102):
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              splitShortfall === 0 && grandTotal > 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-500'
+                            }`}
                           >
-                            ✕ Umum
-                          </button>
+                            {splitShortfall === 0 && grandTotal > 0
+                              ? '✓ LUNAS 100%'
+                              : `Kurang: Rp ${splitShortfall.toLocaleString('id-ID')}`}
+                          </span>
                         </div>
                       </div>
-                    ) : (
-                      <div className={`px-3 py-2 border-b flex items-center justify-between gap-2 shrink-0 ${
-                        isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-                      }`} ref={cartCustomerDropdownRef}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-7 h-7 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-gray-400 flex items-center justify-center font-bold text-xs shrink-0">
-                            <Users className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-xs text-slate-800 dark:text-gray-200">
-                                Umum / Walk-in Customer
-                              </span>
-                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-gray-300 border border-slate-300 dark:border-slate-700">
-                                Retail
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-gray-400 block">Transaksi non-member reguler</span>
-                          </div>
-                        </div>
-
-                        <div className="relative">
+                    ) : paymentMethod === 'CASH' ? (
+                      <div className="flex items-center justify-between gap-1.5 pt-0.5">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">Diterima:</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={cashGiven || ''}
+                            onChange={(e) => {
+                              const val = Number(e.target.value) || 0;
+                              setCashGiven(val);
+                              if (isCashUnderpaid && val >= grandTotal) setIsCashUnderpaid(false);
+                            }}
+                            onKeyDown={handleCashInputKeyDown}
+                            placeholder="0"
+                            className={`h-7 w-20 px-1.5 text-xs font-mono font-semibold text-center border rounded-lg outline-none ${
+                              isLight
+                                ? 'border-emerald-500/60 bg-white text-slate-900'
+                                : 'border-emerald-500/50 bg-slate-950 text-white'
+                            }`}
+                          />
                           <button
                             type="button"
                             onClick={() => {
-                              setIsCartCustomerDropdownOpen(!isCartCustomerDropdownOpen);
-                              setCustomerSearchQuery('');
+                              setCashGiven(grandTotal);
+                              setIsCashUnderpaid(false);
                             }}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-black bg-[#0052FF] text-white hover:bg-blue-600 flex items-center gap-1 transition cursor-pointer shadow-xs active:scale-95"
-                            title="Pilih atau cari member pelanggan"
+                            className="h-7 px-2 rounded-lg text-[10px] font-medium bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
                           >
-                            <UserCheck className="w-3.5 h-3.5" />
-                            <span>+ Pilih Member</span>
+                            Pas
                           </button>
-
-                          {/* Dropdown Menu di Panel Keranjang */}
-                          {isCartCustomerDropdownOpen && (
-                            <div className={`absolute right-0 top-full mt-1.5 z-50 w-72 sm:w-80 max-h-72 overflow-y-auto rounded-xl border shadow-2xl p-2 animate-in fade-in duration-100 ${
-                              isLight ? 'bg-white border-slate-200 text-slate-900 shadow-slate-300' : 'bg-[#161b22] border-[#30363d] text-white shadow-black'
-                            }`}>
-                              <div className="relative mb-2">
-                                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                                <input
-                                  autoFocus
-                                  type="text"
-                                  value={customerSearchQuery}
-                                  onChange={(e) => handleCustomerSearchChange(e.target.value)}
-                                  placeholder="Cari nama, No. HP, atau kode..."
-                                  className={`w-full text-xs pl-7 pr-6 py-1.5 rounded-lg outline-none font-medium border ${
-                                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                                  }`}
-                                />
-                                {customerSearchQuery && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setCustomerSearchQuery('')}
-                                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-0.5 cursor-pointer"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-
-                              {/* Opsi Default: Umum / Walk-in Customer */}
-                              <button
-                                type="button"
-                                onClick={handleClearCustomer}
-                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer mb-1 border-b ${
-                                  !selectedCustomer
-                                    ? 'bg-blue-500/15 border-blue-500/30 text-blue-400 font-bold'
-                                    : isLight ? 'hover:bg-slate-100 text-slate-800' : 'hover:bg-[#21262d] text-gray-200'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Users className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                  <div>
-                                    <span className="font-bold text-xs block">Umum / Walk-in Customer</span>
-                                    <span className="text-[10px] text-gray-400">Non-member reguler (Tier Retail)</span>
-                                  </div>
-                                </div>
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-700/50 text-slate-300">
-                                  Retail
-                                </span>
-                              </button>
-
-                              <div className="px-2 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                                Daftar Member Master ({customers.length})
-                              </div>
-
-                              {filteredCustomers.length > 0 ? (
-                                filteredCustomers.map((c, cIdx) => {
-                                  const rawTier = (c.memberTier || c.tier_level || 'Member').toUpperCase();
-                                  const isWholesale = rawTier.includes('GROSIR') || rawTier.includes('WHOLESALE') || c.has_store;
-                                  return (
-                                    <button
-                                      key={`cart-cust-item-${c.id}-${cIdx}`}
-                                      type="button"
-                                      onClick={() => handleSelectCustomer(c)}
-                                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                                        Boolean(selectedCustomer && (selectedCustomer as CustomerMaster).id === c.id)
-                                          ? 'bg-cyan-500/20 text-cyan-300 font-bold'
-                                          : isLight ? 'hover:bg-slate-100 text-slate-900' : 'hover:bg-[#21262d] text-gray-200'
-                                      }`}
-                                    >
-                                      <div className="min-w-0 pr-2">
-                                        <div className="font-bold truncate text-xs flex items-center gap-1">
-                                          <span>{c.name}</span>
-                                          {c.store_name && (
-                                            <span className="text-[10px] text-cyan-500 font-normal">
-                                              ({c.store_name})
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="text-[10px] text-gray-400 font-mono mt-0.5 flex items-center gap-2">
-                                          <span>{c.phone}</span>
-                                          <span className="text-amber-400 font-bold">★ {(c.points ?? 0).toLocaleString('id-ID')} Pts</span>
-                                        </div>
-                                      </div>
-                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border shrink-0 ${
-                                        isWholesale
-                                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                                          : 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                                      }`}>
-                                        {isWholesale ? 'Grosir' : 'Member'}
-                                      </span>
-                                    </button>
-                                  );
-                                })
-                              ) : (
-                                <div className="p-3 text-center text-xs text-gray-400">
-                                  Tidak ditemukan member yang cocok
-                                </div>
-                              )}
-
-                              <div className="pt-1.5 mt-1 border-t border-gray-700/50">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsCartCustomerDropdownOpen(false);
-                                    setIsNewCustomerModalOpen(true);
-                                  }}
-                                  className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-bold text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 flex items-center gap-1.5 transition cursor-pointer"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                  <span>+ Daftarkan Pelanggan / Member Baru</span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                        </div>
+                        <div className="text-right font-mono text-[11px]">
+                          <span className="text-slate-400 mr-1">
+                            {cashGiven >= grandTotal ? 'Kembali:' : 'Kurang:'}
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              cashGiven >= grandTotal
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-500'
+                            }`}
+                          >
+                            Rp{' '}
+                            {(cashGiven >= grandTotal
+                              ? changeAmount
+                              : grandTotal - cashGiven
+                            ).toLocaleString('id-ID')}
+                          </span>
                         </div>
                       </div>
-                    )}
+                    ) : null}
 
-                    {/* Daftar Item Keranjang Belanja (Scrollable Vertikal) */}
-                    <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5 divide-y divide-slate-100 dark:divide-[#30363d]/40">
-                      {cart.length === 0 ? (
-                        <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center p-4 text-gray-400 space-y-2">
-                          <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center text-[#0052FF] dark:text-[#58a6ff]">
-                            <ShoppingBag className="w-6 h-6" />
-                          </div>
-                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Keranjang Belanja Kosong</p>
-                          <p className="text-[11px] text-gray-400">Pilih menu dari katalog (kiri) atau gunakan scan barcode [F2]</p>
-                        </div>
-                      ) : (
-                        cart.map((item, idx) => {
-                          const isSelected = idx === selectedCartIndex;
-                          return (
-                            <div
-                              key={`cart-item-${item.product.id}-${idx}`}
-                              id={`fnb-cart-row-${idx}`}
-                              onClick={() => setSelectedCartIndex(idx)}
-                              className={`p-2 rounded-xl transition cursor-pointer border ${
-                                isSelected
-                                  ? 'bg-emerald-500/15 dark:bg-emerald-500/20 border-emerald-500 ring-2 ring-emerald-500/70 shadow-sm'
-                                  : isLight
-                                  ? 'border-transparent hover:bg-slate-100/80'
-                                  : 'border-transparent hover:bg-[#21262d]'
-                              } flex flex-col gap-1 text-xs`}
-                            >
-                              <div className="flex items-start justify-between gap-1">
-                                <div className="min-w-0 flex-1">
-                                  {(() => {
-                                    const isRacikan =
-                                      (item.product?.id || '').startsWith('RCK-') ||
-                                      (item.product?.barcode || '').startsWith('RCK-') ||
-                                      item.product?.pharmacyClass === 'RACIKAN' ||
-                                      item.product?.category === 'FARMASI_RACIKAN';
-
-                                    const isObatKeras =
-                                      item.product?.pharmacyClass === 'OBAT_KERAS' ||
-                                      (item.product?.category || '').toLowerCase().includes('keras') ||
-                                      (item.product?.id || '').startsWith('MED-');
-
-                                    const signaText = item.signa || item.product?.signa;
-
-                                    return (
-                                      <>
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          {isObatKeras && (
-                                            <span
-                                              className="w-4 h-4 rounded-full bg-red-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 border border-red-400 shadow-[0_0_6px_rgba(239,68,68,0.5)]"
-                                              title="Obat Keras (K)"
-                                            >
-                                              K
-                                            </span>
-                                          )}
-                                          <span className="font-bold text-xs text-slate-900 dark:text-white line-clamp-1">
-                                            {item.product.name}
-                                          </span>
-                                          {isRacikan && (
-                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-purple-900/60 text-purple-300 border border-purple-500/50 shadow-[0_0_8px_rgba(168,85,247,0.4)] shrink-0">
-                                              [KODE: {item.product.barcode || item.product.id}]
-                                            </span>
-                                          )}
-                                          {isSelected && (
-                                            <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-emerald-500 text-black shrink-0 tracking-wider">
-                                              AKTIF [↑↓]
-                                            </span>
-                                          )}
-                                        </div>
-                                      </>
-                                    );
-                                  })()}
-                                  {item.modifiers && (
-                                    <span className="text-[10px] text-amber-500 block truncate font-medium">
-                                      {item.modifiers.orderType} • Meja {item.modifiers.tableNumber || '-'}
-                                      {item.modifiers.spicyLevel !== undefined && ` • Lvl ${item.modifiers.spicyLevel}`}
-                                      {item.modifiers.notes && ` (${item.modifiers.notes})`}
-                                    </span>
-                                  )}
-                                </div>
-                                <span className="font-mono font-black text-xs text-slate-950 dark:text-emerald-400 shrink-0">
-                                  Rp {item.subtotal.toLocaleString('id-ID')}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[10px] text-gray-400 font-mono">
-                                  @ Rp {item.product.sell_price.toLocaleString('id-ID')}
-                                </span>
-
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateQty(idx, -1);
-                                    }}
-                                    className="w-5 h-5 rounded bg-slate-200 dark:bg-slate-800 hover:bg-rose-500 hover:text-white text-slate-700 dark:text-gray-300 flex items-center justify-center text-xs font-black transition cursor-pointer"
-                                    title="Kurangi Qty [-]"
-                                  >
-                                    <Minus className="w-2.5 h-2.5" />
-                                  </button>
-
-                                  <input
-                                    id={`pos-qty-input-${idx}`}
-                                    type="number"
-                                    min="1"
-                                    value={item.quantity}
-                                    onChange={(e) => handleDirectQtyChange(idx, Number(e.target.value))}
-                                    onFocus={(e) => {
-                                      e.target.select();
-                                      setSelectedCartIndex(idx);
-                                    }}
-                                    className={`w-9 text-center font-mono font-bold text-xs py-0.5 rounded border ${
-                                      isLight
-                                        ? 'bg-white border-slate-300 text-slate-900'
-                                        : 'bg-[#0d1117] border-[#30363d] text-white'
-                                    } outline-none focus:border-[#0052FF]`}
-                                  />
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleUpdateQty(idx, 1);
-                                    }}
-                                    className="w-5 h-5 rounded bg-slate-200 dark:bg-slate-800 hover:bg-emerald-500 hover:text-black text-slate-700 dark:text-gray-300 flex items-center justify-center text-xs font-black transition cursor-pointer"
-                                    title="Tambah Qty [+]"
-                                  >
-                                    <Plus className="w-2.5 h-2.5" />
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleRequestRemoveItem(idx);
-                                    }}
-                                    className="p-1 rounded text-rose-500 hover:bg-rose-500/15 transition cursor-pointer ml-1"
-                                    title={language === 'ID' ? 'Hapus Baris Item (Otorisasi Supervisor) [Delete]' : 'Void Line Item (Supervisor Approval) [Delete]'}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
+                    {/* Tombol Metode Bayar F&B: Tunai, QRIS, Debit, Split (Tanpa Kasbon/DP) */}
+                    <div
+                      className={`grid grid-cols-4 p-0.5 rounded-lg border text-[11px] gap-0.5 ${
+                        isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950 border-slate-800'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('CASH')}
+                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                          paymentMethod === 'CASH'
+                            ? 'bg-cyan-600 text-white shadow-xs'
+                            : isLight
+                            ? 'text-slate-700 hover:text-slate-900'
+                            : 'text-gray-300 hover:text-white'
+                        }`}
+                      >
+                        💵 Tunai
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod('QRIS');
+                          setIsQrisModalOpen(true);
+                        }}
+                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                          paymentMethod === 'QRIS'
+                            ? 'bg-cyan-600 text-white shadow-xs'
+                            : isLight
+                            ? 'text-slate-700 hover:text-slate-900'
+                            : 'text-gray-300 hover:text-white'
+                        }`}
+                      >
+                        📱 QRIS
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod('EDC_DEBIT')}
+                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                          paymentMethod === 'EDC_DEBIT'
+                            ? 'bg-cyan-600 text-white shadow-xs'
+                            : isLight
+                            ? 'text-slate-700 hover:text-slate-900'
+                            : 'text-gray-300 hover:text-white'
+                        }`}
+                      >
+                        💳 Debit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSelectSplitPayment}
+                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-semibold whitespace-nowrap transition ${
+                          paymentMethod === 'SPLIT'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : isLight
+                            ? 'text-indigo-700 hover:bg-indigo-50'
+                            : 'text-indigo-300 hover:text-white'
+                        }`}
+                      >
+                        🔀 Split
+                      </button>
                     </div>
 
-                    {/* Panel Finansial & Pembayaran Terintegrasi (Sticky Bagian Bawah Kolom Kanan) */}
-                    <div className={`p-2.5 border-t-2 space-y-2 shrink-0 ${
-                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-                    }`}>
-                      {/* Ringkasan Pelanggan, Tier & Poin Loyalitas */}
-                      <div className={`p-2 rounded-xl border text-[11px] space-y-1.5 ${
-                        selectedCustomer
-                          ? isLight
-                            ? 'bg-blue-50/70 border-blue-200 text-blue-950'
-                            : 'bg-blue-950/30 border-blue-800/40 text-blue-200'
-                          : isLight
-                          ? 'bg-slate-100/80 border-slate-200 text-slate-700'
-                          : 'bg-slate-900/40 border-slate-800 text-gray-300'
-                      }`}>
-                        <div className="flex items-center justify-between font-bold">
-                          <span className="flex items-center gap-1.5">
-                            <UserCheck className="w-3.5 h-3.5 text-[#0052FF] dark:text-[#58a6ff]" />
-                            <span>Pelanggan & Tier:</span>
-                          </span>
-                          <span className="font-mono">
-                            {selectedCustomer
-                              ? `${selectedCustomer.name} (${getTierLabel(selectedPriceTier)})`
-                              : 'Umum / Walk-in (Retail)'}
-                          </span>
+                    <button
+                      type="button"
+                      onClick={handleManualBayarClick}
+                      disabled={cart.length === 0 || (paymentMethod === 'SPLIT' && !isSplitReadyToPay)}
+                      className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold text-xs leading-5 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-[0.99] transition-all duration-200"
+                    >
+                      {paymentMethod === 'SPLIT'
+                        ? isSplitReadyToPay
+                          ? 'Bayar Split [F10]'
+                          : `Split Kurang Rp ${splitShortfall.toLocaleString('id-ID')}`
+                        : 'Bayar [F10]'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (isSalonServiceTerminal || isLaundryTerminal) ? (
+              /* SPLIT-SCREEN VERTIKAL 2 KOLOM SEKTOR SERVICE (BARBERSHOP & SALON / LAUNDRY) */
+              <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-2.5 overflow-hidden h-full">
+                {/* KOLOM KIRI (~62%): PEMILIH STYLIST / INTAKE LAUNDRY & GRID KATALOG LAYANAN */}
+                <div
+                  className={`w-full lg:w-[62%] flex flex-col h-full min-h-0 rounded-xl border overflow-hidden ${
+                    isLight
+                      ? 'bg-white border-purple-500/50 shadow-sm text-slate-900'
+                      : 'bg-slate-900 border-purple-500/30 text-white'
+                  }`}
+                >
+                  {isSalonServiceTerminal ? (
+                    <>
+                      {/* Bar Atas Kolom Kiri: Pemilih Stylist Utama & Pil Filter Kategori Cepat */}
+                      <div
+                        className={`p-2.5 border-b space-y-2 shrink-0 ${
+                          isLight ? 'bg-purple-50/60 border-purple-200' : 'bg-purple-500/10 border-purple-500/25'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold text-purple-700 dark:text-purple-300">
+                              ✂️ Stylist / Kapster Utama:
+                            </span>
+                            <select
+                              value={selectedServiceStylist?.id || ''}
+                              onChange={(e) => {
+                                const picked = activeServiceStylists.find((s) => s.id === e.target.value);
+                                setSelectedStylistId(e.target.value);
+                                setStylistName(picked?.name || '');
+                              }}
+                              className={`px-2.5 py-1 rounded-lg border text-xs font-medium outline-none cursor-pointer ${
+                                isLight
+                                  ? 'bg-white border-purple-300 text-slate-900'
+                                  : 'bg-slate-950 border-purple-500/40 text-white'
+                              }`}
+                            >
+                              {activeServiceStylists.length === 0 ? (
+                                <option value="">Belum ada Stylist Aktif</option>
+                              ) : (
+                                activeServiceStylists.map((st) => (
+                                  <option key={st.id} value={st.id}>
+                                    {st.name} — {st.role} (Komisi {st.commissionRate}%)
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+                          {serviceCartCommissionSummary && serviceCartCommissionSummary.totalCommission > 0 && (
+                            <span className="px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35">
+                              Est. Komisi Jasa: Rp {serviceCartCommissionSummary.totalCommission.toLocaleString('id-ID')}
+                            </span>
+                          )}
                         </div>
 
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 text-slate-500 dark:text-gray-400">
-                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                            <span>Poin Loyalitas:</span>
+                        {/* Pil Filter Kategori Cepat: Semua, Satuan, Paket Bundling, Add-on, Retail */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-purple-500/20">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {(
+                              [
+                                { id: 'ALL' as const, label: 'Semua' },
+                                { id: 'LAYANAN_SATUAN' as const, label: 'Satuan' },
+                                { id: 'PAKET_BUNDLING' as const, label: 'Paket Bundling' },
+                                { id: 'LAYANAN_ADDON' as const, label: 'Add-on' },
+                                { id: 'PRODUK_RETAIL_SALON' as const, label: 'Retail' },
+                              ]
+                            ).map((pill) => {
+                              const isActive = salonCatalogFilter === pill.id;
+                              return (
+                                <button
+                                  key={pill.id}
+                                  type="button"
+                                  onClick={() => setSalonCatalogFilter(pill.id)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer transition ${
+                                    isActive
+                                      ? 'bg-purple-600 text-white border-purple-500 shadow-xs'
+                                      : isLight
+                                      ? 'bg-white text-slate-700 border-slate-300 hover:bg-purple-50'
+                                      : 'bg-slate-950 text-slate-300 border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  {pill.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <span className="text-[10px] font-mono text-purple-700 dark:text-purple-300">
+                            {filteredSalonServiceCatalog.length} Item Aktif
                           </span>
-                          {selectedCustomer ? (
-                            <div className="font-mono text-right">
-                              <span className="font-extrabold text-amber-600 dark:text-amber-300">
-                                {(selectedCustomer.points ?? 0).toLocaleString('id-ID')} Pts
-                              </span>
-                              {grandTotal > 0 && (
-                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold ml-1.5">
-                                  (+{Math.floor(grandTotal / 10000)} Pts)
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="font-mono text-gray-400">0 Pts (Non-Member)</span>
-                          )}
                         </div>
                       </div>
 
-                      {/* Subtotal & PPN 11% Toggle */}
-                      <div className="space-y-1 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-600 dark:text-gray-400 font-semibold">Subtotal:</span>
-                          <span className="font-mono font-black text-slate-900 dark:text-white">
-                            Rp {subtotal.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                          <button
-                            type="button"
-                            onClick={() => setIsTaxIncluded(!isTaxIncluded)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded font-black border transition cursor-pointer flex items-center gap-0.5 active:scale-95 ${
-                              isTaxIncluded
-                                ? 'bg-blue-600 text-white border-blue-600'
-                                : isLight
-                                ? 'text-slate-700 border-slate-400 bg-slate-100 hover:bg-slate-200'
-                                : 'text-gray-300 border-slate-600 bg-slate-800 hover:bg-slate-700'
-                            }`}
-                            title={isTaxIncluded ? 'PPN 11% Aktif' : 'PPN 0%'}
-                          >
-                            <span>PPN</span>
-                            <span>{isTaxIncluded ? '+11%' : '0%'}</span>
-                          </button>
-                          <span className={`font-mono text-xs font-black ${
-                            isTaxIncluded && taxAmount > 0
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-slate-400'
-                          }`}>
-                            Rp {taxAmount.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-
-                        {calculatedDiscount > 0 && (
-                          <div className="flex items-center justify-between text-amber-500 font-bold">
-                            <span>Diskon:</span>
-                            <span className="font-mono">-Rp {calculatedDiscount.toLocaleString('id-ID')}</span>
+                      {/* Grid Kartu Layanan & Produk Salon (2–3 Kolom Responsif dengan Scroll Internal) */}
+                      <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
+                        {filteredSalonServiceCatalog.length === 0 ? (
+                          <div className="h-full flex flex-col items-center justify-center text-center text-xs text-slate-500 py-8">
+                            Belum ada layanan/produk pada kategori filter ini.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                            {filteredSalonServiceCatalog.map((svc) => {
+                              const isSvcItem = svc.itemType === 'SERVICE';
+                              const fmtMeta = getServiceFormatMeta(svc);
+                              return (
+                                <button
+                                  key={svc.id}
+                                  type="button"
+                                  onClick={() => handleAddToCart(svc, 1)}
+                                  className={`text-left p-2.5 rounded-xl border transition cursor-pointer active:scale-[0.99] flex flex-col justify-between gap-2 ${
+                                    isLight
+                                      ? 'bg-white hover:bg-purple-50/70 border-slate-200 hover:border-purple-400 text-slate-900 shadow-2xs'
+                                      : 'bg-slate-950/80 hover:bg-purple-950/40 border-slate-800 hover:border-purple-400/70 text-slate-100'
+                                  }`}
+                                >
+                                  <div className="space-y-1">
+                                    <div className="flex items-start justify-between gap-1.5">
+                                      <span className="text-xs font-semibold leading-snug line-clamp-2">
+                                        {svc.name}
+                                      </span>
+                                      <span
+                                        className={`shrink-0 text-[9px] font-mono px-1.5 py-0.5 rounded border ${fmtMeta.badgeClass}`}
+                                      >
+                                        {fmtMeta.shortLabel}
+                                      </span>
+                                    </div>
+                                    {svc.packageDetails && (
+                                      <div className="text-[10px] leading-snug text-amber-700 dark:text-amber-300/90 line-clamp-2">
+                                        Isi: {svc.packageDetails}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-slate-200/70 dark:border-slate-800/80">
+                                    <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                      Rp {Number(svc.sell_price || 0).toLocaleString('id-ID')}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                      {isSvcItem
+                                        ? `⏱ ${svc.serviceDuration || '30 mnt'}`
+                                        : `Stok ${svc.stock ?? 0}`}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
-
-                      {/* Grand Total Display */}
-                      <div className="flex items-baseline justify-between pt-1 border-t border-slate-200 dark:border-gray-800">
-                        <div>
-                          <span className="text-[11px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider">
-                            TOTAL
-                          </span>
-                          <span className="text-[10px] text-gray-400 block font-mono">
-                            {selectedCustomer ? `${selectedCustomer.name} • ${selectedPriceTier}` : 'Walk-in • RETAIL'}
-                          </span>
+                    </>
+                  ) : (
+                    /* KOLOM KIRI LAUNDRY: TAB TRANSAKSI/TRACKING, INTAKE CEPAT & GRID KATALOG LAUNDRY */
+                    <>
+                      <div
+                        className={`px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b shrink-0 ${
+                          isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950/90 border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            id="btn-laundry-tab-order"
+                            type="button"
+                            onClick={() => setLaundryActiveTab('ORDER')}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition ${
+                              laundryActiveTab === 'ORDER'
+                                ? 'bg-cyan-600 text-white shadow-xs'
+                                : isLight
+                                ? 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                                : 'bg-slate-900 border border-slate-700 text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            <ShoppingBag className="w-3 h-3" />
+                            <span>Transaksi &amp; Input Order</span>
+                          </button>
+                          <button
+                            id="btn-laundry-tab-tracking"
+                            type="button"
+                            onClick={() => setLaundryActiveTab('TRACKING')}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition ${
+                              laundryActiveTab === 'TRACKING'
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : isLight
+                                ? 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                                : 'bg-slate-900 border border-slate-700 text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            <ClipboardList className="w-3 h-3" />
+                            <span>Tracking Cucian &amp; Rak</span>
+                            <span
+                              className={`px-1 py-0 rounded text-[10px] font-mono font-bold ${
+                                laundryActiveTab === 'TRACKING'
+                                  ? 'bg-black/25 text-white'
+                                  : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-300'
+                              }`}
+                            >
+                              {activeLaundryQueueCount}
+                            </span>
+                          </button>
                         </div>
-                        <div id="pos-grand-total-display" className="text-xl sm:text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400 leading-none">
-                          Rp {grandTotal.toLocaleString('id-ID')}
+
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                          <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>
+                              Est. Selesai ({computedLaundrySla.label}): {computedLaundrySla.display}
+                            </span>
+                          </span>
                         </div>
                       </div>
 
-                      {/* Pilihan Metode Pembayaran (CASH, QRIS, DEBIT) */}
-                      <div className={`grid grid-cols-3 gap-1 p-0.5 rounded-lg border text-xs font-black ${
-                        isLight ? 'bg-slate-200/70 border-slate-300' : 'bg-[#161b22] border-[#30363d]'
-                      }`}>
+                      {laundryActiveTab === 'TRACKING' ? (
+                        <div className="flex-1 min-h-0 flex flex-col p-2.5 overflow-hidden">
+                          <LaundryTrackingBoard onBackToOrder={() => setLaundryActiveTab('ORDER')} />
+                        </div>
+                      ) : (
+                        <>
+                          <div className="px-2.5 py-1 bg-cyan-500/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px] leading-4 shrink-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-1">
+                                <span>🧺</span>
+                                <span>Kasir Laundry Multi-Satuan</span>
+                              </span>
+                              <input
+                                type="text"
+                                value={stylistName}
+                                onChange={(e) => setStylistName(e.target.value)}
+                                placeholder="Rak / Petugas..."
+                                className={`w-28 h-6 px-2 py-0 rounded-md border text-[11px] outline-none ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-900'
+                                    : 'bg-slate-900 border-slate-700 text-white'
+                                }`}
+                              />
+                              {scaleLiveState.connected && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  <span>
+                                    Serial: {scaleLiveState.netKg.toFixed(2)} kg
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5">
+                              {luasLaundryServices.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAreaTargetCartIndex(null);
+                                    setAreaModalService(luasLaundryServices[0]);
+                                  }}
+                                  className="px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
+                                >
+                                  <Maximize2 className="w-3 h-3" />
+                                  <span>Hitung P×L (m²)</span>
+                                </button>
+                              )}
+                              <button
+                                id="btn-open-digital-scale"
+                                type="button"
+                                onClick={() => {
+                                  const selectedRow =
+                                    selectedCartIndex !== null ? cart[selectedCartIndex] : undefined;
+                                  const defaultKiloan =
+                                    selectedRow && selectedRow.product.laundryUnitType === 'KILOAN'
+                                      ? selectedRow.product
+                                      : kiloanLaundryServices[0] || null;
+                                  setScaleTargetService(defaultKiloan);
+                                  setIsDigitalScaleModalOpen(true);
+                                }}
+                                className="px-2.5 py-0.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
+                              >
+                                <Scale className="w-3 h-3" />
+                                <span>Timbangan Digital</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Form Cepat Intake Pelanggan & Fisik Pakaian */}
+                          <div
+                            className={`px-2.5 py-1.5 border-t grid grid-cols-2 sm:grid-cols-6 gap-1.5 items-end shrink-0 ${
+                              isLight ? 'bg-cyan-50/40 border-slate-200' : 'bg-slate-900/80 border-slate-800'
+                            }`}
+                          >
+                            <div>
+                              <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                                Nama Pelanggan
+                              </label>
+                              <input
+                                id="input-laundry-customer-name"
+                                type="text"
+                                value={selectedCustomer?.name || laundryCustomerName}
+                                onChange={(e) => {
+                                  if (selectedCustomer) handleClearCustomer();
+                                  setLaundryCustomerName(e.target.value);
+                                }}
+                                placeholder="Walk-in / Nama..."
+                                className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-900'
+                                    : 'bg-slate-950 border-slate-700 text-white'
+                                }`}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                                No. WhatsApp
+                              </label>
+                              <input
+                                id="input-laundry-customer-wa"
+                                type="tel"
+                                value={selectedCustomer?.phone || laundryCustomerPhone}
+                                onChange={(e) => setLaundryCustomerPhone(e.target.value)}
+                                placeholder="0812xxxx..."
+                                className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] font-mono outline-none ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-900'
+                                    : 'bg-slate-950 border-slate-700 text-white'
+                                }`}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                                Fisik (Total Pcs)
+                              </label>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setLaundryTotalPieces((p) => Math.max(1, p - 1))}
+                                  className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                                    isLight
+                                      ? 'bg-white border-slate-300 text-slate-700'
+                                      : 'bg-slate-950 border-slate-700 text-slate-200'
+                                  }`}
+                                >
+                                  <Minus className="w-2.5 h-2.5" />
+                                </button>
+                                <input
+                                  id="input-laundry-total-pcs"
+                                  type="number"
+                                  min={1}
+                                  value={laundryTotalPieces}
+                                  onChange={(e) =>
+                                    setLaundryTotalPieces(Math.max(1, parseInt(e.target.value, 10) || 1))
+                                  }
+                                  className={`w-full h-7 text-center rounded-md border text-[11px] font-mono font-bold outline-none ${
+                                    isLight
+                                      ? 'bg-white border-slate-300 text-slate-900'
+                                      : 'bg-slate-950 border-slate-700 text-white'
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setLaundryTotalPieces((p) => p + 1)}
+                                  className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                                    isLight
+                                      ? 'bg-white border-slate-300 text-slate-700'
+                                      : 'bg-slate-950 border-slate-700 text-slate-200'
+                                  }`}
+                                >
+                                  <Plus className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                                Catatan Kondisi Awal
+                              </label>
+                              <input
+                                id="input-laundry-condition-notes"
+                                type="text"
+                                value={laundryConditionNotes}
+                                onChange={(e) => setLaundryConditionNotes(e.target.value)}
+                                placeholder="Pisah putih, ada noda..."
+                                className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-900'
+                                    : 'bg-slate-950 border-slate-700 text-white'
+                                }`}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                                Paket SLA
+                              </label>
+                              <select
+                                value={String(laundrySlaOverrideHours)}
+                                onChange={(e) =>
+                                  setLaundrySlaOverrideHours(
+                                    e.target.value === 'AUTO' ? 'AUTO' : Number(e.target.value)
+                                  )
+                                }
+                                className={`w-full h-7 px-1.5 py-0.5 rounded-md border text-[11px] outline-none cursor-pointer ${
+                                  isLight
+                                    ? 'bg-white border-indigo-300 text-indigo-900'
+                                    : 'bg-slate-950 border-indigo-500/40 text-indigo-200'
+                                }`}
+                              >
+                                <option value="AUTO">Auto ({computedLaundrySla.hours}j)</option>
+                                <option value="6">Express 6j</option>
+                                <option value="24">Kilat 24j</option>
+                                <option value="48">Reguler 48j</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Pil Filter Kategori Satuan Laundry */}
+                          <div
+                            className={`px-2.5 py-1.5 border-t border-b flex flex-wrap items-center justify-between gap-1.5 shrink-0 ${
+                              isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-950/60 border-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {(
+                                [
+                                  { id: 'ALL', label: 'Semua' },
+                                  { id: 'KILOAN', label: 'Kiloan (kg)' },
+                                  { id: 'SATUAN', label: 'Satuan (pcs/stel)' },
+                                  { id: 'PASANG', label: 'Pasang' },
+                                  { id: 'LUAS', label: 'Luas (m²)' },
+                                ] as const
+                              ).map((tab) => (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() => setLaundryCatalogFilter(tab.id)}
+                                  className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold border cursor-pointer transition ${
+                                    laundryCatalogFilter === tab.id
+                                      ? 'bg-cyan-600 text-white border-cyan-500'
+                                      : isLight
+                                      ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                                      : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  {tab.label}
+                                </button>
+                              ))}
+                            </div>
+                            <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-300">
+                              {filteredQuickLaundryServices.length} Layanan
+                            </span>
+                          </div>
+
+                          {/* Grid Kartu Layanan Laundry (2–3 Kolom Responsif dengan Scroll Internal) */}
+                          <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
+                            <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                              {filteredQuickLaundryServices.map((srv) => {
+                                const isKiloan =
+                                  srv.laundryUnitType === 'KILOAN' ||
+                                  (srv.unit || '').toLowerCase() === 'kg';
+                                const isLuas =
+                                  srv.laundryUnitType === 'LUAS' ||
+                                  (srv.unit || '').toLowerCase().includes('m2');
+                                const minOrderVal = Number(srv.minOrderWeightKg ?? srv.minOrderQty ?? 0);
+                                return (
+                                  <div
+                                    key={srv.id}
+                                    onClick={() => handleAddToCart(srv, 1)}
+                                    className={`p-2.5 rounded-xl border cursor-pointer transition flex flex-col justify-between gap-2 ${
+                                      isLight
+                                        ? 'bg-white hover:border-cyan-500 border-slate-200 shadow-2xs'
+                                        : 'bg-slate-950/80 hover:border-cyan-400/60 border-slate-800'
+                                    }`}
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                          {srv.laundryUnitType || srv.unit}
+                                        </span>
+                                        {srv.slaDuration && (
+                                          <span className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300 truncate">
+                                            ⏱ {srv.slaDuration}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs font-semibold leading-snug line-clamp-2">
+                                        {srv.name}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-slate-200/70 dark:border-slate-800">
+                                      <div className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                        Rp {srv.sell_price.toLocaleString('id-ID')}/{srv.unit}
+                                      </div>
+                                      {isKiloan ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setScaleTargetService(srv);
+                                            setIsDigitalScaleModalOpen(true);
+                                          }}
+                                          className="px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                          title={`Timbang ${srv.name} (Min. ${minOrderVal || 2} kg)`}
+                                        >
+                                          <Scale className="w-2.5 h-2.5" />
+                                          <span>Timbang</span>
+                                        </button>
+                                      ) : isLuas ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setAreaTargetCartIndex(null);
+                                            setAreaModalService(srv);
+                                          }}
+                                          className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                        >
+                                          <Maximize2 className="w-2.5 h-2.5" />
+                                          <span>P×L</span>
+                                        </button>
+                                      ) : minOrderVal > 1 ? (
+                                        <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400">
+                                          Min {minOrderVal}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* KOLOM KANAN (~38%): DAFTAR BELANJA & PANEL PEMBAYARAN STRUK */}
+                <div
+                  className={`w-full lg:w-[38%] flex flex-col h-full min-h-0 rounded-xl border overflow-hidden ${
+                    isLight
+                      ? 'bg-white border-cyan-500/60 shadow-sm text-slate-900'
+                      : 'bg-slate-900 border-cyan-500/35 text-white'
+                  }`}
+                >
+                  {/* Header Daftar Belanja */}
+                  <div
+                    className={`px-3 py-2 border-b flex items-center justify-between text-xs shrink-0 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                      <span className="font-semibold text-xs sm:text-sm">Daftar Belanja</span>
+                      <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                        {cart.length} SKU •{' '}
+                        {Number.isInteger(totalCartItemCount)
+                          ? totalCartItemCount
+                          : totalCartItemCount.toFixed(2)}{' '}
+                        {isLaundryTerminal ? 'Unit' : 'Item'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsManualSearchOpen(true)}
+                      className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium text-xs cursor-pointer flex items-center gap-1 active:scale-[0.99] transition-all"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Pilih Layanan [F3]</span>
+                    </button>
+                  </div>
+
+                  {/* Daftar Item Keranjang Vertikal */}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
+                    {cart.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-2">
+                        <Barcode className="w-7 h-7 text-cyan-500/50" />
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Klik kartu layanan di sebelah kiri atau tekan [F3] untuk menambah pesanan
+                        </p>
                         <button
                           type="button"
-                          onClick={() => setPaymentMethod('CASH')}
-                          className={`py-1 rounded text-center transition cursor-pointer text-xs ${
+                          onClick={() => setIsManualSearchOpen(true)}
+                          className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs rounded-lg cursor-pointer transition"
+                        >
+                          + Pilih Layanan [F3]
+                        </button>
+                      </div>
+                    ) : (
+                      cart.map((item, idx) => {
+                        const fmtMeta = getServiceFormatMeta(item.product);
+                        const itemUnit = item.selectedUnit || item.product.unit || 'Sesi';
+                        const rawUnitPrice = item.product.sell_price || 0;
+                        const unitDisc = item.itemDiscount || 0;
+                        const effectiveUnitPrice = Math.max(0, rawUnitPrice - unitDisc);
+                        return (
+                          <div
+                            key={`svc-cart-${item.product.id}-${idx}`}
+                            onClick={() => setSelectedCartIndex(idx)}
+                            className={`p-2 rounded-xl border text-xs transition ${
+                              idx === selectedCartIndex
+                                ? isLight
+                                  ? 'bg-cyan-50/70 border-cyan-400'
+                                  : 'bg-cyan-500/10 border-cyan-500/40'
+                                : isLight
+                                ? 'bg-white border-slate-200 hover:bg-slate-50'
+                                : 'bg-slate-950/70 border-slate-800 hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold leading-snug">
+                                    {item.product.name}
+                                  </span>
+                                  <span
+                                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${fmtMeta.badgeClass}`}
+                                  >
+                                    {fmtMeta.shortLabel}
+                                  </span>
+                                </div>
+                                {item.product.packageDetails && (
+                                  <div className="text-[10px] text-amber-700 dark:text-amber-300/90 leading-snug">
+                                    Isi: {item.product.packageDetails}
+                                  </div>
+                                )}
+                                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                  <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                    {item.quantity} {itemUnit} × Rp{' '}
+                                    {effectiveUnitPrice.toLocaleString('id-ID')}
+                                  </span>
+                                  {isSalonServiceTerminal && (
+                                    <div
+                                      className="inline-flex items-center gap-1"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {item.product.itemType === 'SERVICE' ? (
+                                        <select
+                                          value={item.stylistId || selectedServiceStylist?.id || ''}
+                                          onChange={(e) => {
+                                            const picked = activeServiceStylists.find(
+                                              (s) => s.id === e.target.value
+                                            );
+                                            setCart((prev) =>
+                                              prev.map((row, rowIdx) =>
+                                                rowIdx === idx
+                                                  ? {
+                                                      ...row,
+                                                      stylistId: picked?.id,
+                                                      stylistName: picked?.name,
+                                                      stylistCommissionRate: picked?.commissionRate,
+                                                    }
+                                                  : row
+                                              )
+                                            );
+                                          }}
+                                          className={`text-[10px] font-medium py-0.5 px-1.5 rounded border cursor-pointer outline-none ${
+                                            isLight
+                                              ? 'bg-purple-50 border-purple-300 text-purple-800'
+                                              : 'bg-purple-500/15 border-purple-500/35 text-purple-200'
+                                          }`}
+                                          title="Pilih Stylist / Kapster untuk layanan ini"
+                                        >
+                                          {activeServiceStylists.map((st) => (
+                                            <option key={st.id} value={st.id}>
+                                              ✂️ {st.name} ({st.commissionRate}%)
+                                            </option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                          Non-Komisi
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {isLaundryTerminal &&
+                                    (item.product.laundryUnitType === 'KILOAN' ||
+                                      (item.product.unit || '').toLowerCase() === 'kg') && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedCartIndex(idx);
+                                          setScaleTargetService(item.product);
+                                          setIsDigitalScaleModalOpen(true);
+                                        }}
+                                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer flex items-center gap-0.5"
+                                      >
+                                        <Scale className="w-2.5 h-2.5" />
+                                        <span>Timbang</span>
+                                      </button>
+                                    )}
+                                </div>
+                              </div>
+
+                              {/* Kontrol +/- Qty, Subtotal & Hapus */}
+                              <div
+                                className="flex flex-col items-end gap-1 shrink-0"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                                  Rp {item.subtotal.toLocaleString('id-ID')}
+                                </span>
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateQty(idx, -1)}
+                                    className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] cursor-pointer transition ${
+                                      isLight
+                                        ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800'
+                                        : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                    }`}
+                                    title="Kurangi Qty"
+                                  >
+                                    <Minus className="w-2.5 h-2.5" />
+                                  </button>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      handleDirectQtyChange(idx, parseFloat(e.target.value) || 1)
+                                    }
+                                    className={`w-11 h-5 text-center font-mono text-[11px] border rounded ${
+                                      isLight
+                                        ? 'border-slate-300 bg-white text-slate-900'
+                                        : 'border-slate-700 bg-slate-900 text-white'
+                                    }`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateQty(idx, 1)}
+                                    className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] cursor-pointer transition ${
+                                      isLight
+                                        ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800'
+                                        : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                    }`}
+                                    title="Tambah Qty"
+                                  >
+                                    <Plus className="w-2.5 h-2.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRequestRemoveItem(idx)}
+                                    className="w-5 h-5 flex items-center justify-center rounded border border-rose-500/40 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 cursor-pointer ml-0.5"
+                                    title="Hapus Item"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Panel Ringkasan Pembayaran Terkunci di Bawah Kolom Kanan */}
+                  <div
+                    className={`p-2.5 border-t space-y-2 shrink-0 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    {/* Baris Subtotal, PPN & TOTAL Besar */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="space-y-0.5 text-[11px]">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                          <span>Subtotal:</span>
+                          <span className="font-mono text-slate-800 dark:text-slate-200">
+                            Rp {subtotalBeforePromo.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setIsTaxIncluded(!isTaxIncluded)}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-mono border cursor-pointer transition ${
+                              isTaxIncluded
+                                ? 'bg-cyan-600 text-white border-cyan-500'
+                                : isLight
+                                ? 'bg-white text-slate-600 border-slate-300'
+                                : 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
+                          >
+                            PPN {isTaxIncluded ? '+11%' : '0%'}
+                          </button>
+                          <span className="font-mono text-[11px]">
+                            Rp {taxAmount.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          TOTAL
+                        </div>
+                        <div
+                          id="pos-grand-total-display"
+                          className="font-mono font-bold text-lg sm:text-xl text-emerald-600 dark:text-emerald-400 tabular-nums"
+                        >
+                          Rp {grandTotal.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Opsi Status Bayar Khusus Laundry (Lunas Awal / DP / Bayar Ambil) */}
+                    {isLaundryTerminal && (
+                      <div
+                        className={`grid grid-cols-3 p-0.5 rounded-lg border text-[11px] gap-0.5 ${
+                          isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-800'
+                        }`}
+                      >
+                        {(
+                          [
+                            { id: 'LUNAS_AWAL' as LaundryPaymentStatus, label: 'Lunas Awal' },
+                            { id: 'DP' as LaundryPaymentStatus, label: 'DP' },
+                            { id: 'BAYAR_AMBIL' as LaundryPaymentStatus, label: 'Bayar Ambil' },
+                          ]
+                        ).map((st) => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => {
+                              setLaundryPaymentStatus(st.id);
+                              if (st.id === 'DP' && laundryDpAmount === 0) {
+                                setLaundryDpAmount(Math.round(grandTotal * 0.5));
+                              }
+                            }}
+                            className={`py-1 px-2 rounded-md font-semibold cursor-pointer transition ${
+                              laundryPaymentStatus === st.id
+                                ? st.id === 'LUNAS_AWAL'
+                                  ? 'bg-emerald-600 text-white'
+                                  : st.id === 'DP'
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-indigo-600 text-white'
+                                : isLight
+                                ? 'text-slate-700 hover:bg-slate-200'
+                                : 'text-slate-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            {st.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Input Diterima / Split / Kasbon DP */}
+                    {paymentMethod === 'SPLIT' ? (
+                      <div className="p-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 space-y-1">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <label className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 block">
+                              Nominal Tunai (1-10101):
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={splitCashAmount || ''}
+                              onChange={(e) =>
+                                setSplitCashAmount(Math.max(0, Number(e.target.value) || 0))
+                              }
+                              placeholder="0"
+                              className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                                isLight
+                                  ? 'border-emerald-500/60 bg-white text-slate-900'
+                                  : 'border-emerald-500/50 bg-slate-900 text-white'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300">
+                                Non-Tunai ({splitNonCashChannel}):
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next =
+                                    splitNonCashChannel === 'QRIS'
+                                      ? 'DEBIT'
+                                      : splitNonCashChannel === 'DEBIT'
+                                      ? 'TRANSFER'
+                                      : 'QRIS';
+                                  setSplitNonCashChannel(next);
+                                }}
+                                className="text-[9px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
+                                title="Klik untuk ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
+                              >
+                                Ubah
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                value={splitNonCashAmount || ''}
+                                onChange={(e) =>
+                                  setSplitNonCashAmount(Math.max(0, Number(e.target.value) || 0))
+                                }
+                                placeholder="0"
+                                className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                                  isLight
+                                    ? 'border-indigo-500/60 bg-white text-slate-900'
+                                    : 'border-indigo-500/50 bg-slate-900 text-white'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
+                                }
+                                className="h-7 px-1.5 rounded text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
+                                title="Isi otomatis sisa kekurangan"
+                              >
+                                Sisa
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono pt-0.5">
+                          <span className="text-slate-500 dark:text-slate-400">
+                            Status Split (1-10101 + 1-10102):
+                          </span>
+                          <span
+                            className={`font-bold ${
+                              splitShortfall === 0 && grandTotal > 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-500'
+                            }`}
+                          >
+                            {splitShortfall === 0 && grandTotal > 0
+                              ? '✓ LUNAS 100%'
+                              : `Kurang: Rp ${splitShortfall.toLocaleString('id-ID')}`}
+                          </span>
+                        </div>
+                      </div>
+                    ) : isKasbonAllowedForSector &&
+                      (paymentMethod === 'KREDIT / TEMPO (AR)' ||
+                        (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')) ? (
+                      <div className="p-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                              Bayar DP Awal (Rp):
+                            </span>
+                            <input
+                              id="pos-kasbon-dp-input"
+                              type="number"
+                              min={0}
+                              max={grandTotal}
+                              value={effectiveKasbonDp || ''}
+                              onChange={(e) => {
+                                const val = Math.max(
+                                  0,
+                                  Math.min(grandTotal, Number(e.target.value) || 0)
+                                );
+                                setKasbonDpAmount(val);
+                                if (isLaundryTerminal) {
+                                  setLaundryDpAmount(val);
+                                  setLaundryPaymentStatus(val > 0 ? 'DP' : 'BAYAR_AMBIL');
+                                }
+                              }}
+                              placeholder="0 (Kasbon 100%)"
+                              className={`h-7 w-24 px-1.5 text-xs font-mono font-semibold text-center border rounded-lg outline-none ${
+                                isLight
+                                  ? 'border-amber-400 bg-white text-slate-900'
+                                  : 'border-amber-500/50 bg-slate-900 text-white'
+                              }`}
+                            />
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[9px] text-slate-500 dark:text-slate-400 block">
+                              Sisa Piutang / Kasbon (1-10105):
+                            </span>
+                            <span className="font-mono font-bold text-xs text-rose-600 dark:text-rose-400">
+                              Rp {kasbonRemainingPiutang.toLocaleString('id-ID')}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono pt-0.5 border-t border-amber-500/20">
+                          <span
+                            className={
+                              resolvedTopBarCustomerName
+                                ? 'text-emerald-600 dark:text-emerald-400 font-semibold truncate max-w-[170px]'
+                                : 'text-amber-600 dark:text-amber-400 font-semibold'
+                            }
+                          >
+                            {resolvedTopBarCustomerName
+                              ? `Pelanggan: ${resolvedTopBarCustomerName}`
+                              : '* Wajib Isi Pelanggan di Bar Atas'}
+                          </span>
+                          <span className="text-slate-500 dark:text-slate-400">
+                            Tempo: +14 Hr ({kasbonDefaultDueInfo.display})
+                          </span>
+                        </div>
+                      </div>
+                    ) : paymentMethod === 'CASH' ? (
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/70 dark:border-slate-800">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Diterima:
+                          </span>
+                          <input
+                            ref={cashInputRef}
+                            id="pos-cash-given-input"
+                            type="number"
+                            min="0"
+                            value={cashGiven || ''}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val = Number(e.target.value) || 0;
+                              setCashGiven(val);
+                              if (isCashUnderpaid && val >= grandTotal) setIsCashUnderpaid(false);
+                            }}
+                            onKeyDown={handleCashInputKeyDown}
+                            className={`h-7 w-24 px-2 text-xs font-mono font-semibold text-center border rounded-lg outline-none transition ${
+                              isCashUnderpaid
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                : isLight
+                                ? 'border-emerald-500/60 bg-white text-slate-900'
+                                : 'border-emerald-500/50 bg-slate-900 text-white'
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCashGiven(grandTotal);
+                              setIsCashUnderpaid(false);
+                            }}
+                            className="h-7 px-2 rounded-lg text-[11px] font-medium bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer transition"
+                          >
+                            Pas
+                          </button>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
+                            {cashGiven >= grandTotal ? 'Kembalian:' : 'Kurang:'}
+                          </span>
+                          <span
+                            className={`font-mono font-bold text-xs sm:text-sm ${
+                              cashGiven >= grandTotal
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-amber-500'
+                            }`}
+                          >
+                            Rp{' '}
+                            {(cashGiven >= grandTotal
+                              ? changeAmount
+                              : grandTotal - cashGiven
+                            ).toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/70 dark:border-slate-800">
+                        <span className="text-[11px] text-slate-500">
+                          Metode Non-Tunai:
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => paymentMethod === 'QRIS' && setIsQrisModalOpen(true)}
+                          className="h-7 px-2.5 rounded-lg text-[11px] font-medium bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 cursor-pointer"
+                        >
+                          {paymentMethod === 'QRIS' ? 'Buka QRIS Dinamis' : 'Mesin EDC Siap'}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Metode Tunai / QRIS / Debit / Split / (Kasbon khusus Laundry) & Tombol Bayar [F10] */}
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <div
+                        className={`grid ${
+                          isKasbonAllowedForSector ? 'grid-cols-5' : 'grid-cols-4'
+                        } p-0.5 rounded-lg border text-[11px] gap-0.5 flex-1 ${
+                          isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-900 border-slate-800'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPaymentMethod('CASH');
+                            if (isLaundryTerminal) setLaundryPaymentStatus('LUNAS_AWAL');
+                          }}
+                          className={`h-8 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
                             paymentMethod === 'CASH'
-                              ? 'bg-[#0052FF] text-white shadow-xs'
-                              : isLight ? 'text-slate-700 hover:bg-slate-300' : 'text-gray-300 hover:text-white'
+                              ? 'bg-cyan-600 text-white shadow-xs'
+                              : isLight
+                              ? 'text-slate-700 hover:text-slate-900'
+                              : 'text-gray-300 hover:text-white'
                           }`}
                         >
                           💵 Tunai
@@ -5289,12 +6937,16 @@ export const PosModule: React.FC = () => {
                           type="button"
                           onClick={() => {
                             setPaymentMethod('QRIS');
-                            setIsQrisModalOpen(true);
+                            if (!isLaundryTerminal || laundryPaymentStatus === 'LUNAS_AWAL') {
+                              setIsQrisModalOpen(true);
+                            }
                           }}
-                          className={`py-1 rounded text-center transition cursor-pointer text-xs ${
+                          className={`h-8 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
                             paymentMethod === 'QRIS'
-                              ? 'bg-[#0052FF] text-white shadow-xs'
-                              : isLight ? 'text-slate-700 hover:bg-slate-300' : 'text-gray-300 hover:text-white'
+                              ? 'bg-cyan-600 text-white shadow-xs'
+                              : isLight
+                              ? 'text-slate-700 hover:text-slate-900'
+                              : 'text-gray-300 hover:text-white'
                           }`}
                         >
                           📱 QRIS
@@ -5302,818 +6954,1952 @@ export const PosModule: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setPaymentMethod('EDC_DEBIT')}
-                          className={`py-1 rounded text-center transition cursor-pointer text-xs ${
+                          className={`h-8 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
                             paymentMethod === 'EDC_DEBIT'
-                              ? 'bg-[#0052FF] text-white shadow-xs'
-                              : isLight ? 'text-slate-700 hover:bg-slate-300' : 'text-gray-300 hover:text-white'
+                              ? 'bg-cyan-600 text-white shadow-xs'
+                              : isLight
+                              ? 'text-slate-700 hover:text-slate-900'
+                              : 'text-gray-300 hover:text-white'
                           }`}
                         >
                           💳 Debit
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleSelectSplitPayment}
+                          className={`h-8 px-1.5 rounded-md cursor-pointer text-[10px] font-semibold whitespace-nowrap transition ${
+                            paymentMethod === 'SPLIT'
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : isLight
+                              ? 'text-indigo-700 hover:bg-indigo-50'
+                              : 'text-indigo-300 hover:text-white'
+                          }`}
+                        >
+                          🔀 Split
+                        </button>
+                        {isKasbonAllowedForSector && (
+                          <button
+                            type="button"
+                            onClick={handleSelectKasbonPayment}
+                            className={`h-8 px-1.5 rounded-md cursor-pointer text-[10px] font-semibold whitespace-nowrap transition ${
+                              paymentMethod === 'KREDIT / TEMPO (AR)'
+                                ? 'bg-amber-500 text-slate-950 shadow-xs'
+                                : isLight
+                                ? 'text-amber-700 hover:bg-amber-50'
+                                : 'text-amber-300 hover:text-white'
+                            }`}
+                          >
+                            📋 Kasbon/DP
+                          </button>
+                        )}
                       </div>
 
-                      {/* Area Received & Kembalian (Khusus CASH) */}
-                      {paymentMethod === 'CASH' ? (
-                        <div className="space-y-1.5 pt-0.5">
-                          <div className="flex items-center justify-between gap-1.5">
-                            <span className="text-[11px] font-bold text-slate-700 dark:text-gray-300 shrink-0">
-                              {language === 'ID' ? 'Diterima:' : 'Received:'}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                  Rp
-                                </span>
-                                <input
-                                  ref={cashInputRef}
-                                  id="pos-cash-given-input"
-                                  type="number"
-                                  min="0"
-                                  value={cashGiven || ''}
-                                  placeholder="0"
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 0;
-                                    setCashGiven(val);
-                                    if (isCashUnderpaid && val >= grandTotal) {
-                                      setIsCashUnderpaid(false);
-                                    }
-                                  }}
-                                  onFocus={(e) => e.target.select()}
-                                  onKeyDown={handleCashInputKeyDown}
-                                  className={`h-8 sm:h-9 w-24 sm:w-28 pl-7 pr-1.5 text-sm font-black text-center font-mono border-2 rounded-lg shadow-xs outline-none ${
-                                    isCashUnderpaid
-                                      ? 'border-rose-500 bg-rose-500/10 text-rose-600 ring-2 ring-rose-400/50'
-                                      : 'border-emerald-500 ' + (isLight ? 'bg-white text-slate-900' : 'bg-[#0d1117] text-white')
-                                  }`}
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCashGiven(grandTotal);
-                                  setIsCashUnderpaid(false);
-                                }}
-                                className="h-8 sm:h-9 px-2 rounded-lg text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer active:scale-95"
-                                title="Bayar Uang Pas (Spasi / P)"
-                              >
-                                Pas
-                              </button>
-                            </div>
-                          </div>
+                      <button
+                        id="btn-process-pos-sale"
+                        type="button"
+                        onClick={handleManualBayarClick}
+                        disabled={
+                          cart.length === 0 || (paymentMethod === 'SPLIT' && !isSplitReadyToPay)
+                        }
+                        className="h-9 px-3 rounded-xl font-semibold text-xs whitespace-nowrap flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 active:scale-[0.99] transition cursor-pointer disabled:opacity-40 shrink-0"
+                      >
+                        <Wallet className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {paymentMethod === 'SPLIT'
+                            ? isSplitReadyToPay
+                              ? 'Bayar Split [F10]'
+                              : 'Belum Lunas'
+                            : paymentMethod === 'KREDIT / TEMPO (AR)' ||
+                              (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')
+                            ? 'Simpan Kasbon [F10]'
+                            : 'Bayar [F10]'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* TABEL GRID TRANSAKSI KASIR */
+              <div
+                id="card-pos-cart-table"
+                className={`${
+                  isLaundryTerminal && laundryActiveTab !== 'TRACKING'
+                    ? 'flex-1 min-h-fit'
+                    : 'flex-1 min-h-0'
+                } flex flex-col rounded-xl border overflow-hidden transition-all duration-200 ${
+                  isLight
+                    ? 'border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] bg-white text-slate-900'
+                    : 'border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] bg-slate-900 text-white'
+                }`}
+              >
+                {/* Terminal Contextual Operating Bar */}
+                {activeTerminal?.id === 'T-01' && (
+                  <div className="px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/20 flex flex-wrap items-center justify-between gap-2 text-xs leading-5">
+                    <span className="font-medium text-cyan-600 dark:text-cyan-400">
+                      POS Retail Operating Mode:
+                    </span>
+                    <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                      Scan Barcode [F2] Aktif • Diskon Item Didukung
+                    </span>
+                  </div>
+                )}
+                {activeTerminal?.id === 'T-02' && (
+                  <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 text-xs leading-5">
+                    <span className="font-medium text-amber-600 dark:text-amber-400">F&B Mode:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleChangeFnbOrderMode(
+                          fnbOrderMode === 'Dine-In'
+                            ? 'Takeaway'
+                            : fnbOrderMode === 'Takeaway'
+                            ? 'Delivery'
+                            : 'Dine-In'
+                        )
+                      }
+                      className="px-2 py-0.5 rounded bg-amber-500 text-black font-normal text-[11px] cursor-pointer active:scale-[0.99]"
+                    >
+                      {fnbOrderMode}
+                    </button>
+                    {fnbOrderMode === 'Dine-In' ? (
+                      <>
+                        <span className="text-slate-400 ml-2">Meja:</span>
+                        <input
+                          type="text"
+                          value={fnbTableNo}
+                          onChange={(e) => handleChangeFnbTableNo(e.target.value)}
+                          className="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-center font-normal text-xs outline-none"
+                        />
+                      </>
+                    ) : (
+                      <span className="ml-2 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/35 text-amber-300 text-[11px]">
+                        {fnbOrderMode === 'Delivery'
+                          ? 'Tanpa Meja • Kurir'
+                          : 'Tanpa Meja • Bungkus'}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {activeTerminal?.id === 'T-03' && (
+                  <div className="px-3 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 flex flex-wrap items-center justify-between gap-2 text-xs leading-5">
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400">POS Grosir &amp; Distribusi:</span>
+                    <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                      Ecer / Member / Grosir otomatis aktif • Satuan: Pcs/Box/Karton
+                    </span>
+                  </div>
+                )}
+                {isFashionTerminal && (
+                  <div className="border-b border-purple-500/25 shrink-0">
+                    {/* Fashion & Butik Operational Bar */}
+                    <div
+                      className={`px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs ${
+                        isLight
+                          ? 'bg-purple-50/75 text-slate-900'
+                          : 'bg-purple-950/20 text-slate-100'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-600 text-white text-[11px] font-semibold">
+                          <Shirt className="w-3.5 h-3.5" />
+                          <span>POS Butik &amp; Fashion</span>
+                        </span>
 
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[11px] font-bold text-slate-700 dark:text-gray-300">
-                              {cashGiven >= grandTotal ? 'Kembalian:' : 'Kurang:'}
+                        {/* Pemilih Pramuniaga / Fashion Advisor */}
+                        <div className="flex items-center gap-1">
+                          <UserCheck className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                          <select
+                            id="select-fashion-advisor"
+                            value={fashionAdvisorId}
+                            onChange={(e) => setFashionAdvisorId(e.target.value)}
+                            className={`h-7 px-2 rounded-lg border text-[11px] outline-none cursor-pointer ${
+                              isLight
+                                ? 'bg-white border-purple-300 text-slate-800'
+                                : 'bg-slate-950 border-purple-500/35 text-slate-100'
+                            }`}
+                            title="Pilih Pramuniaga / Fashion Advisor untuk pencatatan komisi"
+                          >
+                            <option value="">Pramuniaga: Kasir Langsung</option>
+                            {fashionAdvisorChoices.map((emp) => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.name} ({emp.fashionCommissionRate ?? 2}%)
+                              </option>
+                            ))}
+                          </select>
+                          {selectedFashionAdvisor && (
+                            <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
+                              Komisi {selectedFashionAdvisor.fashionCommissionRate ?? 2}%: Rp {fashionAdvisorCommission.toLocaleString('id-ID')}
                             </span>
-                            <span className={`font-mono font-black text-sm sm:text-base ${
-                              cashGiven >= grandTotal ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600'
-                            }`}>
-                              Rp {cashGiven >= grandTotal ? changeAmount.toLocaleString('id-ID') : (grandTotal - cashGiven).toLocaleString('id-ID')}
-                            </span>
-                          </div>
+                          )}
                         </div>
-                      ) : paymentMethod === 'QRIS' ? (
-                        <button
-                          type="button"
-                          onClick={() => setIsQrisModalOpen(true)}
-                          className="w-full py-1.5 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-500 border border-rose-500/30 hover:bg-rose-500/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>Buka QRIS Dinamis</span>
-                        </button>
-                      ) : (
-                        <div className="py-1.5 px-2 rounded-lg text-xs font-bold text-blue-500 bg-blue-500/10 border border-blue-500/20 text-center flex items-center justify-center gap-1.5">
-                          <CreditCard className="w-3.5 h-3.5" />
-                          <span>Mesin EDC Siap</span>
-                        </div>
-                      )}
+                      </div>
 
-                      {/* Tombol Aksi [Send to Kitchen / Print KOT] & [Bayar [F10]] */}
-                      <div className="grid grid-cols-2 gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <button
-                          id="btn-open-kot-modal"
+                          id="btn-fashion-variant-matrix"
                           type="button"
-                          onClick={() => setIsKotModalOpen(true)}
-                          disabled={cart.length === 0}
-                          className={`h-10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                            cart.length === 0
-                              ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700'
-                              : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-md shadow-emerald-500/20'
-                          }`}
-                          title="Kirim Pesanan ke Printer Dapur (KOT)"
+                          onClick={() => {
+                            const selectedRow =
+                              selectedCartIndex !== null ? cart[selectedCartIndex] : cart[0];
+                            if (selectedRow && selectedRow.product.variantMatrix?.length) {
+                              setVariantPickerState({
+                                product: selectedRow.product,
+                                mode: 'ADD',
+                                initialSize: selectedRow.selectedFashionSize,
+                                initialColor: selectedRow.selectedFashionColor,
+                              });
+                            } else {
+                              setIsManualSearchOpen(true);
+                            }
+                          }}
+                          className="h-7 px-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer transition active:scale-[0.99]"
                         >
-                          <ChefHat className="w-4 h-4 shrink-0" />
-                          <span className="truncate">KOT Dapur</span>
+                          <Sparkles className="w-3 h-3" />
+                          <span>Matriks Ukuran×Warna</span>
                         </button>
 
                         <button
-                          id="btn-process-pos-sale-fnb"
+                          id="btn-fashion-hold-fitting-room"
                           type="button"
-                          onClick={handleManualBayarClick}
                           disabled={cart.length === 0}
-                          className={`h-10 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-lg transition active:scale-95 cursor-pointer border-2 shrink-0 ${
-                            cart.length === 0
-                              ? 'opacity-40 cursor-not-allowed bg-gray-500 border-gray-600 text-white'
-                              : 'bg-[#0052FF] hover:bg-[#0043d1] border-blue-600 text-white shadow-blue-500/30'
-                          }`}
-                          title="Bayar Transaksi [F10]"
+                          onClick={handleOpenHoldModal}
+                          className="h-7 px-2.5 rounded-lg border border-amber-500/45 bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 text-[11px] font-medium flex items-center gap-1 cursor-pointer disabled:opacity-40 transition"
                         >
-                          <span>Bayar</span>
-                          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-black/30 text-white border border-white/20">
-                            [F10]
+                          <Pause className="w-3 h-3" />
+                          <span>Hold / Fitting Room</span>
+                        </button>
+
+                        <button
+                          id="btn-fashion-recall-fitting"
+                          type="button"
+                          onClick={() => setIsHeldOrdersModalOpen(true)}
+                          className="h-7 px-2 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 text-[11px] font-medium flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Titipan ({fittingRoomHeldCount > 0 ? fittingRoomHeldCount : heldOrders.length})</span>
+                        </button>
+
+                        <button
+                          id="btn-fashion-exchange"
+                          type="button"
+                          onClick={() => setIsFashionExchangeOpen(true)}
+                          className="h-7 px-2.5 rounded-lg border border-emerald-500/45 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-800 dark:text-emerald-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <ArrowLeftRight className="w-3 h-3" />
+                          <span>Tukar Ukuran / Barang</span>
+                        </button>
+
+                        <button
+                          id="btn-fashion-quick-nota-disc"
+                          type="button"
+                          onClick={() => setIsQuickFashionDiscOpen((v) => !v)}
+                          className={`h-7 px-2.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 cursor-pointer transition ${
+                            calculatedDiscount > 0 || isQuickFashionDiscOpen
+                              ? 'bg-rose-600 text-white border-rose-500'
+                              : isLight
+                              ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                              : 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          <Percent className="w-3 h-3" />
+                          <span>
+                            {calculatedDiscount > 0
+                              ? `Disc Nota: -Rp ${calculatedDiscount.toLocaleString('id-ID')}`
+                              : 'Diskon Nota'}
                           </span>
                         </button>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ) : (
-                /* TABEL GRID TRANSAKSI TERMINAL KASIR SWALAYAN (80% TINGGI LAYAR) */
-                <div
-                  id="card-pos-cart-table"
-                  className={`flex-1 min-h-0 flex flex-col rounded-lg border-2 overflow-hidden shadow-sm transition-colors ${
-                    isLight ? 'border-slate-400 bg-white' : 'border-slate-700 bg-[#161b22]'
-                  }`}
-                >
-                  {/* Sub-Header Tabel Belanja Ringkas */}
-                  <div
-                    className={`px-3 py-1.5 border-b-2 flex items-center justify-between text-xs flex-shrink-0 select-none ${
-                      isLight ? 'bg-slate-100 text-slate-950 border-slate-300' : 'bg-[#0d1117] text-gray-200 border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 font-bold">
-                      <ShoppingBag className="w-4 h-4 text-[#0052FF] dark:text-[#58a6ff]" />
-                      <span className="text-slate-950 dark:text-white font-black text-xs sm:text-sm">
-                        {language === 'ID' ? 'Daftar Belanja' : 'Cart Items'}
+
+                    {/* Quick Fashion Article Matrix Bar */}
+                    <div
+                      className={`px-2.5 py-1 border-t flex items-center gap-1.5 overflow-x-auto ${
+                        isLight ? 'bg-white border-slate-200' : 'bg-slate-900/70 border-slate-800'
+                      }`}
+                    >
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 shrink-0">
+                        Artikel Cepat:
                       </span>
-                      <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-slate-900 dark:text-blue-200 border border-blue-400 dark:border-blue-700 font-black">
-                        {cart.length} SKU • {totalCartItemCount} Pcs
-                      </span>
-                      {selectedCustomer && (
-                        <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 hidden sm:inline">
-                          • Member: <strong className="font-black text-emerald-950 dark:text-emerald-200">{selectedCustomer.name}</strong> ({selectedPriceTier})
-                        </span>
-                      )}
+                      {fashionCatalogSource.slice(0, 7).map((fp) => {
+                        const hasClr = Boolean(fp.fashionPromo?.clearanceActive);
+                        const hasBnd = Boolean(fp.fashionPromo?.bundleActive);
+                        return (
+                          <button
+                            key={fp.id}
+                            type="button"
+                            onClick={() => setVariantPickerState({ product: fp, mode: 'ADD' })}
+                            className={`px-2 py-0.5 rounded-lg border text-[11px] flex items-center gap-1.5 shrink-0 cursor-pointer transition ${
+                              isLight
+                                ? 'bg-slate-50 hover:bg-purple-50 border-slate-200 hover:border-purple-400 text-slate-800'
+                                : 'bg-slate-950 hover:bg-purple-950/30 border-slate-800 hover:border-purple-500/50 text-slate-200'
+                            }`}
+                          >
+                            <span className="font-medium truncate max-w-[140px]">{fp.name}</span>
+                            <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                              {(Number(fp.sell_price || 0) / 1000).toFixed(0)}k
+                            </span>
+                            {hasClr && (
+                              <span className="text-[9px] font-mono px-1 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300">
+                                {fp.fashionPromo?.clearanceType === 'PERCENT'
+                                  ? `-${fp.fashionPromo.clearanceValue}%`
+                                  : 'CLR'}
+                              </span>
+                            )}
+                            {!hasClr && hasBnd && (
+                              <span className="text-[9px] font-mono px-1 rounded bg-indigo-500/15 text-indigo-600 dark:text-indigo-300">
+                                Mix&amp;Match
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {/* Hold Cart */}
-                      <button
-                        type="button"
-                        onClick={handleOpenHoldModal}
-                        disabled={cart.length === 0}
-                        className={`px-2 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 cursor-pointer ${
-                          cart.length === 0
-                            ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400'
-                            : isLight
-                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 shadow-xs'
-                            : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40 shadow-xs'
+                    {/* Inline Quick Manual Nota Discount Panel (<= 15% Kasir Mandiri, > 15% PIN SPV) */}
+                    {isQuickFashionDiscOpen && (
+                      <div
+                        className={`px-2.5 py-2 border-t flex flex-wrap items-center gap-2 text-xs ${
+                          isLight ? 'bg-rose-50/60 border-rose-200' : 'bg-rose-950/20 border-rose-500/30'
                         }`}
-                        title="Tahan transaksi keranjang saat ini (Hold Cart)"
                       >
-                        <Pause className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-                        <span>{language === 'ID' ? 'Hold' : 'Hold'}</span>
-                      </button>
+                        <div className="flex rounded-lg border border-slate-300 dark:border-slate-700 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => setQuickDiscType('PERCENT')}
+                            className={`px-2 py-1 text-[11px] font-bold cursor-pointer ${
+                              quickDiscType === 'PERCENT'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-white dark:bg-slate-900 text-slate-500'
+                            }`}
+                          >
+                            %
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setQuickDiscType('IDR')}
+                            className={`px-2 py-1 text-[11px] font-bold cursor-pointer ${
+                              quickDiscType === 'IDR'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-white dark:bg-slate-900 text-slate-500'
+                            }`}
+                          >
+                            Rp
+                          </button>
+                        </div>
 
-                      {/* Recall Cart */}
+                        <input
+                          type="number"
+                          min={0}
+                          value={quickDiscVal || ''}
+                          onChange={(e) => {
+                            setQuickDiscVal(Math.max(0, Number(e.target.value) || 0));
+                            setQuickDiscPinError(null);
+                          }}
+                          placeholder={quickDiscType === 'PERCENT' ? 'Diskon %' : 'Nominal Rp'}
+                          className={`h-7 w-24 px-2 rounded-lg border font-mono text-xs outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-950 border-slate-700 text-white'
+                          }`}
+                        />
+
+                        <select
+                          value={quickDiscReason}
+                          onChange={(e) => setQuickDiscReason(e.target.value)}
+                          className={`h-7 px-2 rounded-lg border text-[11px] outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-950 border-slate-700 text-white'
+                          }`}
+                        >
+                          <option value="Promo Pelanggan Butik / VIP Member">Promo Pelanggan Butik / VIP Member</option>
+                          <option value="Display Sample / Cacat Jahitan Minor">Display Sample / Cacat Jahitan Minor</option>
+                          <option value="Negosiasi Paket Koleksi Kasir">Negosiasi Paket Koleksi Kasir</option>
+                          <option value="Diskon Kebijakan Khusus Manajemen Toko">Kebijakan Khusus Manajemen</option>
+                        </select>
+
+                        {((quickDiscType === 'PERCENT' && quickDiscVal > 15) ||
+                          (quickDiscType === 'IDR' && subtotal > 0 && (quickDiscVal / subtotal) * 100 > 15)) &&
+                          !quickDiscSpvName && (
+                            <input
+                              type="password"
+                              maxLength={4}
+                              value={quickDiscPin}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                setQuickDiscPin(v);
+                                setQuickDiscPinError(null);
+                              }}
+                              placeholder="PIN SPV (1234/8888)"
+                              className={`h-7 w-32 px-2 rounded-lg border font-mono text-xs outline-none ${
+                                isLight ? 'bg-amber-50 border-amber-400 text-slate-900' : 'bg-amber-950/40 border-amber-500/50 text-amber-300'
+                              }`}
+                            />
+                          )}
+
+                        <button
+                          type="button"
+                          onClick={handleApplyQuickFashionNoteDiscount}
+                          className="h-7 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold cursor-pointer"
+                        >
+                          Terapkan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickDiscVal(0);
+                            setDiscountPercent(0);
+                            setDiscountAmount(0);
+                            setManualDiscountReason('');
+                            setManualDiscountAuthorizedBy('');
+                            setQuickDiscSpvName('');
+                            setIsQuickFashionDiscOpen(false);
+                          }}
+                          className="h-7 px-2 rounded-lg border border-slate-300 dark:border-slate-700 text-[11px] cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                        {quickDiscPinError && (
+                          <span className="text-[11px] font-semibold text-rose-500">{quickDiscPinError}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(activeTerminal?.id === 'T-05' || isBuildingTerminal) && (
+                  <div className="px-3 py-1.5 bg-indigo-500/10 border-b border-indigo-500/20 flex flex-wrap items-center gap-2 text-xs leading-5">
+                    <span className="font-medium text-indigo-600 dark:text-indigo-400">Depo Bangunan:</span>
+                    <div className="flex items-center gap-1 rounded-lg border border-indigo-500/30 p-0.5">
                       <button
                         type="button"
-                        onClick={() => setIsHeldOrdersModalOpen(true)}
-                        className={`px-2 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 cursor-pointer ${
-                          heldOrders.length > 0
-                            ? isLight
-                              ? 'bg-blue-100 hover:bg-blue-200 text-blue-900 border-blue-300 shadow-xs'
-                              : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border-blue-500/40 shadow-xs'
-                            : isLight
-                            ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                            : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-gray-700'
+                        onClick={() => {
+                          setDeliveryPolicy('LOCO');
+                          setDeliveryMethod('DIRECT');
+                          setDeliveryFleetActive(false);
+                        }}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition ${
+                          deliveryPolicy === 'LOCO' && deliveryMethod === 'DIRECT'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-slate-500 dark:text-slate-300'
                         }`}
-                        title="Panggil transaksi yang ditahan (Recall Cart)"
                       >
-                        <RotateCcw className="w-3 h-3 text-[#0052FF] dark:text-[#58a6ff]" />
-                        <span>{language === 'ID' ? 'Recall' : 'Recall'}</span>
-                        <span className={`px-1.5 py-0.1 rounded-full text-[10px] font-mono font-black ${
-                          heldOrders.length > 0
-                            ? 'bg-amber-500 text-slate-950'
-                            : 'bg-slate-300 dark:bg-gray-700 text-slate-800 dark:text-gray-300'
-                        }`}>
-                          {heldOrders.length}
+                        Loco (Ambil Sendiri)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeliveryPolicy('FRANGKO');
+                          setDeliveryMethod('FLEET_DELIVERY');
+                          setDeliveryFleetActive(true);
+                        }}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium cursor-pointer transition ${
+                          deliveryPolicy === 'FRANGKO' || deliveryMethod === 'FLEET_DELIVERY'
+                            ? 'bg-amber-500 text-slate-950 font-semibold'
+                            : 'text-slate-500 dark:text-slate-300'
+                        }`}
+                      >
+                        Frangko (Kirim Armada DO)
+                      </button>
+                    </div>
+                    {(deliveryPolicy === 'FRANGKO' || deliveryMethod === 'FLEET_DELIVERY' || deliveryFleetActive) && (
+                      <>
+                        <select
+                          value={selectedFleetType}
+                          onChange={(e) => setSelectedFleetType(e.target.value as BuildingFleetType)}
+                          className={`px-2 py-0.5 rounded border text-[11px] outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-900 border-slate-700 text-white'
+                          }`}
+                        >
+                          <option value="PICKUP_RET">Pick-up (±1.2 m³)</option>
+                          <option value="TRUCK_ENGKEL">Truk Engkel (±3.0 m³)</option>
+                          <option value="DUMP_TRUCK">Dump Truck (±6.5 m³)</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={deliveryDestination}
+                          onChange={(e) => setDeliveryDestination(e.target.value)}
+                          placeholder="Alamat proyek / tujuan DO..."
+                          className={`w-44 px-2 py-0.5 rounded border text-[11px] outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-900 border-slate-700 text-white'
+                          }`}
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          value={shippingFee || ''}
+                          onChange={(e) => setShippingFee(Math.max(0, Number(e.target.value) || 0))}
+                          placeholder="Ongkir Rp (0=Free)"
+                          className={`w-28 px-2 py-0.5 rounded border text-[11px] font-mono outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-900 border-slate-700 text-white'
+                          }`}
+                        />
+                      </>
+                    )}
+                    <span className="text-[10px] text-slate-400 ml-auto font-normal hidden sm:inline">(Support Qty Desimal 1.5, 2.25)</span>
+                  </div>
+                )}
+                {activeTerminal?.id === 'T-06' && (
+                  <div className="px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/20 flex items-center justify-between text-xs leading-5">
+                    <span className="font-medium text-cyan-600 dark:text-cyan-400">Elektronik & Gadget:</span>
+                    <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">Input Nomor Seri / IMEI tercetak otomatis pada struk</span>
+                  </div>
+                )}
+                {activeTerminal?.id === 'T-07' && (
+                  <div className="px-3 py-1.5 bg-orange-500/10 border-b border-orange-500/20 flex items-center gap-2 text-xs leading-5">
+                    <span className="font-medium text-orange-600 dark:text-orange-400">Bengkel:</span>
+                    <input type="text" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} placeholder="No. Polisi..." className="w-32 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-xs font-mono outline-none" />
+                    <input type="text" value={mechanicName} onChange={e => setMechanicName(e.target.value)} placeholder="Mekanik..." className="w-28 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-xs outline-none" />
+                  </div>
+                )}
+                {isLaundryTerminal ? (
+                  <div className="border-b border-cyan-500/25 shrink-0">
+                    {/* Sub-Tab Laundry: Transaksi & Input Order vs Tracking Cucian & Rak */}
+                    <div
+                      className={`px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5 border-b ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-200'
+                          : 'bg-slate-950/90 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          id="btn-laundry-tab-order"
+                          type="button"
+                          onClick={() => setLaundryActiveTab('ORDER')}
+                          className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition ${
+                            laundryActiveTab === 'ORDER'
+                              ? 'bg-cyan-600 text-white shadow-xs'
+                              : isLight
+                              ? 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                              : 'bg-slate-900 border border-slate-700 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <ShoppingBag className="w-3 h-3" />
+                          <span>Transaksi &amp; Input Order</span>
+                        </button>
+                        <button
+                          id="btn-laundry-tab-tracking"
+                          type="button"
+                          onClick={() => setLaundryActiveTab('TRACKING')}
+                          className={`px-2.5 py-0.5 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition ${
+                            laundryActiveTab === 'TRACKING'
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : isLight
+                              ? 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                              : 'bg-slate-900 border border-slate-700 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <ClipboardList className="w-3 h-3" />
+                          <span>Tracking Cucian &amp; Rak</span>
+                          <span
+                            className={`px-1 py-0 rounded text-[10px] font-mono font-bold ${
+                              laundryActiveTab === 'TRACKING'
+                                ? 'bg-black/25 text-white'
+                                : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-300'
+                            }`}
+                          >
+                            {activeLaundryQueueCount}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                        <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>
+                            Est. Selesai ({computedLaundrySla.label}): {computedLaundrySla.display}
+                          </span>
                         </span>
-                      </button>
+                      </div>
+                    </div>
 
+                    {laundryActiveTab === 'ORDER' && (
+                      <>
+                    <div className="px-2.5 py-1 bg-cyan-500/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px] leading-4">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-1">
+                          <span>🧺</span>
+                          <span>Kasir Laundry Multi-Satuan</span>
+                        </span>
+                        <input
+                          type="text"
+                          value={stylistName}
+                          onChange={(e) => setStylistName(e.target.value)}
+                          placeholder="Rak / Petugas..."
+                          className={`w-28 h-6 px-2 py-0 rounded-md border text-[11px] outline-none ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900'
+                              : 'bg-slate-900 border-slate-700 text-white'
+                          }`}
+                        />
+                        {scaleLiveState.connected && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>
+                              Serial: {scaleLiveState.netKg.toFixed(2)} kg (Tare {scaleLiveState.tareKg.toFixed(2)})
+                            </span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {luasLaundryServices.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAreaTargetCartIndex(null);
+                              setAreaModalService(luasLaundryServices[0]);
+                            }}
+                            className="px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                            <span>Hitung P×L (m²)</span>
+                          </button>
+                        )}
+                        <button
+                          id="btn-open-digital-scale"
+                          type="button"
+                          onClick={() => {
+                            const selectedRow =
+                              selectedCartIndex !== null ? cart[selectedCartIndex] : undefined;
+                            const defaultKiloan =
+                              selectedRow && selectedRow.product.laundryUnitType === 'KILOAN'
+                                ? selectedRow.product
+                                : kiloanLaundryServices[0] || null;
+                            setScaleTargetService(defaultKiloan);
+                            setIsDigitalScaleModalOpen(true);
+                          }}
+                          className="px-2.5 py-0.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
+                        >
+                          <Scale className="w-3 h-3" />
+                          <span>Timbangan Digital</span>
+                          {scaleLiveState.netKg > 0 && (
+                            <span className="px-1 py-0 rounded bg-black/25 font-mono text-[10px]">
+                              {scaleLiveState.netKg.toFixed(2)} kg
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Form Cepat Intake & Pencegahan Tertukar */}
+                    <div
+                      className={`px-2.5 py-1 border-t grid grid-cols-1 md:grid-cols-12 gap-1.5 items-end ${
+                        isLight ? 'bg-cyan-50/40 border-slate-200' : 'bg-slate-900/80 border-slate-800'
+                      }`}
+                    >
+                      <div className="md:col-span-2">
+                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                          Nama Pelanggan
+                        </label>
+                        <input
+                          id="input-laundry-customer-name"
+                          type="text"
+                          value={selectedCustomer?.name || laundryCustomerName}
+                          onChange={(e) => {
+                            if (selectedCustomer) handleClearCustomer();
+                            setLaundryCustomerName(e.target.value);
+                          }}
+                          placeholder="Walk-in / Nama..."
+                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                          }`}
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                          No. WhatsApp
+                        </label>
+                        <input
+                          id="input-laundry-customer-wa"
+                          type="tel"
+                          value={selectedCustomer?.phone || laundryCustomerPhone}
+                          onChange={(e) => setLaundryCustomerPhone(e.target.value)}
+                          placeholder="0812xxxx..."
+                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] font-mono outline-none ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                          }`}
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                          Fisik Pakaian (Total Pcs)
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setLaundryTotalPieces((p) => Math.max(1, p - 1))}
+                            className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                              isLight
+                                ? 'bg-white border-slate-300 text-slate-700'
+                                : 'bg-slate-950 border-slate-700 text-slate-200'
+                            }`}
+                          >
+                            <Minus className="w-2.5 h-2.5" />
+                          </button>
+                          <input
+                            id="input-laundry-total-pcs"
+                            type="number"
+                            min={1}
+                            value={laundryTotalPieces}
+                            onChange={(e) =>
+                              setLaundryTotalPieces(Math.max(1, parseInt(e.target.value, 10) || 1))
+                            }
+                            className={`w-full h-7 text-center rounded-md border text-[11px] font-mono font-bold outline-none ${
+                              isLight
+                                ? 'bg-white border-slate-300 text-slate-900'
+                                : 'bg-slate-950 border-slate-700 text-white'
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setLaundryTotalPieces((p) => p + 1)}
+                            className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                              isLight
+                                ? 'bg-white border-slate-300 text-slate-700'
+                                : 'bg-slate-950 border-slate-700 text-slate-200'
+                            }`}
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-4">
+                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                          <label className="text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 truncate">
+                            Catatan Kondisi Awal
+                          </label>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {['Pisah Putih', 'Ada Noda', 'Kancing Longgar'].map((chip) => (
+                              <button
+                                key={chip}
+                                type="button"
+                                onClick={() =>
+                                  setLaundryConditionNotes((prev) =>
+                                    prev.trim()
+                                      ? prev.includes(chip)
+                                        ? prev
+                                        : `${prev}, ${chip}`
+                                      : chip
+                                  )
+                                }
+                                className={`px-1 py-0 rounded text-[9px] leading-3.5 border cursor-pointer ${
+                                  isLight
+                                    ? 'bg-white border-amber-300 text-amber-800 hover:bg-amber-50'
+                                    : 'bg-amber-500/10 border-amber-500/35 text-amber-300 hover:bg-amber-500/20'
+                                }`}
+                              >
+                                +{chip}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <input
+                          id="input-laundry-condition-notes"
+                          type="text"
+                          value={laundryConditionNotes}
+                          onChange={(e) => setLaundryConditionNotes(e.target.value)}
+                          placeholder="Misal: Kemeja putih pisah warna, noda kerah..."
+                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                          }`}
+                        />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                          Paket SLA Selesai
+                        </label>
+                        <select
+                          value={String(laundrySlaOverrideHours)}
+                          onChange={(e) =>
+                            setLaundrySlaOverrideHours(
+                              e.target.value === 'AUTO' ? 'AUTO' : Number(e.target.value)
+                            )
+                          }
+                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none cursor-pointer ${
+                            isLight
+                              ? 'bg-white border-indigo-300 text-indigo-900'
+                              : 'bg-slate-950 border-indigo-500/40 text-indigo-200'
+                          }`}
+                        >
+                          <option value="AUTO">Auto Layanan ({computedLaundrySla.hours}j)</option>
+                          <option value="6">Express 6 Jam</option>
+                          <option value="24">Kilat 24 Jam</option>
+                          <option value="48">Reguler 48 Jam</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Penugasan Awal Petugas Produksi (Opsional - Non-Blocking, Sinkron Komisi HR) */}
+                    <div
+                      className={`px-2.5 py-1 border-t flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
+                        isLight ? 'bg-indigo-50/40 border-slate-200 text-slate-700' : 'bg-slate-900/60 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold">
+                        <UserCheck className="w-3 h-3" />
+                        <span>Petugas Produksi (Opsional):</span>
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Op. Cuci:</span>
+                        <select
+                          value={laundryWasherId}
+                          onChange={(e) => setLaundryWasherId(e.target.value)}
+                          aria-label="Pilih Operator Cuci Awal"
+                          className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                          }`}
+                        >
+                          <option value="">-- Otomatis / Isi di Tracking --</option>
+                          {laundryStaffChoices.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.name} ({emp.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Teknisi Sepatu/Karpet:</span>
+                        <select
+                          value={laundrySpecialistId}
+                          onChange={(e) => setLaundrySpecialistId(e.target.value)}
+                          aria-label="Pilih Teknisi Sepatu atau Karpet Awal"
+                          className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900 focus:border-amber-500'
+                              : 'bg-slate-950 border-slate-700 text-white focus:border-amber-400'
+                          }`}
+                        >
+                          <option value="">-- Opsional --</option>
+                          {laundryStaffChoices.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.name} ({emp.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Katalog Cepat Layanan Laundry 4 Satuan */}
+                    <div
+                      className={`px-2.5 py-1.5 border-t space-y-1 ${
+                        isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-950/60 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {(
+                            [
+                              { id: 'ALL', label: 'Semua Layanan' },
+                              { id: 'KILOAN', label: 'Kiloan (kg)' },
+                              { id: 'SATUAN', label: 'Satuan (pcs/stel)' },
+                              { id: 'PASANG', label: 'Pasang' },
+                              { id: 'LUAS', label: 'Luas (m²)' },
+                            ] as const
+                          ).map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setLaundryCatalogFilter(tab.id)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer transition ${
+                                laundryCatalogFilter === tab.id
+                                  ? 'bg-cyan-600 text-white border-cyan-500'
+                                  : isLight
+                                  ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono hidden sm:inline">
+                          Klik layanan untuk tambah • Min. Berat &amp; SLA otomatis tercatat
+                        </span>
+                      </div>
+
+                      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                        {filteredQuickLaundryServices.map((srv) => {
+                          const isKiloan =
+                            srv.laundryUnitType === 'KILOAN' ||
+                            (srv.unit || '').toLowerCase() === 'kg';
+                          const isLuas =
+                            srv.laundryUnitType === 'LUAS' ||
+                            (srv.unit || '').toLowerCase().includes('m2');
+                          const minOrderVal = Number(srv.minOrderWeightKg ?? srv.minOrderQty ?? 0);
+                          return (
+                            <div
+                              key={srv.id}
+                              onClick={() => handleAddToCart(srv, 1)}
+                              className={`shrink-0 w-44 px-2 py-1.5 rounded-lg border cursor-pointer transition flex flex-col justify-between gap-0.5 ${
+                                isLight
+                                  ? 'bg-white hover:border-cyan-500 border-slate-200 shadow-2xs'
+                                  : 'bg-slate-900 hover:border-cyan-400/60 border-slate-800'
+                              }`}
+                            >
+                              <div className="space-y-0.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[9px] font-mono uppercase px-1 py-0 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                    {srv.laundryUnitType || srv.unit}
+                                  </span>
+                                  {srv.slaDuration && (
+                                    <span className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300 truncate">
+                                      ⏱ {srv.slaDuration}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] font-semibold leading-tight line-clamp-1">
+                                  {srv.name}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-slate-200/70 dark:border-slate-800">
+                                <div className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  Rp {srv.sell_price.toLocaleString('id-ID')}/{srv.unit}
+                                </div>
+                                {isKiloan ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setScaleTargetService(srv);
+                                      setIsDigitalScaleModalOpen(true);
+                                    }}
+                                    className="px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                    title={`Timbang ${srv.name} (Min. ${minOrderVal || 2} kg)`}
+                                  >
+                                    <Scale className="w-2.5 h-2.5" />
+                                    <span>Timbang</span>
+                                  </button>
+                                ) : isLuas ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setAreaTargetCartIndex(null);
+                                      setAreaModalService(srv);
+                                    }}
+                                    className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                  >
+                                    <Maximize2 className="w-2.5 h-2.5" />
+                                    <span>P×L</span>
+                                  </button>
+                                ) : minOrderVal > 1 ? (
+                                  <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400">
+                                    Min {minOrderVal}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  isSalonServiceTerminal && (
+                    <div className={`border-b ${isLight ? 'bg-purple-50/60 border-purple-200' : 'bg-purple-500/10 border-purple-500/25'}`}>
+                      {/* Bar Pilih Stylist / Kapster Utama dari Master Data */}
+                      <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold text-purple-700 dark:text-purple-300">
+                            ✂️ Stylist / Kapster Utama:
+                          </span>
+                          <select
+                            value={selectedServiceStylist?.id || ''}
+                            onChange={(e) => {
+                              const picked = activeServiceStylists.find((s) => s.id === e.target.value);
+                              setSelectedStylistId(e.target.value);
+                              setStylistName(picked?.name || '');
+                            }}
+                            className={`px-2.5 py-1 rounded-lg border text-xs font-medium outline-none cursor-pointer ${
+                              isLight
+                                ? 'bg-white border-purple-300 text-slate-900'
+                                : 'bg-slate-950 border-purple-500/40 text-white'
+                            }`}
+                          >
+                            {activeServiceStylists.length === 0 ? (
+                              <option value="">Belum ada Stylist Aktif</option>
+                            ) : (
+                              activeServiceStylists.map((st) => (
+                                <option key={st.id} value={st.id}>
+                                  {st.name} — {st.role} (Komisi {st.commissionRate}%)
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                            • Bisa pilih stylist berbeda per layanan di baris keranjang
+                          </span>
+                        </div>
+                        {serviceCartCommissionSummary && serviceCartCommissionSummary.totalCommission > 0 && (
+                          <span className="px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35">
+                            Est. Komisi Jasa: Rp {serviceCartCommissionSummary.totalCommission.toLocaleString('id-ID')}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Quick Service Cards Grid (1-Klik Paket Layanan & Produk Salon dari Master Data) */}
+                      <div className={`px-3 pb-2.5 pt-1 border-t ${isLight ? 'border-purple-200/70' : 'border-purple-500/20'}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-purple-700 dark:text-purple-300 font-semibold">
+                            Quick Service Cards ({salonServiceCatalogSource.length} Layanan &amp; Produk Aktif)
+                          </span>
+                          <span className="text-[10px] text-slate-500">Klik kartu untuk langsung masuk keranjang</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5 max-h-48 overflow-y-auto pr-0.5">
+                          {salonServiceCatalogSource.map((svc) => {
+                            const isSvcItem = svc.itemType === 'SERVICE';
+                            const fmtMeta = getServiceFormatMeta(svc);
+                            return (
+                              <button
+                                key={svc.id}
+                                type="button"
+                                onClick={() => handleAddToCart(svc, 1)}
+                                className={`text-left p-2 rounded-lg border transition cursor-pointer active:scale-[0.99] flex flex-col justify-between gap-1 ${
+                                  isLight
+                                    ? 'bg-white hover:bg-purple-50 border-slate-200 hover:border-purple-400 text-slate-900'
+                                    : 'bg-slate-900/90 hover:bg-purple-950/50 border-slate-700/80 hover:border-purple-400 text-slate-100'
+                                }`}
+                              >
+                                <div className="space-y-0.5">
+                                  <div className="flex items-start justify-between gap-1">
+                                    <span className="text-[11px] font-semibold leading-tight line-clamp-2">
+                                      {svc.name}
+                                    </span>
+                                    <span
+                                      className={`shrink-0 text-[9px] font-mono px-1 py-0.5 rounded border ${fmtMeta.badgeClass}`}
+                                    >
+                                      {fmtMeta.shortLabel}
+                                    </span>
+                                  </div>
+                                  {svc.packageDetails && (
+                                    <div className="text-[10px] leading-snug text-amber-700 dark:text-amber-300/90 line-clamp-2">
+                                      {svc.packageDetails}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between gap-1 pt-0.5">
+                                  <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    Rp {Number(svc.sell_price || 0).toLocaleString('id-ID')}
+                                  </span>
+                                  <span className="text-[9px] font-mono text-slate-500 dark:text-slate-400">
+                                    {isSvcItem
+                                      ? `⏱ ${svc.serviceDuration || '30 mnt'}`
+                                      : `Stok ${svc.stock ?? 0}`}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                )}
+
+                {isLaundryTerminal && laundryActiveTab === 'TRACKING' ? (
+                  <div className="flex-1 min-h-0 flex flex-col p-2.5 overflow-hidden">
+                    <LaundryTrackingBoard onBackToOrder={() => setLaundryActiveTab('ORDER')} />
+                  </div>
+                ) : (
+                  <>
+                <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs leading-5 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'}`}>
+                  <div className="flex items-center gap-2">
+                    <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <span className="font-medium text-sm leading-5">Daftar Belanja</span>
+                    <span className="font-mono text-[11px] leading-4 px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-normal">
+                      {cart.length} SKU • {Number.isInteger(totalCartItemCount) ? totalCartItemCount : totalCartItemCount.toFixed(2)} {isLaundryTerminal ? 'Unit' : isSalonServiceTerminal ? 'Item' : 'Pcs'}{totalFreeBonusCount > 0 ? ` (+${totalFreeBonusCount} Gratis)` : ''}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsManualSearchOpen(true)}
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline font-normal text-xs cursor-pointer flex items-center gap-1 active:scale-[0.99] transition-all"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{isSalonServiceTerminal || isLaundryTerminal ? 'Pilih Layanan [F3]' : 'Tambah Item [F3]'}</span>
+                  </button>
+                </div>
+
+                {/* Penawaran Tebus Murah (PWP_TEBUS_MURAH) */}
+                {pwpOffers.length > 0 && !isSalonServiceTerminal && !isLaundryTerminal && (
+                  <div className={`px-3 py-1.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs ${
+                    isLight ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/25 text-amber-200'
+                  }`}>
+                    {pwpOffers.slice(0, 2).map((offer, oIdx) => {
+                      const reachedCap = offer.maxQtyPerReceipt !== null && offer.alreadyInCartQty >= offer.maxQtyPerReceipt;
+                      return (
+                        <div key={`pwp-offer-${offer.campaign.id}-${oIdx}`} className="flex items-center justify-between gap-2 w-full sm:w-auto flex-1">
+                          <div className="min-w-0 truncate font-mono text-[11px] tabular-nums">
+                            {offer.isQualified ? (
+                              <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
+                                Tebus Murah Terbuka: {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
+                                {' '}· Normal Rp {offer.regularPrice.toLocaleString('id-ID')}
+                                {offer.maxQtyPerReceipt ? ` · Maks ${offer.maxQtyPerReceipt}/struk` : ' · Unlimited FEFO'}
+                              </span>
+                            ) : (
+                              <span>
+                                Belanja tambah Rp {offer.shortfallAmount.toLocaleString('id-ID')} lagi (min. Rp {offer.minCartSubtotal.toLocaleString('id-ID')}) untuk Tebus Murah {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
+                              </span>
+                            )}
+                          </div>
+                          {offer.isQualified && !reachedCap && (
+                            <button
+                              type="button"
+                              onClick={() => handleAddToCart(offer.product, 1)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] cursor-pointer whitespace-nowrap shrink-0 transition"
+                            >
+                              + Tebus Rp {offer.specialPrice.toLocaleString('id-ID')}
+                            </button>
+                          )}
+                          {offer.isQualified && reachedCap && (
+                            <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">
+                              Kuota Tebus Tercapai ({offer.alreadyInCartQty}/{offer.maxQtyPerReceipt})
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className={`overflow-x-auto flex-1 ${isLaundryTerminal ? 'min-h-[260px]' : 'min-h-0 overflow-y-auto'}`}>
+                  {cart.length === 0 ? (
+                    <div className={`h-full ${isLaundryTerminal ? 'min-h-[220px] py-6' : 'min-h-[180px] py-8'} flex flex-col items-center justify-center text-center space-y-2`}>
+                      <Barcode className="w-8 h-8 text-cyan-500/60" />
+                      <p className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400">
+                        {isSalonServiceTerminal
+                          ? 'Pilih kartu layanan di atas atau tekan [F3] untuk menambah jasa & produk salon'
+                          : 'Terminal Kasir Siap Melayani'}
+                      </p>
                       <button
                         type="button"
                         onClick={() => setIsManualSearchOpen(true)}
-                        className="text-[#0052FF] dark:text-[#58a6ff] hover:underline font-black text-xs cursor-pointer flex items-center gap-1 ml-1"
+                        className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-normal rounded-xl cursor-pointer active:scale-[0.99] transition-all shadow-sm"
                       >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{language === 'ID' ? 'Tambah Item [F3]' : 'Add Item [F3]'}</span>
+                        {isSalonServiceTerminal || isLaundryTerminal ? 'Cari Paket Layanan [F3]' : 'Cari Produk Manual [F3]'}
                       </button>
                     </div>
-                  </div>
+                  ) : (
+                    <table className="w-full text-left border-collapse text-xs leading-5">
+                      <thead className={`border-b text-[11px] leading-4 font-mono font-normal tracking-widest uppercase sticky top-0 z-10 ${isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
+                        <tr>
+                          <th className="py-1.5 px-2 text-center w-10">No</th>
+                          <th className="py-1.5 px-2 w-36">CODE / BARCODE</th>
+                          <th className="py-1.5 px-2">Nama Produk</th>
+                          <th className="py-1.5 px-2 text-center w-24">Qty</th>
+                          <th className="py-1.5 px-2 text-right w-32">Harga Satuan</th>
+                          <th className="py-1.5 px-2 text-right w-36">Total</th>
+                          <th className="py-1.5 px-2 text-center w-24">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-normal">
+                        {cart.map((item, idx) => {
+                          const sizeOrVariant = getItemVariant(item);
+                          const itemCode = item.product?.barcode || item.product?.id || '-';
+                          const itemUnit = item.product?.unit || 'Pcs';
+                          const rawUnitPrice = item.isRetailUnit && item.product.priceSecondary ? item.product.priceSecondary : item.product.sell_price;
+                          const unitDisc = item.itemDiscount || 0;
+                          const effectiveUnitPrice = Math.max(0, rawUnitPrice - unitDisc);
+                          const linePromoSavings = item.promoSavings ?? (unitDisc * item.quantity);
+                          const comps = item.componentSkus || item.product?.componentSkus;
+                          const badgeTone =
+                            item.promoSourceType === 'FEFO_EXP'
+                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
+                              : item.promoSourceType === 'SUPPLIER_TPR'
+                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/35'
+                              : item.promoSourceType === 'SEASONAL'
+                              ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/35'
+                              : item.promoSourceType === 'STORE_BND'
+                              ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/35'
+                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/35';
 
-                  {/* KONTEN TABEL BELANJA: PENUH & SCROLL HALUS OTOMATIS */}
-                  <div className="overflow-x-auto flex-1 min-h-0 overflow-y-auto scroll-smooth">
-                    {cart.length === 0 ? (
-                      <div className="h-full min-h-[240px] flex flex-col items-center justify-center py-12 text-center space-y-3">
-                        <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-[#0052FF] dark:text-[#58a6ff]">
-                          <Barcode className="w-8 h-8" />
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-base font-bold text-slate-900 dark:text-white">
-                            {language === 'ID' ? 'Terminal Kasir Siap Melayani' : 'Register Ready'}
-                          </p>
-                          <p className="text-xs text-gray-400 max-w-sm mx-auto">
-                            {language === 'ID'
-                              ? 'Scan barcode barang [F2], masukkan No. HP Member di atas, atau cari produk dari katalog [F3].'
-                              : 'Scan product barcode [F2], input member phone above, or browse product catalog [F3].'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsManualSearchOpen(true)}
-                          className="mt-2 px-4 py-2 bg-[#0052FF] hover:bg-[#0043d1] text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition cursor-pointer active:scale-95"
-                        >
-                          <Search className="w-3.5 h-3.5" />
-                          <span>{language === 'ID' ? 'Cari Produk Manual [F3]' : 'Browse Products [F3]'}</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <table className="w-full text-left border-collapse">
-                        {/* 7 Sticky Table Columns (Standard Minimarket ERP) */}
-                        <thead
-                          className={`border-b-2 sticky top-0 z-10 font-mono text-[11px] uppercase tracking-wider ${
-                            isLight
-                              ? 'bg-slate-100 text-slate-950 border-slate-300'
-                              : 'bg-[#161b22] text-gray-200 border-slate-700'
-                          }`}
-                        >
-                          <tr>
-                            <th className="py-1 px-2 text-center w-10 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">No</th>
-                            <th className="py-1 px-2 w-32 sm:w-36 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">CODE / BARCODE</th>
-                            <th className="py-1 px-2 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">{language === 'ID' ? 'Nama Produk' : 'Product Name'}</th>
-                            <th className="py-1 px-2 text-center w-20 sm:w-24 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">
-                              Qty <span className="text-[9px] text-blue-600 dark:text-blue-400 font-mono lowercase">[f4]</span>
-                            </th>
-                            <th className="py-1 px-2 text-right w-28 sm:w-32 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">{language === 'ID' ? 'Harga Satuan' : 'Unit Price'}</th>
-                            <th className="py-1 px-2 text-right w-32 sm:w-36 font-black border-r border-slate-300 dark:border-slate-700 text-slate-950 dark:text-gray-200">{language === 'ID' ? 'Total' : 'Total'}</th>
-                            <th className="py-1 px-2 text-center w-20 sm:w-24 font-black text-slate-950 dark:text-gray-200">{language === 'ID' ? 'Aksi' : 'Action'}</th>
-                          </tr>
-                        </thead>
-                        <tbody
-                          className={`divide-y ${
-                            isLight ? 'divide-slate-300' : 'divide-slate-700'
-                          }`}
-                        >
-                          {cart.map((item, idx) => {
-                            const sizeOrVariant = getItemVariant(item);
-                            const itemCode = item.product?.barcode || item.product?.id || '-';
-                            const itemUnit = item.product?.unit || 'Pcs';
-                            const isSelected = idx === selectedCartIndex;
-
-                            return (
-                              <tr
-                                key={`pos-cart-${item.product?.id || item.product?.barcode || 'item'}-${idx}`}
-                                id={`pos-cart-row-${idx}`}
-                                onClick={() => setSelectedCartIndex(idx)}
-                                className={`border-b transition duration-75 h-7.5 max-h-8 cursor-pointer select-none ${
-                                  isSelected
-                                    ? isLight
-                                      ? 'bg-blue-100/95 text-blue-950 font-bold ring-2 ring-inset ring-[#0052FF] border-l-4 border-l-[#0052FF]'
-                                      : 'bg-blue-950/70 text-blue-100 font-bold ring-2 ring-inset ring-[#58a6ff] border-l-4 border-l-[#58a6ff]'
-                                    : isLight
-                                    ? idx % 2 === 0
-                                      ? 'bg-white hover:bg-blue-50/90 text-slate-950 border-slate-300'
-                                      : 'bg-slate-50 hover:bg-blue-50/90 text-slate-950 border-slate-300'
-                                    : idx % 2 === 0
-                                    ? 'bg-[#161b22] hover:bg-[#1c2128] text-gray-100 border-slate-700'
-                                    : 'bg-[#0d1117] hover:bg-[#1c2128] text-gray-100 border-slate-700'
-                                }`}
-                              >
-                                {/* 1. No (01, 02, 03...) */}
-                                <td className={`py-1 px-2 text-center font-mono font-black text-xs border-r border-slate-300 dark:border-slate-700 ${
-                                  isSelected
-                                    ? isLight ? 'text-[#0052FF] font-black' : 'text-[#58a6ff] font-black'
-                                    : isLight ? 'text-slate-950' : 'text-gray-300'
-                                }`}>
-                                  {isSelected && <span className="inline-block mr-0.5 animate-pulse text-[#0052FF] dark:text-[#58a6ff]">►</span>}
-                                  {String(idx + 1).padStart(2, '0')}
-                                </td>
-
-                                {/* 2. CODE / BARCODE (Pabrik atau Kode PLU/Internal Toko) */}
-                                <td className={`py-1 px-2 font-mono text-xs font-bold border-r border-slate-300 dark:border-slate-700 truncate ${
-                                  isSelected
-                                    ? isLight ? 'text-blue-950 font-black' : 'text-blue-200 font-black'
-                                    : isLight ? 'text-slate-800' : 'text-slate-200'
-                                }`} title={`Kode: ${itemCode}`}>
-                                  {itemCode}
-                                </td>
-
-                                {/* 3. Nama Produk, Satuan UOM & Badge Farmasi Khusus */}
-                                <td className="py-1 px-2 border-r border-slate-300 dark:border-slate-700">
-                                  {(() => {
-                                    const isRacikan =
-                                      (item.product?.id || '').startsWith('RCK-') ||
-                                      (item.product?.barcode || '').startsWith('RCK-') ||
-                                      item.product?.pharmacyClass === 'RACIKAN' ||
-                                      item.product?.category === 'FARMASI_RACIKAN';
-
-                                    const isObatKeras =
-                                      item.product?.pharmacyClass === 'OBAT_KERAS' ||
-                                      (item.product?.category || '').toLowerCase().includes('keras') ||
-                                      (item.product?.id || '').startsWith('MED-');
-
+                          return (
+                            <tr
+                              key={`pos-row-${itemCode}-${idx}`}
+                              onClick={() => setSelectedCartIndex(idx)}
+                              className={`border-b border-slate-100 dark:border-slate-800/60 min-h-9 cursor-pointer transition-colors ${
+                                idx === selectedCartIndex 
+                                  ? 'bg-cyan-500/10 text-cyan-900 dark:text-cyan-200' 
+                                  : isLight 
+                                  ? 'hover:bg-slate-50 text-slate-800' 
+                                  : 'hover:bg-slate-800/40 text-slate-200'
+                              }`}
+                            >
+                              <td className="py-1.5 px-2 text-center font-mono text-xs text-slate-500">{String(idx + 1).padStart(2, '0')}</td>
+                              <td className="py-1.5 px-2 font-mono text-xs text-slate-500 dark:text-slate-400">{itemCode}</td>
+                              <td className="py-1.5 px-2 text-xs font-normal">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span>{item.product.name}</span>
+                                  {item.buildingTierBadge && (
+                                    <span
+                                      className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+                                        item.buildingTierName === 'KONTRAKTOR'
+                                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
+                                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/40'
+                                      }`}
+                                    >
+                                      {item.buildingTierBadge}
+                                    </span>
+                                  )}
+                                  {item.promoBadge && (
+                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${badgeTone}`}>
+                                      {item.promoBadge}
+                                    </span>
+                                  )}
+                                  {isSalonServiceTerminal && (() => {
+                                    const fmtMeta = getServiceFormatMeta(item.product);
                                     return (
-                                      <div className="flex items-center gap-1.5 flex-wrap truncate">
-                                        {isObatKeras && (
-                                          <span
-                                            className="w-4 h-4 rounded-full bg-red-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 border border-red-400 shadow-[0_0_6px_rgba(239,68,68,0.5)]"
-                                            title="Obat Keras (K)"
-                                          >
-                                            K
-                                          </span>
-                                        )}
-                                        <span
-                                          className={`text-xs font-semibold truncate ${
-                                            isSelected
-                                              ? isLight ? 'text-blue-950 font-black' : 'text-white font-black'
-                                              : isLight ? 'text-slate-900' : 'text-slate-100'
-                                          }`}
-                                          title={item.product.name}
-                                        >
-                                          {item.product.name}
+                                      <div
+                                        className="inline-flex flex-wrap items-center gap-1"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${fmtMeta.badgeClass}`}>
+                                          {fmtMeta.shortLabel}
                                         </span>
-
-                                        {isRacikan && (
-                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-900/60 text-purple-300 border border-purple-500/50 shadow-[0_0_8px_rgba(168,85,247,0.4)] shrink-0">
-                                            [KODE: {itemCode}]
-                                          </span>
-                                        )}
-
-                                        {sizeOrVariant &&
-                                          sizeOrVariant !== 'ALL' &&
-                                          sizeOrVariant !== 'STD' &&
-                                          sizeOrVariant !== 'STANDAR' &&
-                                          sizeOrVariant.toLowerCase() !== (itemUnit || '').toLowerCase() && (
-                                            <span className={`text-[10px] font-semibold shrink-0 ${
-                                              isLight ? 'text-slate-600' : 'text-slate-400'
-                                            }`}>
-                                              ({sizeOrVariant})
-                                            </span>
-                                          )}
-                                        {/* Badge Satuan Aktif */}
-                                        <span className={`text-[10px] font-mono px-1 rounded border shrink-0 ${
-                                          item.isRetailUnit
-                                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-500 dark:text-amber-300 font-bold'
-                                            : isLight
-                                            ? 'bg-slate-100 border-slate-300 text-slate-700'
-                                            : 'bg-slate-800 border-slate-600 text-slate-300'
-                                        }`}>
-                                          {item.selectedUnit || itemUnit}
-                                        </span>
-
-                                        {/* Badge IMEI, Serial Number & Garansi (Electronics KASIR 07) */}
-                                        {item.product.imeiSerial && (
-                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/15 text-sky-400 border border-sky-500/40 shrink-0">
-                                            IMEI: {item.product.imeiSerial}
-                                          </span>
-                                        )}
-                                        {item.product.specs && (
-                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30 shrink-0">
-                                            {item.product.specs}
-                                          </span>
-                                        )}
-                                        {item.product.warrantyPeriod && (
-                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                            🛡️ Garansi: {item.product.warrantyPeriod}
-                                          </span>
-                                        )}
-
-                                        {/* Badge Part Fisik / Jasa Servis (Workshop KASIR 08) */}
-                                        {item.product.description && (item.product.description === 'Part Fisik' || item.product.description === 'Jasa Servis') && (
-                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
-                                            item.product.description === 'Jasa Servis'
-                                              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/40'
-                                              : 'bg-orange-500/15 text-orange-400 border border-orange-500/40'
-                                          }`}>
-                                            {item.product.description === 'Jasa Servis' ? '⚙️ Jasa Servis' : '📦 Part Fisik'}
-                                          </span>
-                                        )}
-
-                                        {/* Toggle Satuan Eceran/Utuh (Building Materials Multi-Unit) */}
-                                        {Boolean(item.product.unitSecondary && item.product.priceSecondary) && (
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleToggleItemUnit(idx);
+                                        {item.product.itemType === 'SERVICE' ? (
+                                          <select
+                                            value={item.stylistId || selectedServiceStylist?.id || ''}
+                                            onChange={(e) => {
+                                              const picked = activeServiceStylists.find((s) => s.id === e.target.value);
+                                              setCart((prev) =>
+                                                prev.map((row, rowIdx) =>
+                                                  rowIdx === idx
+                                                    ? {
+                                                        ...row,
+                                                        stylistId: picked?.id,
+                                                        stylistName: picked?.name,
+                                                        stylistCommissionRate: picked?.commissionRate,
+                                                      }
+                                                    : row
+                                                )
+                                              );
                                             }}
-                                            className="text-[9px] font-bold px-1.5 py-0.2 rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/25 transition cursor-pointer flex items-center gap-0.5 shrink-0 active:scale-95"
-                                            title={`Ganti Satuan: ${item.isRetailUnit ? `Utuh (${item.product.unit})` : `Eceran (${item.product.unitSecondary})`}`}
+                                            className={`text-[10px] font-medium py-0.5 px-1.5 rounded border cursor-pointer outline-none ${
+                                              isLight
+                                                ? 'bg-purple-50 border-purple-300 text-purple-800'
+                                                : 'bg-purple-500/15 border-purple-500/35 text-purple-200'
+                                            }`}
+                                            title="Pilih Stylist / Kapster untuk layanan ini"
                                           >
-                                            <span>⇄</span>
-                                            <span>{item.isRetailUnit ? `Utuh (${item.product.unit})` : `Eceran (${item.product.unitSecondary})`}</span>
-                                          </button>
+                                            {activeServiceStylists.map((st) => (
+                                              <option key={st.id} value={st.id}>
+                                                ✂️ {st.name} ({st.commissionRate}%)
+                                              </option>
+                                            ))}
+                                          </select>
+                                        ) : (
+                                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                            Non-Komisi
+                                          </span>
                                         )}
-
-                                        {/* Dropdown Armada Cepat pada Item Curah KASIR 09 */}
-                                        {Boolean(
-                                          item.product.materialNature === 'BULK_CURAH' ||
-                                          (item.product.category || '').includes('PASIR') ||
-                                          (item.product.bulkFleetTiers && item.product.bulkFleetTiers.length > 0)
-                                        ) && (
-                                          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                                            <span className="text-[10px] text-amber-500 font-bold flex items-center gap-0.5">
-                                              <Truck className="w-3 h-3 text-amber-400" />
-                                              <span className="hidden sm:inline">Armada:</span>
-                                            </span>
-                                            <select
-                                              value={
-                                                item.product.bulkUnitType ||
-                                                (item.product.bulkFleetTiers || DEFAULT_FLEET_OPTIONS).find(
-                                                  (f) =>
-                                                    f.id === item.product.bulkUnitType ||
-                                                    f.name === item.selectedUnit ||
-                                                    f.price === item.product.sell_price
-                                                )?.id || 'PICKUP_RET'
-                                              }
-                                              onChange={(e) => {
-                                                e.stopPropagation();
-                                                handleSelectFleetTier(idx, e.target.value);
-                                              }}
-                                              className={`text-[10px] font-bold py-0.5 px-2 rounded-lg border cursor-pointer focus:outline-none focus:ring-1 focus:ring-amber-400 ${
-                                                isLight
-                                                  ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-xs'
-                                                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
-                                              }`}
-                                              title="Pilih Armada: Ret Pick-up (Rp 350rb) | Ret Truk Engkel (Rp 850rb) | Dump Truck (Rp 1.8jt)"
-                                            >
-                                              {((item.product.bulkFleetTiers && item.product.bulkFleetTiers.length > 0)
-                                                ? item.product.bulkFleetTiers.filter((f) => f.isActive)
-                                                : DEFAULT_FLEET_OPTIONS
-                                              ).map((fleet, flIdx) => {
-                                                const fleetLabel = fleet.name.toLowerCase().includes('dump truck')
-                                                  ? 'Dump Truck'
-                                                  : fleet.name.toLowerCase().includes('pick-up') || fleet.name.toLowerCase().includes('pickup')
-                                                  ? 'Ret Pick-up'
-                                                  : fleet.name.toLowerCase().includes('engkel')
-                                                  ? 'Ret Truk Engkel'
-                                                  : fleet.name.toLowerCase().includes('karung') || fleet.name.toLowerCase().includes('sak')
-                                                  ? 'Sak / Karung'
-                                                  : fleet.name.split(' (')[0];
-
-                                                const priceTag = fleet.price >= 1000000
-                                                  ? `${(fleet.price / 1000000).toFixed(1).replace('.0', '')}jt`
-                                                  : `${Math.round(fleet.price / 1000)}rb`;
-
-                                                return (
-                                                  <option
-                                                    key={`fleet-opt-${fleet.id}-${flIdx}`}
-                                                    value={fleet.id}
-                                                    className={isLight ? 'bg-white text-slate-900' : 'bg-[#161b22] text-white'}
-                                                  >
-                                                    {fleetLabel} (Rp {priceTag})
-                                                  </option>
-                                                );
-                                              })}
-                                            </select>
-                                          </div>
-                                        )}
-
-                                        {isSelected && (
-                                          <span className="text-[9px] font-black uppercase px-1 py-0.2 rounded bg-blue-600 text-white shrink-0 tracking-wider">
-                                            AKTIF [Del / +/-]
+                                        {item.product.packageDetails && (
+                                          <span className="text-[10px] text-amber-700 dark:text-amber-300/90">
+                                            • Isi: {item.product.packageDetails}
                                           </span>
                                         )}
                                       </div>
                                     );
                                   })()}
-                                </td>
-
-                                {/* 4. Kotak Qty Presisi & Navigasi Keyboard Interaktif (Mendukung Desimal) */}
-                                <td className="py-1 px-2 text-center border-r border-slate-300 dark:border-slate-700">
-                                  <div className="inline-flex items-center justify-center">
+                                  {(item.product.businessModel === 'fashion' || Boolean(item.product.variantMatrix?.length)) ? (() => {
+                                    const sizes = item.product.variantMatrix?.length
+                                      ? Array.from(new Set(item.product.variantMatrix.map((c) => c.size)))
+                                      : (item.product.variantSize || 'S, M, L, XL, XXL').split(',').map((s) => s.trim()).filter(Boolean);
+                                    const colors = item.product.variantMatrix?.length
+                                      ? Array.from(new Set(item.product.variantMatrix.map((c) => c.color)))
+                                      : (item.product.variantColor || 'Sage, Maroon, Hitam, Cream').split(',').map((c) => c.trim()).filter(Boolean);
+                                    const curSize = item.selectedFashionSize || sizes[0] || 'M';
+                                    const curColor = item.selectedFashionColor || colors[0] || 'Sage';
+                                    const matchedCell = item.product.variantMatrix?.find(
+                                      (c) => c.size === curSize && c.color === curColor
+                                    );
+                                    return (
+                                      <div
+                                        className="inline-flex items-center gap-1"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <select
+                                          value={curSize}
+                                          onChange={(e) => handleChangeFashionVariant(idx, e.target.value, curColor)}
+                                          className="text-[10px] font-mono font-semibold py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
+                                          title="Pilih Ukuran"
+                                        >
+                                          {sizes.map((sz) => (
+                                            <option key={sz} value={sz}>
+                                              Size {sz}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <select
+                                          value={curColor}
+                                          onChange={(e) => handleChangeFashionVariant(idx, curSize, e.target.value)}
+                                          className="text-[10px] font-medium py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
+                                          title="Pilih Warna"
+                                        >
+                                          {colors.map((cl) => (
+                                            <option key={cl} value={cl}>
+                                              {cl}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        {matchedCell !== undefined && (
+                                          <span className={`text-[10px] font-mono px-1 rounded border ${
+                                            matchedCell.stock <= 0
+                                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
+                                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                                          }`}>
+                                            Stok {matchedCell.stock}
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setVariantPickerState({
+                                              product: item.product,
+                                              mode: 'CHANGE',
+                                              cartIndex: idx,
+                                              initialSize: curSize,
+                                              initialColor: curColor,
+                                            })
+                                          }
+                                          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition"
+                                          title="Buka Matriks Ukuran × Warna"
+                                        >
+                                          Matriks
+                                        </button>
+                                      </div>
+                                    );
+                                  })() : (
+                                    sizeOrVariant && <span className="text-[10px] text-slate-400">({sizeOrVariant})</span>
+                                  )}
+                                  <span className="text-[10px] font-mono px-1 rounded border border-slate-300 dark:border-slate-700 text-slate-500">
+                                    {item.selectedUnit || itemUnit}
+                                  </span>
+                                  {Boolean(item.product.unitSecondary && item.product.priceSecondary) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleToggleItemUnit(idx);
+                                      }}
+                                      className="text-[9px] font-normal px-1.5 rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 cursor-pointer active:scale-[0.99]"
+                                    >
+                                      ⇄ {item.isRetailUnit ? item.product.unit : item.product.unitSecondary}
+                                    </button>
+                                  )}
+                                  {Boolean(item.product.materialNature === 'BULK_CURAH' || (item.product.category || '').includes('PASIR')) && (
+                                    <select
+                                      value={item.product.bulkUnitType || 'PICKUP_RET'}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => handleSelectFleetTier(idx, e.target.value)}
+                                      className="text-[10px] font-normal py-0.5 px-2 rounded-lg border bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                                    >
+                                      {DEFAULT_FLEET_OPTIONS.map((fleet) => (
+                                        <option key={fleet.id} value={fleet.id}>
+                                          {fleet.shortName} ({fleet.suffix} = {fleet.volumeM3} m³)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  {item.cubicConversionFactorM3 && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-semibold">
+                                      Potong Curah: {item.cubicDeductionM3 ?? Number((item.cubicConversionFactorM3 * item.quantity).toFixed(2))} m³ (@{item.cubicConversionFactorM3} m³)
+                                    </span>
+                                  )}
+                                  {item.grossMarginPercent !== undefined && (isBuildingTerminal || isBuildingMaterialProduct(item.product)) && (
+                                    <span
+                                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold ${
+                                        item.isMarginBelowFloor
+                                          ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
+                                          : 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
+                                      }`}
+                                    >
+                                      Margin {item.grossMarginPercent.toFixed(1)}%
+                                      {item.isMarginBelowFloor ? ' ⚠️ < 3%' : ''}
+                                    </span>
+                                  )}
+                                  {item.product.slaDuration && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                                      ⏱ {item.product.slaDuration}
+                                    </span>
+                                  )}
+                                  {item.laundryLengthM && item.laundryWidthM && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setAreaTargetCartIndex(idx);
+                                        setAreaModalService(item.product);
+                                      }}
+                                      className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 cursor-pointer hover:bg-purple-500/25"
+                                    >
+                                      📐 {item.laundryLengthM}m × {item.laundryWidthM}m
+                                    </button>
+                                  )}
+                                  {item.grossWeightKg !== undefined && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                      ⚖️ Bruto {item.grossWeightKg.toFixed(2)} - Tare {(item.tareWeightKg || 0).toFixed(2)} = Netto {(item.actualNetWeightKg ?? item.quantity).toFixed(2)} kg
+                                    </span>
+                                  )}
+                                  {item.isMinWeightAdjusted && (
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-semibold">
+                                      Auto Min. {item.minWeightAppliedKg ?? item.quantity} {item.selectedUnit || itemUnit}
+                                    </span>
+                                  )}
+                                  {(item.product.laundryUnitType === 'KILOAN' || (isLaundryTerminal && (item.product.unit || '').toLowerCase() === 'kg')) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedCartIndex(idx);
+                                        setScaleTargetService(item.product);
+                                        setIsDigitalScaleModalOpen(true);
+                                      }}
+                                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer flex items-center gap-0.5"
+                                    >
+                                      <Scale className="w-2.5 h-2.5" />
+                                      <span>Timbang</span>
+                                    </button>
+                                  )}
+                                </div>
+                                {Array.isArray(comps) && comps.length > 0 && (
+                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+                                    Komponen Paket ({comps.length} SKU): {comps.map(c => `${c.qty * (item.quantity + (item.freeBonusQty || 0))}x ${c.skuName}`).join(' • ')}
+                                  </div>
+                                )}
+                                {(item.freeBonusQty || 0) > 0 && (
+                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono font-semibold">
+                                    + Bonus Gratis: {item.freeBonusQty} unit ({item.freeBonusLabel || 'Beli X Gratis Y'})
+                                  </div>
+                                )}
+                                {(linePromoSavings > 0 || item.promoHint || item.manualDiscountReason) && (
+                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono flex flex-wrap gap-x-2">
+                                    {linePromoSavings > 0 && (
+                                      <span>
+                                        {item.promoName ? `${item.promoName} • ` : item.buildingTierLabel ? `${item.buildingTierLabel} • ` : ''}
+                                        Hemat Rp {linePromoSavings.toLocaleString('id-ID')}
+                                      </span>
+                                    )}
+                                    {item.manualDiscountReason && (
+                                      <span className="text-amber-600 dark:text-amber-300">
+                                        ({item.manualDiscountReason}{item.manualDiscountAuthorizedBy ? ` • ${item.manualDiscountAuthorizedBy}` : ''})
+                                      </span>
+                                    )}
+                                    {item.promoHint && (
+                                      <span className={item.pwpQualified === false ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}>
+                                        {item.promoHint}
+                                      </span>
+                                    )}
+                                  {(item.overriddenPromosCount || 0) > 0 && (
+                                      <span className="text-slate-400">
+                                        (Anti-Tumpuk: {item.overriddenPromosCount} promo lain non-aktif)
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-1.5 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex flex-col items-center">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateQty(idx, -1)}
+                                      className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
+                                        isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                      }`}
+                                      title="Kurangi Qty"
+                                    >
+                                      <Minus className="w-3 h-3" />
+                                    </button>
                                     <input
                                       id={`pos-qty-input-${idx}`}
                                       type="number"
-                                      step={item.product.supportDecimal || isBuildingTerminal ? 'any' : '1'}
-                                      min={item.product.supportDecimal || isBuildingTerminal ? 0.01 : 1}
-                                      max={9999}
+                                      step="any"
                                       value={item.quantity}
-                                      onChange={(e) => {
-                                        const rawVal = e.target.value;
-                                        if (rawVal === '') {
-                                          handleDirectQtyChange(idx, 0);
-                                        } else {
-                                          const parsed = parseFloat(rawVal.replace(',', '.'));
-                                          if (!isNaN(parsed)) {
-                                            handleDirectQtyChange(idx, parsed);
-                                          }
-                                        }
-                                      }}
-                                      onFocus={(e) => {
-                                        e.target.select();
-                                        setSelectedCartIndex(idx);
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          if (cart.length > 0 && !isFnbTerminal && !isFnbPhotoMenuMode) {
-                                            setPaymentMethod('CASH');
-                                            focusCashInput();
-                                          } else {
-                                            focusBarcodeInput();
-                                          }
-                                        } else if (e.key === 'Escape') {
-                                          e.preventDefault();
-                                          focusBarcodeInput();
-                                        }
-                                      }}
-                                      className={`w-14 sm:w-16 h-5.5 sm:h-6 text-center font-black text-xs border rounded outline-none transition ${
-                                        isLight
-                                          ? 'border-slate-400 bg-white text-slate-950 focus:border-blue-600 focus:ring-1 focus:ring-blue-600'
-                                          : 'border-slate-600 bg-slate-900 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
-                                      }`}
-                                      title={language === 'ID' ? 'Ketik kuantitas [Bisa desimal, misal 2.5]' : 'Type quantity'}
+                                      onChange={(e) => handleDirectQtyChange(idx, parseFloat(e.target.value) || 1)}
+                                      className="w-14 h-6 text-center font-mono font-normal text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded"
                                     />
-                                  </div>
-                                </td>
-
-                                {/* 5. Harga Satuan (Otomatis Switch Eceran/Utuh) */}
-                                <td className={`py-1 px-2 text-right font-mono text-xs font-black border-r border-slate-300 dark:border-slate-700 ${
-                                  isLight ? 'text-slate-950' : 'text-slate-100'
-                                }`}>
-                                  {(() => {
-                                    const unitPrice = item.isRetailUnit && item.product.priceSecondary
-                                      ? item.product.priceSecondary
-                                      : item.product.sell_price;
-                                    return (
-                                      <div className="flex flex-col items-end">
-                                        <span>Rp {unitPrice.toLocaleString('id-ID')}</span>
-                                        {item.isRetailUnit && (
-                                          <span className="text-[9px] font-bold text-amber-500 font-mono">
-                                            (Ecer/{item.selectedUnit || item.product.unitSecondary || 'Meter'})
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </td>
-
-                                {/* 6. Total */}
-                                <td className={`py-1 px-2 text-right font-mono font-black text-xs border-r border-slate-300 dark:border-slate-700 ${
-                                  isLight ? 'text-emerald-700' : 'text-emerald-400'
-                                }`}>
-                                  Rp {item.subtotal.toLocaleString('id-ID')}
-                                </td>
-
-                                {/* 7. Aksi */}
-                                <td className="py-0.5 px-1.5 text-center">
-                                  <div className="inline-flex items-center justify-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => setEditingItemIndex(idx)}
-                                      className={`w-6 h-6 flex items-center justify-center rounded border transition cursor-pointer active:scale-90 ${
-                                        isLight
-                                          ? 'bg-blue-50 text-[#0052FF] hover:bg-blue-100 border-blue-300 shadow-xs'
-                                          : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-blue-500/40'
+                                      onClick={() => handleUpdateQty(idx, 1)}
+                                      className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
+                                        isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
                                       }`}
-                                      title={language === 'ID' ? 'Edit item nota' : 'Edit item'}
+                                      title="Tambah Qty"
                                     >
-                                      <Edit3 className="w-3 h-3" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRequestRemoveItem(idx)}
-                                      className={`w-6 h-6 flex items-center justify-center rounded border transition cursor-pointer active:scale-90 ${
-                                        isLight
-                                          ? 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-300 shadow-xs'
-                                          : 'bg-rose-500/15 text-rose-400 hover:bg-rose-500/25 border-rose-500/40'
-                                      }`}
-                                      title={language === 'ID' ? 'Void baris item ini (Otorisasi Supervisor)' : 'Void item line (Supervisor Approval)'}
-                                    >
-                                      <Trash2 className="w-3 h-3" />
+                                      <Plus className="w-3 h-3" />
                                     </button>
                                   </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
+                                  {(item.freeBonusQty || 0) > 0 && (
+                                    <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
+                                      +{item.freeBonusQty} Gratis
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-1.5 px-2 text-right font-mono text-xs">
+                                {unitDisc > 0 ? (
+                                  <div className="flex flex-col items-end leading-tight">
+                                    <span className="text-[10px] text-slate-400 line-through">
+                                      Rp {rawUnitPrice.toLocaleString('id-ID')}
+                                    </span>
+                                    <span className="text-emerald-600 dark:text-emerald-400">
+                                      Rp {effectiveUnitPrice.toLocaleString('id-ID')}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span>Rp {rawUnitPrice.toLocaleString('id-ID')}</span>
+                                )}
+                              </td>
+                              <td className="py-1.5 px-2 text-right font-mono font-semibold text-xs text-emerald-600 dark:text-emerald-400">
+                                <div>Rp {item.subtotal.toLocaleString('id-ID')}</div>
+                                {linePromoSavings > 0 && (
+                                  <div className="text-[10px] font-normal text-emerald-500">
+                                    -Rp {linePromoSavings.toLocaleString('id-ID')}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-0.5 px-1.5 text-center">
+                                <div className="inline-flex gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingItemIndex(idx)}
+                                    className="w-6 h-6 flex items-center justify-center rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 cursor-pointer active:scale-[0.99] transition-all"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRequestRemoveItem(idx)}
+                                    className="w-6 h-6 flex items-center justify-center rounded border border-rose-500/40 bg-rose-500/10 text-rose-500 cursor-pointer active:scale-[0.99] transition-all"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Banner Khusus Elektronik, Bengkel & Material Bangunan */}
+          {isElectronicsTerminal && (
+            <div className="w-full py-2 px-3 mb-1.5 rounded-xl border border-sky-500/40 bg-sky-950/30 text-sky-200 flex items-center justify-between text-xs">
+              <span className="font-bold">📱 Elektronik & Gadget Register • Dual-IMEI & Garansi Aktif</span>
+              <span className="font-mono text-emerald-400 font-bold">● ONLINE</span>
+            </div>
+          )}
+
+          {isWorkshopTerminal && (
+            <div className="w-full py-2 px-3 mb-1.5 rounded-xl border border-orange-500/40 bg-orange-950/30 text-orange-200 flex items-center justify-between text-xs">
+              <span className="font-bold">🔧 Bengkel • Nopol: {workshopPlateNumber} • Mekanik: {workshopMechanic}</span>
+              <span className="font-mono text-emerald-400 font-bold">● ONLINE</span>
+            </div>
+          )}
+
+          {(isBuildingTerminal || (isHybridMode && cart.some((c) => c.product.businessModel === 'building'))) && (
+            <div className={`w-full py-2 px-3 mb-1.5 rounded-xl border flex flex-col gap-1.5 text-xs ${
+              isLight ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-indigo-500/30 bg-indigo-950/30 text-indigo-200'
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold flex items-center gap-1">
+                    <Truck className="w-3.5 h-3.5 text-amber-500" />
+                    Skema Kirim Depo:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeliveryPolicy('LOCO');
+                      setDeliveryMethod('DIRECT');
+                      setDeliveryFleetActive(false);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] cursor-pointer ${
+                      deliveryPolicy === 'LOCO' && deliveryMethod === 'DIRECT'
+                        ? 'bg-indigo-600 text-white'
+                        : isLight
+                        ? 'bg-white border border-slate-300 text-slate-700'
+                        : 'bg-[#161b22] text-slate-300'
+                    }`}
+                  >
+                    📦 Loco (Ambil Sendiri)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeliveryPolicy('FRANGKO');
+                      setDeliveryMethod('FLEET_DELIVERY');
+                      setDeliveryFleetActive(true);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] cursor-pointer ${
+                      deliveryPolicy === 'FRANGKO' || deliveryMethod === 'FLEET_DELIVERY'
+                        ? 'bg-amber-500 text-slate-950'
+                        : isLight
+                        ? 'bg-white border border-slate-300 text-slate-700'
+                        : 'bg-[#161b22] text-slate-300'
+                    }`}
+                  >
+                    🚛 Frangko ({selectedFleetType === 'DUMP_TRUCK' ? 'Dump Truck' : selectedFleetType === 'TRUCK_ENGKEL' ? 'Engkel' : 'Pick-up'})
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {cart.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        submitBuildingAuthRequest({
+                          type: 'DISKON_BORONGAN_FRANGKO',
+                          customerId: selectedCustomer?.id,
+                          contractorName: selectedCustomer?.name || 'Pelanggan Proyek Depo',
+                          projectTitle: deliveryDestination || selectedCustomer?.store_name || 'Order Material Borongan POS',
+                          requestedBy: activeUser?.name || 'Kasir Depo',
+                          orderSubtotal: subtotal,
+                          requestedDiscountPercent: discountType === 'PERCENT' && discountPercent > 0 ? discountPercent : 5,
+                          requestedDiscountAmount: calculatedDiscount > 0 ? calculatedDiscount : Math.round(subtotal * 0.05),
+                          frangkoFeeWaived: activeShippingFee > 0 ? activeShippingFee : 250000,
+                          reason: `Pengajuan Diskon Borongan & Bebas Ongkir Frangko (${resolvedFleetLabel}) dari POS`,
+                        });
+                      }}
+                      className="px-2.5 py-1 rounded-lg font-semibold text-[11px] bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-700 dark:text-amber-300 cursor-pointer"
+                    >
+                      Ajukan Borongan / Free Frangko
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('KREDIT / TEMPO (AR)');
+                      setIsPaymentConfirmOpen(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg font-semibold text-[11px] bg-purple-600 hover:bg-purple-500 text-white cursor-pointer"
+                  >
+                    📋 DP / Tempo Kontraktor
+                  </button>
+                </div>
+              </div>
+
+              {/* Ringkasan Pemisahan Jurnal Logistik & Est. Laba Bersih Setelah Ongkir di POS */}
+              <div className={`pt-1.5 border-t flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
+                isLight ? 'border-amber-200 text-slate-800' : 'border-indigo-500/25 text-slate-300'
+              }`}>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span>
+                    Omzet Material (4-10001):{' '}
+                    <strong className="text-slate-900 dark:text-white">
+                      Rp {buildingCartAccounting.materialRevenueAmt.toLocaleString('id-ID')}
+                    </strong>
+                  </span>
+                  <span>
+                    Jasa Bongkar Kuli (4-10102):{' '}
+                    <strong className="text-indigo-600 dark:text-indigo-400">
+                      +Rp {buildingCartAccounting.loadingFeeAmt.toLocaleString('id-ID')}
+                    </strong>
+                  </span>
+                  <span>
+                    Beban Armada Frangko (5-10205):{' '}
+                    <strong className="text-rose-600 dark:text-rose-400">
+                      -Rp {buildingCartAccounting.fleetDeliveryCostAmt.toLocaleString('id-ID')}
+                    </strong>
+                  </span>
+                  {buildingCartAccounting.totalCubicDeductionM3 > 0 && (
+                    <span className="px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-bold">
+                      Total Potong Stok Curah: {buildingCartAccounting.totalCubicDeductionM3} m³
+                    </span>
+                  )}
+                </div>
+                <div className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-bold">
+                  Est. Laba Bersih Setelah Ongkir: Rp {buildingCartAccounting.netProfitAfterShipping.toLocaleString('id-ID')}
+                </div>
+              </div>
+
+              {/* Margin Floor Guard Warning di POS */}
+              {buildingCartAccounting.hasMarginViolation && (
+                <div className="rounded-lg p-2 bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[11px]">
+                    <span className="font-bold uppercase">⚠️ Margin Floor Guard (&lt; 3% / Di Bawah HPP): </span>
+                    <span>
+                      {buildingCartAccounting.itemsBelowMarginFloor.map((it) => it.product.name).join(', ')}. Pembayaran dikunci tanpa otorisasi.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAutoFixCartSafeMargin}
+                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] cursor-pointer"
+                    >
+                      Sesuaikan Harga Aman (≥3%)
+                    </button>
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold cursor-pointer bg-white/80 dark:bg-slate-900/80 px-2 py-1 rounded border border-rose-400">
+                      <input
+                        type="checkbox"
+                        checked={posMarginFloorAuthorized}
+                        onChange={(e) => setPosMarginFloorAuthorized(e.target.checked)}
+                        className="rounded border-rose-500 text-rose-600"
+                      />
+                      <span>Otorisasi Khusus</span>
+                    </label>
                   </div>
                 </div>
               )}
-          </div>
-
-          {/* Panel Banner Khusus KASIR 07 (Elektronik & Gadget) */}
-          {isElectronicsTerminal && (
-            <div
-              className={`w-full py-2 px-3 mb-1.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs transition ${
-                isLight ? 'bg-sky-50 border-sky-300 text-sky-950' : 'bg-sky-950/30 border-sky-500/40 text-sky-200'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5 text-sky-500 dark:text-sky-400">
-                  <Smartphone className="w-4 h-4 text-sky-400" />
-                  <span>Elektronik & Gadget Register:</span>
-                </span>
-                <span className="px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40 text-[10px] font-bold font-mono">
-                  ✓ Dual-IMEI, Serial Number & Garansi Aktif
-                </span>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-[11px]">
-                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                  ● STATUS: ONLINE / ACTIVE
-                </span>
-                <span className="text-gray-400 hidden sm:inline">Garansi Resmi Terverifikasi</span>
-              </div>
             </div>
           )}
 
-          {/* Panel Banner Khusus KASIR 08 (Bengkel Otomotif & Servis) */}
-          {isWorkshopTerminal && (
-            <div
-              className={`w-full py-2 px-3 mb-1.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs transition ${
-                isLight ? 'bg-orange-50 border-orange-300 text-orange-950' : 'bg-orange-950/30 border-orange-500/40 text-orange-200'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5 text-orange-500 dark:text-orange-400">
-                  <span className="text-base">🔧</span>
-                  <span>Info Kendaraan & Bengkel:</span>
-                </span>
-                <div className="flex items-center gap-2 font-mono">
-                  <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/40 text-xs font-black">
-                    Nopol: {workshopPlateNumber}
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold">
-                    Mekanik: {workshopMechanic}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-[11px]">
-                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                  ● STATUS: ONLINE / ACTIVE
-                </span>
-                <span className="text-gray-400 hidden sm:inline">Jasa Servis, Sparepart & Nopol</span>
-              </div>
-            </div>
-          )}
-
-          {/* Panel Pengiriman Material Bangunan (Bawa Langsung vs Armada Toko DO) */}
-          {(isBuildingTerminal || cart.some((c) => c.product.businessModel === 'building' || (c.product.id || '').startsWith('MAT-'))) && (
-            <div
-              className={`w-full py-1.5 px-3 mb-1.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs transition ${
-                isLight ? 'bg-indigo-50/80 border-indigo-200 text-slate-800' : 'bg-indigo-950/30 border-indigo-500/30 text-indigo-200'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5 text-indigo-400">
-                  <span className="text-base">🚚</span>
-                  <span>Distribusi Logistik / Pengiriman Material:</span>
-                </span>
-                {deliveryMethod === 'FLEET_DELIVERY' && (
-                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-bold font-mono">
-                    ✓ Terbitkan Dokumen Surat Jalan DO Armada Toko
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setDeliveryMethod('DIRECT')}
-                  className={`px-3 py-1 rounded-lg font-bold text-xs transition cursor-pointer flex items-center gap-1.5 border active:scale-95 ${
-                    deliveryMethod === 'DIRECT'
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                      : isLight
-                      ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                      : 'bg-[#161b22] border-slate-700 text-gray-300 hover:text-white'
-                  }`}
-                >
-                  <span>📦</span>
-                  <span>Bawa Langsung</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeliveryMethod('FLEET_DELIVERY');
-                    setIsDoModalOpen(true);
-                  }}
-                  className={`px-3 py-1 rounded-lg font-bold text-xs transition cursor-pointer flex items-center gap-1.5 border active:scale-95 ${
-                    deliveryMethod === 'FLEET_DELIVERY'
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
-                      : isLight
-                      ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                      : 'bg-[#161b22] border-slate-700 text-gray-300 hover:text-white'
-                  }`}
-                >
-                  <span>🚛</span>
-                  <span>Kirim Armada Toko (Buat Surat Jalan DO)</span>
-                </button>
-                {deliveryMethod === 'FLEET_DELIVERY' && (
-                  <button
-                    type="button"
-                    onClick={() => setIsDoModalOpen(true)}
-                    className="px-2.5 py-1 rounded-lg font-bold text-xs bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition cursor-pointer flex items-center gap-1 active:scale-95"
-                    title="Buka form penugasan sopir & cetak surat jalan DO"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Surat Jalan DO</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ========================================================================= */}
-          {/* BILAH BAWAH: STRIP HORIZONTAL TUNGGAL PEMBAYARAN KHUSUS MODE RETAIL       */}
-          {/* ========================================================================= */}
-          {!isFnbPhotoMenuMode && (
+          {/* BILAH BAWAH: PEMBAYARAN */}
+          {!isFnbPhotoMenuMode && !isSalonServiceTerminal && !isLaundryTerminal && (
             <div
               id="bar-pos-bottom-payment"
-              className={`w-full min-h-[72px] sm:h-[76px] flex-shrink-0 shrink-0 mt-auto border-t-2 rounded-xl px-2.5 sm:px-4 py-1.5 flex items-center justify-between gap-1.5 sm:gap-3 shadow-lg transition-colors select-none overflow-x-auto no-scrollbar flex-nowrap ${
-                isLight ? 'bg-white border-slate-300 shadow-slate-200' : 'bg-[#161b22] border-[#30363d]'
+              className={`w-full min-h-[60px] shrink-0 mt-auto border rounded-xl px-2.5 sm:px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] text-slate-900'
+                  : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-white'
               }`}
             >
-            {/* 1. SISI KIRI: INDIKATOR RINGKAS SUBTOTAL & PPN CHARGE */}
-            <div className="flex flex-col justify-center flex-shrink-0 shrink-0 pr-2 sm:pr-3 border-r-2 border-slate-300 dark:border-[#30363d] min-w-[125px] sm:min-w-[155px]">
-              {/* Row 1: Subtotal */}
-              <div className="flex items-center justify-between gap-1 text-xs">
-                <span className="text-slate-800 dark:text-slate-200 font-bold">Subtotal:</span>
-                <span className="font-mono font-black text-slate-950 dark:text-white">
-                  Rp {subtotal.toLocaleString('id-ID')}
-                </span>
-              </div>
-
-              {/* Row 2: [PPN +11%] Charge */}
-              <div className="flex items-center gap-1.5 mt-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setIsTaxIncluded(!isTaxIncluded)}
-                  className={`text-[10px] px-1.5 py-0.5 rounded font-black border transition cursor-pointer flex items-center gap-0.5 active:scale-95 shrink-0 ${
-                    isTaxIncluded
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                      : isLight
-                      ? 'text-slate-700 border-slate-400 bg-slate-100 hover:bg-slate-200'
-                      : 'text-gray-300 border-slate-600 bg-slate-800/80 hover:bg-slate-700'
-                  }`}
-                  title={isTaxIncluded ? 'PPN 11% Aktif (Klik untuk nonaktifkan)' : 'PPN 0% (Klik untuk aktifkan 11%)'}
-                >
-                  <span>PPN</span>
-                  <span>{isTaxIncluded ? '+11%' : '0%'}</span>
-                </button>
-                <div className="flex items-center gap-1 text-slate-800 dark:text-slate-200 font-bold">
-                  <span className="text-[11px] text-slate-700 dark:text-slate-300">Charge:</span>
-                  <span className={`font-mono text-[11px] font-black ${
-                    isTaxIncluded && taxAmount > 0
-                      ? 'text-blue-700 dark:text-blue-400'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}>
-                    Rp {taxAmount.toLocaleString('id-ID')}
-                  </span>
+              <div className="flex flex-col justify-center shrink-0 pr-2 border-r border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between gap-1.5 text-[11px] leading-4">
+                  <span className="font-normal text-slate-500 dark:text-slate-400">Subtotal:</span>
+                  <span className="font-mono font-normal">Rp {subtotalBeforePromo.toLocaleString('id-ID')}</span>
                 </div>
-              </div>
-            </div>
-
-            {/* 2. SISI TENGAH-KIRI: TAMPILAN TOTAL BELANJA */}
-            <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0 shrink-0 px-1 sm:px-2">
-              <div className="text-right">
-                <div className="text-[11px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                  TOTAL
-                </div>
-                <div className="text-[10px] text-slate-700 dark:text-gray-300 font-mono font-bold hidden sm:block">
-                  {getTierLabel(selectedPriceTier)}
-                </div>
-                {paymentMethod === 'CASH' && cashRoundingDiff !== 0 && (
-                  <span className="text-[9px] font-bold text-amber-500 font-mono block">
-                    {cashRoundingDiff > 0 ? `+Rp ${cashRoundingDiff}` : `-Rp ${Math.abs(cashRoundingDiff)}`} (Round)
-                  </span>
+                {totalAllDiscounts > 0 && (
+                  <div className="flex items-center justify-between gap-1.5 text-[10px] leading-4 text-emerald-600 dark:text-emerald-400 font-mono">
+                    <span>{isBuildingTerminal ? 'Hemat Tier / Promo:' : 'Hemat Promo:'}</span>
+                    <span>-Rp {totalAllDiscounts.toLocaleString('id-ID')}</span>
+                  </div>
                 )}
+                <div className="flex items-center gap-1 mt-0.5 text-[11px] leading-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsTaxIncluded(!isTaxIncluded)}
+                    className={`text-[10px] leading-3.5 px-1.5 py-0.5 rounded font-mono font-normal border cursor-pointer transition-all active:scale-[0.99] ${
+                      isTaxIncluded
+                        ? 'bg-cyan-600 text-white border-cyan-500'
+                        : isLight
+                        ? 'bg-slate-100 text-slate-600 border-slate-300'
+                        : 'bg-slate-800 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    PPN {isTaxIncluded ? '+11%' : '0%'}
+                  </button>
+                  <span className="font-mono text-[11px] leading-4 font-normal">Rp {taxAmount.toLocaleString('id-ID')}</span>
+                </div>
               </div>
-              <div
-                id="pos-grand-total-display"
-                className="text-xl sm:text-2xl lg:text-3xl font-black font-mono text-emerald-600 dark:text-emerald-400 tracking-tight leading-none drop-shadow-xs"
-              >
-                Rp {grandTotal.toLocaleString('id-ID')}
-              </div>
-            </div>
 
-            {/* 3. SISI TENGAH-KANAN: INPUT UANG DITERIMA & KEMBALIAN (HIGH-VISIBILITY CASHIER DOCK) */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 shrink-0 border-l-2 border-slate-300 dark:border-[#30363d] pl-1.5 sm:pl-3">
-              {paymentMethod === 'CASH' ? (
-                <div className="flex items-center gap-2">
-                  {/* Input Diterima */}
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-slate-800 dark:text-gray-200 font-bold leading-none mb-1">
-                      {language === 'ID' ? 'Diterima:' : 'Received:'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                          Rp
+              <div className="flex items-center gap-1.5 shrink-0 px-0.5 sm:px-1">
+                <div className="text-right">
+                  <div className="text-[10px] leading-3.5 font-mono font-normal tracking-widest uppercase text-emerald-600 dark:text-emerald-400">TOTAL</div>
+                  <div className="text-[9px] leading-3 text-slate-400 font-mono font-normal">{getActiveTransactionPriceTierLabel()}</div>
+                </div>
+                <div
+                  id="pos-grand-total-display"
+                  className={`font-mono font-semibold whitespace-nowrap text-emerald-600 dark:text-emerald-400 ${
+                    isLaundryTerminal ? 'text-lg sm:text-xl xl:text-2xl' : 'text-xl sm:text-2xl lg:text-3xl'
+                  }`}
+                >
+                  Rp {grandTotal.toLocaleString('id-ID')}
+                </div>
+              </div>
+
+              {isLaundryTerminal && (
+                <div className="flex items-center gap-1 shrink-0 border-l border-slate-200 dark:border-slate-800 pl-2">
+                  <div
+                    className={`flex items-center p-0.5 rounded-lg border text-[11px] gap-0.5 ${
+                      isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    {(
+                      [
+                        { id: 'LUNAS_AWAL' as LaundryPaymentStatus, label: 'Lunas Awal' },
+                        { id: 'DP' as LaundryPaymentStatus, label: 'DP' },
+                        { id: 'BAYAR_AMBIL' as LaundryPaymentStatus, label: 'Bayar Ambil' },
+                      ]
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => {
+                          setLaundryPaymentStatus(st.id);
+                          if (st.id === 'DP' && laundryDpAmount === 0) {
+                            setLaundryDpAmount(Math.round(grandTotal * 0.5));
+                          }
+                        }}
+                        className={`h-7 sm:h-8 px-2 rounded-md font-semibold whitespace-nowrap cursor-pointer transition ${
+                          laundryPaymentStatus === st.id
+                            ? st.id === 'LUNAS_AWAL'
+                              ? 'bg-emerald-600 text-white'
+                              : st.id === 'DP'
+                              ? 'bg-amber-500 text-slate-950'
+                              : 'bg-indigo-600 text-white'
+                            : isLight
+                            ? 'text-slate-700 hover:bg-slate-200'
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 dark:border-slate-800 pl-2">
+                {paymentMethod === 'SPLIT' ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] leading-3.5 font-mono text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                        Nominal Tunai (1-10101):
+                      </span>
+                      <input
+                        id="pos-split-cash-input"
+                        type="number"
+                        min={0}
+                        value={splitCashAmount || ''}
+                        onChange={(e) =>
+                          setSplitCashAmount(Math.max(0, Number(e.target.value) || 0))
+                        }
+                        placeholder="0"
+                        className={`h-8 w-20 sm:w-24 px-1.5 text-xs sm:text-sm font-mono font-semibold text-center border rounded-lg outline-none ${
+                          isLight
+                            ? 'border-emerald-500/60 bg-white text-slate-900'
+                            : 'border-emerald-500/50 bg-slate-950 text-white'
+                        }`}
+                      />
+                    </div>
+                    <div className="flex flex-col">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[9px] leading-3.5 font-mono text-indigo-600 dark:text-indigo-300 whitespace-nowrap">
+                          Non-Tunai ({splitNonCashChannel}):
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next =
+                              splitNonCashChannel === 'QRIS'
+                                ? 'DEBIT'
+                                : splitNonCashChannel === 'DEBIT'
+                                ? 'TRANSFER'
+                                : 'QRIS';
+                            setSplitNonCashChannel(next);
+                          }}
+                          className="text-[9px] leading-3.5 font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
+                          title="Ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
+                        >
+                          Ubah
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <input
+                          id="pos-split-noncash-input"
+                          type="number"
+                          min={0}
+                          value={splitNonCashAmount || ''}
+                          onChange={(e) =>
+                            setSplitNonCashAmount(Math.max(0, Number(e.target.value) || 0))
+                          }
+                          placeholder="0"
+                          className={`h-8 w-20 sm:w-24 px-1.5 text-xs sm:text-sm font-mono font-semibold text-center border rounded-lg outline-none ${
+                            isLight
+                              ? 'border-indigo-500/60 bg-white text-slate-900'
+                              : 'border-indigo-500/50 bg-slate-950 text-white'
+                          }`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
+                          }
+                          className="h-8 px-2 rounded-lg text-[10px] font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
+                          title="Isi otomatis sisa kekurangan Non-Tunai"
+                        >
+                          Sisa
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-col pl-0.5">
+                      <span className="text-[9px] leading-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {splitShortfall === 0 && grandTotal > 0 ? 'Status Split:' : 'Kurang Bayar:'}
+                      </span>
+                      <div
+                        className={`font-mono font-bold text-xs sm:text-sm whitespace-nowrap ${
+                          splitShortfall === 0 && grandTotal > 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-amber-500'
+                        }`}
+                      >
+                        {splitShortfall === 0 && grandTotal > 0
+                          ? '✓ LUNAS 100%'
+                          : `Rp ${splitShortfall.toLocaleString('id-ID')}`}
+                      </div>
+                    </div>
+                  </div>
+                ) : isKasbonAllowedForSector &&
+                  (paymentMethod === 'KREDIT / TEMPO (AR)' ||
+                    (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')) ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] leading-3.5 font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                        Bayar DP Awal (Rp):
+                      </span>
+                      <input
+                        id="pos-kasbon-dp-input"
+                        type="number"
+                        min={0}
+                        max={grandTotal}
+                        value={effectiveKasbonDp || ''}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.min(grandTotal, Number(e.target.value) || 0));
+                          setKasbonDpAmount(val);
+                          if (isLaundryTerminal) {
+                            setLaundryDpAmount(val);
+                            setLaundryPaymentStatus(val > 0 ? 'DP' : 'BAYAR_AMBIL');
+                          }
+                        }}
+                        placeholder="0 (Kasbon 100%)"
+                        className={`h-8 w-24 sm:w-28 px-1.5 text-xs sm:text-sm font-mono font-semibold text-center border rounded-lg outline-none ${
+                          isLight
+                            ? 'border-amber-400 bg-white text-slate-900'
+                            : 'border-amber-500/50 bg-slate-950 text-white'
+                        }`}
+                      />
+                    </div>
+                    <div className="flex flex-col pl-0.5">
+                      <span className="text-[9px] leading-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        Sisa Piutang / Kasbon (1-10105):
+                      </span>
+                      <div className="font-mono font-bold text-xs sm:text-sm whitespace-nowrap text-rose-600 dark:text-rose-400">
+                        Rp {kasbonRemainingPiutang.toLocaleString('id-ID')}
+                      </div>
+                    </div>
+                    <div className="flex flex-col pl-1 border-l border-slate-200 dark:border-slate-800">
+                      <span className="text-[9px] leading-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        Jatuh Tempo (+14 Hari):
+                      </span>
+                      <div className="font-mono font-semibold text-[11px] whitespace-nowrap text-amber-600 dark:text-amber-400">
+                        {kasbonDefaultDueInfo.display}
+                      </div>
+                    </div>
+                  </div>
+                ) : paymentMethod === 'CASH' ? (
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] leading-3.5 font-normal text-slate-500 dark:text-slate-400">Diterima:</span>
+                      <div className="flex items-center gap-1">
                         <input
                           ref={cashInputRef}
                           id="pos-cash-given-input"
@@ -6124,206 +8910,185 @@ export const PosModule: React.FC = () => {
                           onChange={(e) => {
                             const val = Number(e.target.value) || 0;
                             setCashGiven(val);
-                            if (isCashUnderpaid && val >= grandTotal) {
-                              setIsCashUnderpaid(false);
-                            }
+                            if (isCashUnderpaid && val >= grandTotal) setIsCashUnderpaid(false);
                           }}
-                          onFocus={(e) => e.target.select()}
                           onKeyDown={handleCashInputKeyDown}
-                          className={`h-10 sm:h-11 w-28 sm:w-34 pl-7 pr-2 text-base sm:text-lg font-black text-center font-mono border-2 rounded-lg shadow-sm outline-none transition ${
+                          className={`h-8 w-20 sm:w-24 px-1.5 text-sm font-mono font-semibold text-center border rounded-lg outline-none transition ${
                             isCashUnderpaid
-                              ? 'border-rose-500 bg-rose-500/10 text-rose-600 ring-2 ring-rose-400/50'
-                              : 'border-emerald-500 focus:ring-2 focus:ring-emerald-400 ' +
-                                (isLight ? 'bg-white text-slate-950 focus:bg-white' : 'bg-[#0d1117] text-white focus:border-emerald-400')
+                              ? 'border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : isLight
+                              ? 'border-emerald-500/60 bg-white text-slate-900 focus:border-emerald-500'
+                              : 'border-emerald-500/50 bg-slate-950 text-white focus:border-emerald-500'
                           }`}
                         />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCashGiven(grandTotal);
+                            setIsCashUnderpaid(false);
+                          }}
+                          className="h-8 px-2 rounded-lg text-[11px] leading-4 font-normal bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer active:scale-[0.99] transition-all"
+                        >
+                          Pas
+                        </button>
                       </div>
-
-                      {/* Tombol Pas */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCashGiven(grandTotal);
-                          setIsCashUnderpaid(false);
-                        }}
-                        className="h-10 sm:h-11 px-2.5 rounded-lg text-xs font-black border-2 border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer active:scale-95 shadow-sm flex items-center justify-center shrink-0"
-                        title="Bayar Uang Pas (Spasi / P)"
-                      >
-                        Pas
-                      </button>
+                    </div>
+                    <div className="flex flex-col pl-0.5">
+                      <span className="text-[9px] leading-3.5 font-normal text-slate-500 dark:text-slate-400">{cashGiven >= grandTotal ? 'Kembalian:' : 'Kurang:'}</span>
+                      <div className={`font-mono font-semibold text-sm sm:text-base whitespace-nowrap ${cashGiven >= grandTotal ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
+                        Rp {(cashGiven >= grandTotal ? changeAmount : grandTotal - cashGiven).toLocaleString('id-ID')}
+                      </div>
                     </div>
                   </div>
-
-                  {/* Kembalian / Kurang */}
-                  <div className="flex flex-col pl-1 justify-center">
-                    <span className="text-[10px] text-slate-800 dark:text-gray-200 font-bold leading-none mb-1">
-                      {cashGiven >= grandTotal
-                        ? language === 'ID' ? 'Kembalian:' : 'Change:'
-                        : language === 'ID' ? 'Kurang:' : 'Due:'}
-                    </span>
-                    <div
-                      className={`font-mono font-black text-lg sm:text-xl lg:text-2xl tracking-tight leading-none ${
-                        cashGiven >= grandTotal
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : 'text-rose-600'
-                      }`}
-                    >
-                      Rp{' '}
-                      {cashGiven >= grandTotal
-                        ? changeAmount.toLocaleString('id-ID')
-                        : (grandTotal - cashGiven).toLocaleString('id-ID')}
-                    </div>
-                  </div>
-                </div>
-              ) : paymentMethod === 'QRIS' ? (
-                <div className="flex items-center gap-1.5">
+                ) : (
                   <button
                     type="button"
-                    onClick={() => setIsQrisModalOpen(true)}
-                    className="h-10 sm:h-11 px-3 sm:px-4 rounded-lg text-xs font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border-2 border-rose-500/30 hover:bg-rose-500/20 flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm shrink-0"
+                    onClick={() => paymentMethod === 'QRIS' && setIsQrisModalOpen(true)}
+                    className="h-8 px-2.5 rounded-lg text-[11px] font-normal bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 cursor-pointer whitespace-nowrap active:scale-[0.99] transition-all"
                   >
-                    <QrCode className="w-4 h-4" />
-                    <span>Buka QRIS Dinamis</span>
+                    {paymentMethod === 'QRIS' ? 'Buka QRIS Dinamis' : 'Mesin EDC Siap'}
                   </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <span className="h-10 sm:h-11 px-3 sm:px-4 rounded-lg text-xs font-bold text-slate-800 dark:text-gray-200 flex items-center gap-1.5 bg-blue-500/10 border-2 border-blue-500/30 shrink-0">
-                    <CreditCard className="w-4 h-4 text-[#0052FF]" />
-                    <span>Mesin EDC Siap</span>
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* 4. SISI KANAN: TOMBOL METODE BAYAR + TOMBOL UTAMA [BAYAR (F10)] */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 shrink-0 border-l-2 border-slate-300 dark:border-[#30363d] pl-2 sm:pl-3 ml-auto">
-              {/* Tombol Cepat Pilihan Metode */}
-              <div
-                className={`flex items-center p-0.5 rounded-xl border-2 text-xs font-black gap-0.5 flex-shrink-0 shrink-0 ${
-                  isLight ? 'bg-slate-100 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('CASH')}
-                  className={`h-10 sm:h-11 px-2 sm:px-3 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1 shrink-0 ${
-                    paymentMethod === 'CASH'
-                      ? 'bg-[#0052FF] text-white shadow-sm'
-                      : isLight
-                      ? 'text-slate-950 hover:bg-slate-200'
-                      : 'text-gray-200 hover:text-white'
-                  }`}
-                  title="Bayar Tunai / Cash"
-                >
-                  <span className="text-sm">💵</span>
-                  <span>Tunai</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod('QRIS');
-                    setIsQrisModalOpen(true);
-                  }}
-                  className={`h-10 sm:h-11 px-2 sm:px-3 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1 shrink-0 ${
-                    paymentMethod === 'QRIS'
-                      ? 'bg-[#0052FF] text-white shadow-sm'
-                      : isLight
-                      ? 'text-slate-950 hover:bg-slate-200'
-                      : 'text-gray-200 hover:text-white'
-                  }`}
-                  title="Bayar QRIS Dinamis"
-                >
-                  <span className="text-sm">📱</span>
-                  <span>QRIS</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('EDC_DEBIT')}
-                  className={`h-10 sm:h-11 px-2 sm:px-3 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1 shrink-0 ${
-                    paymentMethod === 'EDC_DEBIT'
-                      ? 'bg-[#0052FF] text-white shadow-sm'
-                      : isLight
-                      ? 'text-slate-950 hover:bg-slate-200'
-                      : 'text-gray-200 hover:text-white'
-                  }`}
-                  title="Bayar Debit / Kartu EDC"
-                >
-                  <span className="text-sm">💳</span>
-                  <span>Debit</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod('KREDIT / TEMPO (AR)');
-                    if (!selectedCustomer) {
-                      showToast(
-                        language === 'ID'
-                          ? 'Silakan pilih Member/Pelanggan terlebih dahulu untuk transaksi Kredit / Tempo (AR)!'
-                          : 'Please select a customer for Credit / AR transaction!'
-                      );
-                      setIsPaymentConfirmOpen(true);
-                    }
-                  }}
-                  className={`h-10 sm:h-11 px-2 sm:px-3 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1 shrink-0 ${
-                    paymentMethod === 'KREDIT / TEMPO (AR)' || paymentMethod === 'KREDIT'
-                      ? 'bg-purple-600 text-white shadow-sm'
-                      : isLight
-                      ? 'text-purple-900 hover:bg-purple-100'
-                      : 'text-purple-300 hover:text-white'
-                  }`}
-                  title="Bayar Kredit / Tempo (AR) Khusus Member"
-                >
-                  <span className="text-sm">📋</span>
-                  <span>Kredit (AR)</span>
-                </button>
+                )}
               </div>
 
-              {/* Tombol Utama [Bayar (F10)] */}
-              <button
-                id="btn-process-pos-sale"
-                type="button"
-                onClick={handleManualBayarClick}
-                disabled={cart.length === 0}
-                className={`h-11 sm:h-12 px-4 sm:px-6 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition active:scale-95 cursor-pointer flex-shrink-0 shrink-0 border-2 whitespace-nowrap min-w-max ${
-                  cart.length === 0
-                    ? 'bg-gray-800 text-gray-500 cursor-not-allowed border-gray-700'
-                    : 'bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-blue-500/25 border-blue-600 ring-2 ring-blue-400/30'
-                }`}
-                title="Selesaikan Transaksi Langsung [F10]"
-              >
-                <Wallet className="w-4 h-4 flex-shrink-0 shrink-0" />
-                <span className="font-black whitespace-nowrap">Bayar [F10]</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 dark:border-slate-800 pl-2 ml-auto">
+                <div className={`flex items-center p-0.5 rounded-lg border text-[11px] gap-0.5 ${
+                  isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950 border-slate-800'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('CASH')}
+                    className={`h-8 px-2 rounded-md cursor-pointer text-[11px] font-normal whitespace-nowrap transition-all active:scale-[0.99] ${
+                      paymentMethod === 'CASH'
+                        ? 'bg-cyan-600 text-white shadow-xs'
+                        : isLight
+                        ? 'text-slate-700 hover:text-slate-900'
+                        : 'text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    💵 Tunai
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod('QRIS');
+                      if (!isLaundryTerminal || laundryPaymentStatus === 'LUNAS_AWAL') {
+                        setIsQrisModalOpen(true);
+                      }
+                    }}
+                    className={`h-8 px-2 rounded-md cursor-pointer text-[11px] font-normal whitespace-nowrap transition-all active:scale-[0.99] ${
+                      paymentMethod === 'QRIS'
+                        ? 'bg-cyan-600 text-white shadow-xs'
+                        : isLight
+                        ? 'text-slate-700 hover:text-slate-900'
+                        : 'text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    📱 QRIS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('EDC_DEBIT')}
+                    className={`h-8 px-2 rounded-md cursor-pointer text-[11px] font-normal whitespace-nowrap transition-all active:scale-[0.99] ${
+                      paymentMethod === 'EDC_DEBIT'
+                        ? 'bg-cyan-600 text-white shadow-xs'
+                        : isLight
+                        ? 'text-slate-700 hover:text-slate-900'
+                        : 'text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    💳 Debit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectSplitPayment}
+                    className={`h-8 px-2 rounded-md cursor-pointer text-[11px] font-semibold whitespace-nowrap transition-all active:scale-[0.99] ${
+                      paymentMethod === 'SPLIT'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : isLight
+                        ? 'text-indigo-700 hover:bg-indigo-50'
+                        : 'text-indigo-300 hover:text-white'
+                    }`}
+                  >
+                    🔀 Split
+                  </button>
+                  {isKasbonAllowedForSector && (
+                    <button
+                      type="button"
+                      onClick={handleSelectKasbonPayment}
+                      className={`h-8 px-2 rounded-md cursor-pointer text-[11px] font-semibold whitespace-nowrap transition-all active:scale-[0.99] ${
+                        paymentMethod === 'KREDIT / TEMPO (AR)'
+                          ? 'bg-amber-500 text-slate-950 shadow-xs'
+                          : isLight
+                          ? 'text-amber-700 hover:bg-amber-50'
+                          : 'text-amber-300 hover:text-white'
+                      }`}
+                    >
+                      📋 Kasbon / DP
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  id="btn-process-pos-sale"
+                  type="button"
+                  onClick={handleManualBayarClick}
+                  disabled={
+                    cart.length === 0 || (paymentMethod === 'SPLIT' && !isSplitReadyToPay)
+                  }
+                  className="h-9 px-3.5 sm:px-4 rounded-xl font-semibold text-xs sm:text-sm whitespace-nowrap flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 active:scale-[0.99] transition-all duration-200 cursor-pointer disabled:opacity-40 shrink-0"
+                >
+                  <Wallet className="w-4 h-4 shrink-0" />
+                  <span>
+                    {paymentMethod === 'SPLIT'
+                      ? isSplitReadyToPay
+                        ? 'Bayar Split [F10]'
+                        : 'Belum Lunas'
+                      : paymentMethod === 'KREDIT / TEMPO (AR)' ||
+                        (isLaundryTerminal && laundryPaymentStatus !== 'LUNAS_AWAL')
+                      ? 'Simpan Kasbon [F10]'
+                      : 'Bayar [F10]'}
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
           )}
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* 3. MODALS & SUB-COMPONENTS                                */}
-      {/* ========================================================= */}
-
-      {/* Manual Product Search Modal [F3] / [F1] */}
+      {/* MODALS */}
       <ManualProductSearchModal
         isOpen={isManualSearchOpen}
         onClose={() => {
           setIsManualSearchOpen(false);
           focusBarcodeInput();
         }}
-        products={activeProducts}
+        products={manualSearchProducts}
         onSelectProduct={(prod) => {
-          handleAddToCart(prod, 1);
+          const isFashionProduct =
+            prod.businessModel === 'fashion' ||
+            Boolean(prod.variantMatrix && prod.variantMatrix.length > 0) ||
+            String(prod.id || '').toUpperCase().startsWith('FASH-');
+          if (isFashionProduct) {
+            setIsManualSearchOpen(false);
+            setVariantPickerState({ product: prod, mode: 'ADD' });
+            return;
+          }
+          const pickedQty = Number((prod as any).qty) > 0 ? Number((prod as any).qty) : 1;
+          handleAddToCart(prod, pickedQty);
           focusBarcodeInput();
         }}
         language={language}
         showAllCategories={showAllCategories}
         onToggleShowAllCategories={() => setShowAllCategories((prev) => !prev)}
-        terminalName={activeTerminal.name}
+        terminalName={resolveSynchronizedTerminalDisplayName(
+          activeStationCode,
+          activeSector,
+          businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+        )}
+        isServiceMode={isSalonServiceTerminal || isLaundryTerminal}
       />
 
-      {/* Promos & Discount Voucher Modal */}
       <DiscountVoucherModal
         isOpen={isDiscountModalOpen}
         onClose={() => setIsDiscountModalOpen(false)}
@@ -6331,197 +9096,23 @@ export const PosModule: React.FC = () => {
         discountAmount={discountAmount}
         discountPercent={discountPercent}
         subtotal={subtotal}
-        onApplyDiscount={(type, val) => {
+        onApplyDiscount={(type, val, meta) => {
           setDiscountType(type);
           if (type === 'IDR') {
             setDiscountAmount(val);
+            if (val === 0) setDiscountPercent(0);
           } else {
             setDiscountPercent(val);
+            if (val === 0) setDiscountAmount(0);
           }
-          showToast(
-            language === 'ID'
-              ? 'Diskon transaksi berhasil diperbarui!'
-              : 'Order discount updated!'
-          );
+          setManualDiscountReason(val > 0 ? meta?.reason || meta?.promoName || '' : '');
+          setManualDiscountAuthorizedBy(val > 0 ? meta?.supervisorName || '' : '');
+          showToast(val > 0 ? 'Diskon transaksi berhasil diperbarui!' : 'Diskon transaksi dihapus.');
         }}
         language={language}
+        activeTerminalModelType={activeTerminal?.modelType}
       />
 
-      {/* Security Terminal Unlock PIN Modal (Admin123) */}
-      <TerminalUnlockModal
-        terminal={terminalToUnlock}
-        isOpen={isUnlockModalOpen}
-        onClose={() => {
-          setIsUnlockModalOpen(false);
-          setTerminalToUnlock(null);
-        }}
-        onUnlockSuccess={handleUnlockSuccess}
-      />
-
-      {/* Modal Verifikasi PIN Keamanan Khusus Akses Menu Backend/Admin Kasir 02 Hybrid */}
-      {isHybridPinModalOpen && (
-        <div
-          id="modal-hybrid-erp-pin-auth"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
-        >
-          <div
-            className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl space-y-4 animate-in zoom-in-95 ${
-              isLight ? 'bg-white border-amber-300 text-slate-900' : 'bg-[#161b22] border-amber-500/50 text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-amber-500/20">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-500 border border-amber-500/40 flex items-center justify-center font-black">
-                  <Shield className="w-5 h-5 text-amber-500" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <span>Otorisasi PIN Backend</span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/30">
-                      KASIR 02
-                    </span>
-                  </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {pendingHybridModule
-                      ? `Buka modul: ${pendingHybridModule.label}`
-                      : 'Buka menu sistem ERP & Administrasi'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsHybridPinModalOpen(false);
-                  setPendingHybridModule(null);
-                  setHybridPinInput('');
-                  setHybridPinError(null);
-                }}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Hint & Info Pengamanan */}
-            <div className={`p-2.5 rounded-xl border text-xs flex items-center justify-between ${
-              isLight ? 'bg-amber-50/80 border-amber-200 text-amber-950' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-            }`}>
-              <span className="text-[11px] font-medium flex items-center gap-1">
-                <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                PIN Kasir 02 (Maya):
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setHybridPinInput('2222');
-                  handleVerifyHybridPin('2222');
-                }}
-                className="px-2 py-0.5 rounded font-mono font-bold bg-amber-500 text-slate-950 hover:bg-amber-400 transition cursor-pointer text-[11px]"
-                title="Gunakan PIN Kasir 02"
-              >
-                2222 (Maya)
-              </button>
-            </div>
-
-            {/* Input PIN Display */}
-            <div className="space-y-1.5">
-              <input
-                id="input-hybrid-pin-auth"
-                type="password"
-                maxLength={8}
-                autoFocus
-                placeholder="••••"
-                value={hybridPinInput}
-                onChange={(e) => {
-                  setHybridPinInput(e.target.value);
-                  setHybridPinError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleVerifyHybridPin();
-                  }
-                }}
-                className={`w-full text-center text-2xl font-mono tracking-widest py-2 rounded-xl outline-none border-2 transition ${
-                  hybridPinError
-                    ? 'border-rose-500 bg-rose-500/10 text-rose-500'
-                    : isLight
-                    ? 'bg-slate-50 border-amber-300 text-slate-900 focus:border-amber-500'
-                    : 'bg-[#0d1117] border-amber-500/40 text-white focus:border-amber-400'
-                }`}
-              />
-              {hybridPinError && (
-                <div className="text-center text-xs font-bold text-rose-500 flex items-center justify-center gap-1">
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{hybridPinError}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Numeric Keypad */}
-            <div className="grid grid-cols-3 gap-1.5">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
-                <button
-                  key={`hybrid-key-${k}`}
-                  type="button"
-                  onClick={() => {
-                    if (k === 'C') {
-                      setHybridPinInput('');
-                      setHybridPinError(null);
-                    } else if (k === '⌫') {
-                      setHybridPinInput((prev) => prev.slice(0, -1));
-                    } else {
-                      if (hybridPinInput.length < 8) {
-                        const next = hybridPinInput + k;
-                        setHybridPinInput(next);
-                        if (next.length === 4) {
-                          handleVerifyHybridPin(next);
-                        }
-                      }
-                    }
-                  }}
-                  className={`h-10 text-sm font-bold rounded-xl border active:scale-95 transition cursor-pointer flex items-center justify-center ${
-                    isLight
-                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 border-slate-300'
-                      : 'bg-[#21262d] hover:bg-[#30363d] text-white border-gray-700'
-                  }`}
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-
-            {/* Actions */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsHybridPinModalOpen(false);
-                  setPendingHybridModule(null);
-                  setHybridPinInput('');
-                  setHybridPinError(null);
-                }}
-                className={`py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                    : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-gray-700'
-                }`}
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={() => handleVerifyHybridPin()}
-                className="py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md transition cursor-pointer flex items-center justify-center gap-1"
-              >
-                <Unlock className="w-3.5 h-3.5" />
-                <span>Verifikasi PIN</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* F&B Modifiers Modal */}
       <FnbModifierModal
         product={selectedFnbProduct}
         isOpen={isFnbModalOpen}
@@ -6532,23 +9123,46 @@ export const PosModule: React.FC = () => {
         onConfirm={handleAddFnbOrder}
       />
 
-      {/* Kitchen Order Ticket (KOT) Modal */}
+      <FnbQuickToppingModal
+        isOpen={editingToppingCartIndex !== null}
+        onClose={() => setEditingToppingCartIndex(null)}
+        item={editingToppingCartIndex !== null ? cart[editingToppingCartIndex] || null : null}
+        onConfirm={handleConfirmQuickTopping}
+        isLight={isLight}
+        requiresSupervisorPin={
+          editingToppingCartIndex !== null &&
+          isItemSentToKot(cart[editingToppingCartIndex])
+        }
+      />
+
       <KotTicketModal
         isOpen={isKotModalOpen}
         onClose={() => setIsKotModalOpen(false)}
         cart={cart}
         terminal={activeTerminal}
         user={activeUser}
+        orderType={fnbOrderMode}
+        tableNumber={fnbOrderMode === 'Dine-In' ? fnbTableNo : ''}
+        voidedKotItems={kotVoidedItems}
+        revisedKotItems={kotRevisedItems}
         onSentToKitchen={() => {
+          setCart((prev) =>
+            prev.map((it) => ({
+              ...it,
+              kotSent: true,
+              kotSentQty: it.quantity,
+            }))
+          );
+          setHasSentKot(true);
+          setKotSentAt((prevTs) => prevTs ?? Date.now());
           showToast(
-            language === 'ID'
-              ? 'Pesanan berhasil dikirim ke antrean dapur & barista!'
-              : 'Order sent to kitchen & barista queue!'
+            kotVoidedItems.length > 0 || kotRevisedItems.length > 0
+              ? 'Revisi KOT Dapur berhasil dikirim ke antrean dapur!'
+              : 'Pesanan berhasil dikirim ke antrean dapur! (Batas revisi: 5 menit)'
           );
         }}
       />
 
-      {/* Held Orders / Antrean Recall Modal */}
       <HeldOrdersModal
         isOpen={isHeldOrdersModalOpen}
         onClose={() => setIsHeldOrdersModalOpen(false)}
@@ -6560,7 +9174,6 @@ export const PosModule: React.FC = () => {
         onOpenHoldModal={handleOpenHoldModal}
       />
 
-      {/* Hold Cart Modal */}
       <HoldCartModal
         isOpen={isHoldCartModalOpen}
         onClose={() => setIsHoldCartModalOpen(false)}
@@ -6570,9 +9183,45 @@ export const PosModule: React.FC = () => {
         heldOrdersCount={heldOrders.length}
         isLight={isLight}
         language={language}
+        isFashionMode={isFashionTerminal}
+        isFnbMode={isFnbModeActive}
+        isServiceMode={isSalonServiceTerminal || isLaundryTerminal}
+        serviceStylistName={selectedServiceStylist?.name || stylistName}
+        fnbTableNo={fnbOrderMode === 'Dine-In' ? fnbTableNo : ''}
+        fnbOrderMode={fnbOrderMode}
       />
 
-      {/* Supervisor Void Approval Modal */}
+      <FashionVariantPickerModal
+        isOpen={Boolean(variantPickerState)}
+        onClose={() => {
+          setVariantPickerState(null);
+          focusBarcodeInput();
+        }}
+        product={variantPickerState?.product || null}
+        isLight={isLight}
+        mode={variantPickerState?.mode || 'ADD'}
+        initialSize={variantPickerState?.initialSize}
+        initialColor={variantPickerState?.initialColor}
+        onConfirm={handleConfirmFashionVariants}
+      />
+
+      <FashionExchangeModal
+        isOpen={isFashionExchangeOpen}
+        onClose={() => {
+          setIsFashionExchangeOpen(false);
+          focusBarcodeInput();
+        }}
+        sales={sales}
+        products={products}
+        fashionAdvisorId={selectedFashionAdvisor?.id}
+        fashionAdvisorName={selectedFashionAdvisor?.name}
+        activeStationCode={activeStationCode}
+        activeTerminalId={activeTerminal?.id}
+        activeShiftId={activeStationShift?.status === 'OPEN' ? activeStationShift.id : undefined}
+        isLight={isLight}
+        onSubmitExchange={processFashionExchange}
+      />
+
       <SupervisorVoidModal
         isOpen={isSupervisorVoidModalOpen}
         onClose={() => {
@@ -6585,282 +9234,86 @@ export const PosModule: React.FC = () => {
         isLight={isLight}
         language={language}
         users={users}
+        customTitle={
+          voidingCartItem?.mode === 'EDIT_TOPPING'
+            ? 'Otorisasi Revisi KOT Supervisor'
+            : undefined
+        }
+        customSubtitle={
+          voidingCartItem?.mode === 'EDIT_TOPPING'
+            ? 'Perubahan topping/catatan pada item yang sudah dikirim ke KOT memerlukan PIN Supervisor (1234 / 8888)'
+            : undefined
+        }
+        customBadge={
+          voidingCartItem?.mode === 'EDIT_TOPPING' ? 'REVISI KOT' : undefined
+        }
       />
 
-      {/* QRIS Dinamis Preview Modal */}
+      {/* Modal Konfirmasi Ringan Batal / Kosongkan Keranjang Draft (Tanpa PIN Supervisor) */}
+      {isVoidConfirmOpen && (
+        <div
+          id="modal-confirm-clear-cart"
+          className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setIsVoidConfirmOpen(false)}
+        >
+          <div
+            className={`w-full max-w-sm rounded-2xl border shadow-2xl p-5 space-y-4 ${
+              isLight
+                ? 'bg-white border-rose-300 text-slate-900'
+                : 'bg-[#161b22] border-rose-500/40 text-white'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-500 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold">Kosongkan Keranjang Pesanan?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Pesanan masih berstatus draft ({cart.length} item •{' '}
+                  <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums">
+                    Rp {grandTotal.toLocaleString('id-ID')}
+                  </span>
+                  ) dan belum dikirim ke dapur. Seluruh item di keranjang aktif akan dikosongkan.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsVoidConfirmOpen(false)}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-medium cursor-pointer transition ${
+                  isLight
+                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                }`}
+              >
+                Kembali
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-clear-draft-cart"
+                onClick={handleConfirmVoid}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer shadow-sm transition active:scale-[0.99]"
+              >
+                Ya, Kosongkan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <QrisModal
         isOpen={isQrisModalOpen}
         onClose={() => setIsQrisModalOpen(false)}
         totalAmount={grandTotal}
-        merchantName="JACS MART / TOKO MITRA"
+        merchantName={businessProfile?.name || businessProfile?.businessName || 'BARBER HUMAIRA'}
         refId={receiptNumber}
         isLight={isLight}
         onSuccess={handleQrisPaymentSuccess}
       />
 
-      {/* Modal [+ Pelanggan Baru] Ringkas */}
-      {isNewCustomerModalOpen && (
-        <div
-          id="modal-new-customer"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
-        >
-          <div
-            className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl space-y-4 animate-in zoom-in-95 ${
-              isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-gray-700/30">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold">
-                    {language === 'ID' ? 'Daftar Pelanggan Baru' : 'Register New Customer'}
-                  </h3>
-                  <p className="text-[11px] text-gray-400">
-                    {language === 'ID' ? 'Sinkron otomatis ke Master Data Pelanggan' : 'Auto syncs to Customer Master'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsNewCustomerModalOpen(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateNewCustomer} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">
-                  {language === 'ID' ? 'Nama Lengkap Pelanggan *' : 'Full Name *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={language === 'ID' ? 'Contoh: Hendra Wijaya' : 'e.g. Hendra Wijaya'}
-                  value={newCustomerName}
-                  onChange={(e) => setNewCustomerName(e.target.value)}
-                  className={`w-full p-2.5 rounded-xl border text-xs font-semibold outline-none transition ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF] focus:bg-white'
-                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">
-                  {language === 'ID' ? 'Nomor HP / WhatsApp *' : 'WhatsApp / Mobile Number *'}
-                </label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="081234567890"
-                  value={newCustomerPhone}
-                  onChange={(e) => setNewCustomerPhone(e.target.value)}
-                  className={`w-full p-2.5 rounded-xl border text-xs font-mono font-semibold outline-none transition ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF] focus:bg-white'
-                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-400 font-semibold mb-1">
-                  {language === 'ID' ? 'Catatan Singkat (Opsional)' : 'Short Notes (Optional)'}
-                </label>
-                <input
-                  type="text"
-                  placeholder={language === 'ID' ? 'Contoh: Langganan kantor, tetangga toko, reseller...' : 'e.g. Office regular, local neighbor...'}
-                  value={newCustomerNotes}
-                  onChange={(e) => setNewCustomerNotes(e.target.value)}
-                  className={`w-full p-2.5 rounded-xl border text-xs font-semibold outline-none transition ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF] focus:bg-white'
-                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
-                  }`}
-                />
-              </div>
-
-              {/* Checkbox / Toggle Kepemilikan Toko */}
-              <div
-                className={`p-3 rounded-xl border transition ${
-                  newCustomerHasStore
-                    ? isLight
-                      ? 'bg-emerald-50/90 border-emerald-300'
-                      : 'bg-emerald-950/20 border-emerald-500/40'
-                    : isLight
-                      ? 'bg-slate-50 border-slate-200'
-                      : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={newCustomerHasStore}
-                    onChange={(e) => setNewCustomerHasStore(e.target.checked)}
-                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-gray-600 cursor-pointer accent-emerald-600 mt-0.5"
-                  />
-                  <div className="flex-1">
-                    <span className="font-bold text-xs flex items-center gap-1.5 text-white">
-                      <Store className="w-3.5 h-3.5 text-emerald-400" />
-                      {language === 'ID'
-                        ? 'Pelanggan Memiliki Toko / Reseller Grosir'
-                        : 'Customer Owns a Store / Wholesale Reseller'}
-                    </span>
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      {language === 'ID'
-                        ? 'Centang jika pelanggan memiliki toko fisik/usaha untuk mengaktifkan izin tier Grosir/Partai'
-                        : 'Check if customer has a physical store to unlock wholesale pricing tier'}
-                    </p>
-                  </div>
-                </label>
-
-                {/* Input Nama Toko jika dicentang */}
-                {newCustomerHasStore && (
-                  <div className="mt-2.5 pt-2.5 border-t border-emerald-500/20">
-                    <label className="block text-emerald-400 font-semibold mb-1 text-[11px]">
-                      {language === 'ID' ? 'Nama Toko / Usaha *' : 'Store / Business Name *'}
-                    </label>
-                    <input
-                      type="text"
-                      required={newCustomerHasStore}
-                      placeholder={
-                        language === 'ID'
-                          ? 'Contoh: Toko Barokah Jaya / UD Sinar Terang'
-                          : 'e.g. Barokah Mart / UD Sinar Terang'
-                      }
-                      value={newCustomerStoreName}
-                      onChange={(e) => setNewCustomerStoreName(e.target.value)}
-                      className={`w-full p-2.5 rounded-xl border text-xs font-semibold outline-none transition ${
-                        isLight
-                          ? 'bg-white border-emerald-300 text-slate-900 focus:border-emerald-600'
-                          : 'bg-[#161b22] border-emerald-500/50 text-white focus:border-emerald-400'
-                      }`}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Status Awal & Kenaikan Level Otomatis (Otomasi Kasir) */}
-              <div
-                className={`p-3 rounded-xl border space-y-2 text-xs ${
-                  isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 font-bold text-gray-300">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Status Hak Akses:</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-md font-bold text-[11px] border ${
-                        newCustomerHasStore
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : 'bg-slate-500/20 text-slate-200 border-slate-500/40'
-                      }`}
-                    >
-                      {newCustomerHasStore ? 'Mitra Toko Terverifikasi' : 'Perorangan (Silver)'}
-                    </span>
-                  </div>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                      newCustomerHasStore
-                        ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
-                        : 'text-amber-300 bg-amber-500/15 border-amber-500/30'
-                    }`}
-                  >
-                    {newCustomerHasStore
-                      ? 'Hak: Ecer + Langganan + Grosir'
-                      : 'Hak: Ecer + Langganan'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-gray-400 leading-relaxed pl-1 border-l-2 border-[#0052FF]/60 mt-1">
-                  {newCustomerHasStore ? (
-                    <span>
-                      Pelanggan dengan toko fisik terverifikasi otomatis mendapatkan hak akses harga{' '}
-                      <span className="text-emerald-400 font-bold">Grosir / Partai</span> serta member.
-                    </span>
-                  ) : (
-                    <span>
-                      Member baru perorangan otomatis mendapatkan harga{' '}
-                      <span className="text-amber-300 font-semibold">Langganan/Member</span>. Tier Grosir terkunci khusus pemilik toko fisik terverifikasi.
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-700/30">
-                <button
-                  type="button"
-                  onClick={() => setIsNewCustomerModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl font-bold text-xs bg-transparent hover:bg-white/5 text-gray-400 hover:text-white transition cursor-pointer"
-                >
-                  {language === 'ID' ? 'Batal' : 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>{language === 'ID' ? 'Simpan & Aktifkan Member' : 'Save & Activate Member'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Void Transaction Confirmation Dialog */}
-      {isVoidConfirmOpen && (
-        <div
-          id="modal-confirm-void"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
-        >
-          <div className={`w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center space-y-4 border ${
-            isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-          }`}>
-            <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-500 border border-rose-500/40 mx-auto flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                {language === 'ID' ? 'Batalkan Transaksi (VOID)?' : 'Void Transaction?'}
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-gray-400 mt-1">
-                {language === 'ID'
-                  ? `Seluruh ${cart.length} item pada keranjang kasir saat ini akan dikosongkan. Tindakan ini tidak dapat dibatalkan.`
-                  : `All ${cart.length} items currently in cart will be cleared. This action cannot be undone.`}
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsVoidConfirmOpen(false)}
-                className={`py-2.5 rounded-xl font-bold text-xs border transition cursor-pointer ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300'
-                    : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-gray-700'
-                }`}
-              >
-                {language === 'ID' ? 'Kembali' : 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmVoid}
-                className="py-2.5 rounded-xl font-bold text-xs bg-rose-500 hover:bg-rose-600 text-white shadow-lg transition cursor-pointer"
-              >
-                {language === 'ID' ? 'Ya, Batalkan (Void)' : 'Yes, Void'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Cart Item Modal */}
       <EditCartItemModal
         isOpen={editingItemIndex !== null}
         onClose={() => setEditingItemIndex(null)}
@@ -6869,175 +9322,38 @@ export const PosModule: React.FC = () => {
         language={language}
       />
 
-      {/* Mobile Cart Drawer Modal */}
-      {isMobileCartOpen && (
-        <div className="xl:hidden fixed inset-0 z-50 flex flex-col justify-end bg-black/80 backdrop-blur-md animate-in fade-in">
-          <div className={`border-t rounded-t-3xl p-5 max-h-[85vh] overflow-y-auto space-y-4 ${
-            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-          }`}>
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#30363d] pb-3">
-              <div className="flex items-center gap-2">
-                <ShoppingBag className="w-5 h-5 text-[#0052FF]" />
-                <span className="font-bold text-sm text-slate-900 dark:text-white">
-                  {language === 'ID' ? 'Lembar Transaksi Kasir' : 'Checkout Worksheet'}
-                </span>
-              </div>
-              <button
-                onClick={() => setIsMobileCartOpen(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      <DigitalScaleModal
+        isOpen={isDigitalScaleModalOpen}
+        onClose={() => {
+          setIsDigitalScaleModalOpen(false);
+          setScaleTargetService(null);
+        }}
+        kiloanServices={kiloanLaundryServices}
+        initialService={scaleTargetService}
+        initialGrossKg={scaleLiveState.grossKg}
+        initialTareKg={scaleLiveState.tareKg}
+        isLight={isLight}
+        onApplyWeight={handleApplyDigitalScaleWeight}
+        onScaleLiveUpdate={setScaleLiveState}
+      />
 
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-600 dark:text-gray-400">
-                {totalCartItemCount} {language === 'ID' ? 'Item dalam keranjang' : 'Items in cart'}
-              </span>
-              <span className="font-mono font-bold text-base text-emerald-600 dark:text-[#10B981]">
-                Rp {grandTotal.toLocaleString('id-ID')}
-              </span>
-            </div>
+      <LaundryAreaModal
+        isOpen={Boolean(areaModalService)}
+        service={areaModalService}
+        initialLengthM={
+          areaTargetCartIndex !== null ? cart[areaTargetCartIndex]?.laundryLengthM : undefined
+        }
+        initialWidthM={
+          areaTargetCartIndex !== null ? cart[areaTargetCartIndex]?.laundryWidthM : undefined
+        }
+        isLight={isLight}
+        onClose={() => {
+          setAreaModalService(null);
+          setAreaTargetCartIndex(null);
+        }}
+        onConfirm={handleConfirmLaundryArea}
+      />
 
-            {/* Quick Hold & Recall Buttons on Mobile */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileCartOpen(false);
-                  handleOpenHoldModal();
-                }}
-                disabled={cart.length === 0}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  cart.length === 0
-                    ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400'
-                    : isLight
-                    ? 'bg-amber-50 text-amber-900 border-amber-300'
-                    : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                }`}
-              >
-                <Pause className="w-3.5 h-3.5" />
-                <span>{language === 'ID' ? 'Tahan (Hold)' : 'Hold Cart'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileCartOpen(false);
-                  setIsHeldOrdersModalOpen(true);
-                }}
-                className={`flex-1 py-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  heldOrders.length > 0
-                    ? isLight
-                      ? 'bg-blue-100 text-blue-900 border-blue-300'
-                      : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                    : isLight
-                    ? 'bg-slate-100 text-slate-700 border-slate-300'
-                    : 'bg-[#21262d] text-gray-300 border-gray-700'
-                }`}
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Recall ({heldOrders.length})</span>
-              </button>
-            </div>
-
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {cart.map((item, idx) => (
-                <div
-                  key={`pos-receipt-${item.product?.id || item.product?.barcode || 'item'}-${idx}`}
-                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
-                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-                  }`}
-                >
-                  <div className="min-w-0 flex-1 pr-2">
-                    <div className="font-bold truncate text-slate-900 dark:text-white">
-                      {item.product?.name || 'Produk'}
-                    </div>
-                    <div className="text-[10px] text-slate-500 dark:text-gray-400">
-                      {item.quantity}x @ Rp {(item.product?.sell_price || 0).toLocaleString('id-ID')}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-mono font-bold text-emerald-600 dark:text-[#10B981]">
-                      Rp {(item.subtotal || 0).toLocaleString('id-ID')}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsMobileCartOpen(false);
-                        handleRequestRemoveItem(idx);
-                      }}
-                      className="p-1 rounded text-rose-500 hover:bg-rose-500/10 cursor-pointer ml-1"
-                      title="Void item"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={() => {
-                setIsMobileCartOpen(false);
-                handleCheckout();
-              }}
-              disabled={cart.length === 0}
-              className="w-full py-3.5 rounded-xl font-bold text-xs bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-lg cursor-pointer"
-            >
-              {language === 'ID'
-                ? `Bayar Sekarang (Rp ${grandTotal.toLocaleString('id-ID')})`
-                : `Pay Now (Rp ${grandTotal.toLocaleString('id-ID')})`}
-            </button>
-          </div>
-        </div>
-      )}
-      {/* Optional Popover Virtual Numpad Modal */}
-      {isKeypadModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in"
-          onClick={() => setIsKeypadModalOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-xs rounded-2xl p-4 border shadow-2xl space-y-3 animate-in zoom-in-95 ${
-              isLight
-                ? 'bg-white border-slate-200 text-slate-900'
-                : 'bg-[#161b22] border-[#30363d] text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-2 border-b border-gray-700/30">
-              <div className="flex items-center gap-2 font-bold text-xs">
-                <Calculator className="w-4 h-4 text-[#0052FF]" />
-                <span>{language === 'ID' ? 'Keypad Numpad Virtual' : 'Virtual Numpad'}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsKeypadModalOpen(false)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <VirtualNumpad
-              value={cashGiven}
-              onChange={(val) => setCashGiven(val)}
-              totalAmount={grandTotal}
-            />
-
-            <button
-              type="button"
-              onClick={() => setIsKeypadModalOpen(false)}
-              className="w-full py-2 bg-[#0052FF] hover:bg-[#0043d1] text-white rounded-xl text-xs font-bold transition cursor-pointer"
-            >
-              {language === 'ID' ? 'Selesai / Tutup' : 'Done / Close'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Konfirmasi Pembayaran & Cetak Struk (APS POS5 PaymentModal) */}
       <PaymentModal
         isOpen={isPaymentConfirmOpen}
         onClose={() => {
@@ -7055,498 +9371,67 @@ export const PosModule: React.FC = () => {
         setCashGiven={setCashGiven}
         changeAmount={changeAmount}
         selectedCustomer={selectedCustomer}
-        onSelectCustomer={(cust) => {
-          handleSelectCustomer(cust);
-        }}
+        onSelectCustomer={handleSelectCustomer}
         customers={customers}
-        onConfirmPayment={(overrideMethod) => {
-          if (overrideMethod) {
-            setPaymentMethod(overrideMethod as PaymentMethod);
-          }
-          executeSaleCheckout();
+        onConfirmPayment={(overrideMethod, creditMeta) => {
+          if (overrideMethod) setPaymentMethod(overrideMethod as PaymentMethod);
+          executeSaleCheckout(overrideMethod, creditMeta);
         }}
         isLight={isLight}
         language={language}
         activeTerminal={activeTerminal}
         onHoldOrder={handleHoldOrderFromModal}
+        promoSavingsTotal={totalPromoSavings}
+        isBuildingBulkMode={isBuildingTerminal || businessDomainConfig?.mechanismFamily === 'BUILDING_BULK'}
+        onRequestCreditLimitIncrease={(reqPayload) => {
+          submitBuildingAuthRequest({
+            type: 'PLAFON_KREDIT_KONTRAKTOR',
+            customerId: reqPayload.customerId,
+            contractorName: reqPayload.contractorName,
+            projectTitle: reqPayload.projectTitle,
+            requestedBy: activeUser?.name || 'Kasir Depo',
+            currentCreditLimit: reqPayload.currentCreditLimit,
+            requestedCreditLimit: reqPayload.requestedCreditLimit,
+            outstandingBalance: reqPayload.outstandingBalance,
+            reason: reqPayload.reason,
+          });
+        }}
         onOpenQris={() => {
           setIsPaymentConfirmOpen(false);
           setIsQrisModalOpen(true);
         }}
+        isLaundryMode={isLaundryTerminal}
+        laundryPayStatus={laundryPaymentStatus}
+        setLaundryPayStatus={setLaundryPaymentStatus}
+        laundryDpAmount={laundryDpAmount}
+        setLaundryDpAmount={setLaundryDpAmount}
+        laundryMetaSummary={{
+          customerName: selectedCustomer?.name || laundryCustomerName || 'Pelanggan Laundry',
+          customerPhone: selectedCustomer?.phone || laundryCustomerPhone,
+          totalPieces: laundryTotalPieces,
+          estimatedDoneStr: computedLaundrySla.display,
+          slaLabel: computedLaundrySla.label,
+        }}
       />
 
-      {/* ========================================================================= */}
-      {/* MODAL 1: FORM PENUGASAN ARMADA & SURAT JALAN DO (KASIR 09 BAHAN BANGUNAN) */}
-      {/* ========================================================================= */}
-      {isDoModalOpen && (
-        <div
-          id="modal-delivery-order"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-in fade-in"
-          onClick={() => setIsDoModalOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh] animate-in zoom-in-95 ${
-              isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-            }`}
-          >
-            {/* Header Modal */}
-            <div className="px-5 py-3.5 border-b border-gray-700/40 flex items-center justify-between bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-500 border border-amber-500/40 flex items-center justify-center">
-                  <Truck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base flex items-center gap-1.5">
-                    <span>Penugasan Armada & Surat Jalan (DO)</span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                      KASIR 09
-                    </span>
-                  </h3>
-                  <p className="text-[11px] text-gray-400">
-                    Input sopir, no. polisi kendaraan, alamat drop & preview DO resmi kuli
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsDoModalOpen(false)}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Form Fields */}
-            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
-              {/* Row 1: Sopir & No. Polisi Kendaraan */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={`font-bold block mb-1 flex items-center gap-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <User className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Nama Sopir / Driver Toko <span className="text-rose-500">*</span></span>
-                  </label>
-                  <input
-                    type="text"
-                    value={doDriverName}
-                    onChange={(e) => setDoDriverName(e.target.value)}
-                    placeholder="Contoh: Pak Joko / Budi"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 font-semibold ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className={`font-bold block mb-1 flex items-center gap-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <Truck className="w-3.5 h-3.5 text-amber-500" />
-                    <span>No. Polisi & Tipe Kendaraan <span className="text-rose-500">*</span></span>
-                  </label>
-                  <input
-                    type="text"
-                    value={doVehiclePlate}
-                    onChange={(e) => setDoVehiclePlate(e.target.value)}
-                    placeholder="Contoh: B 9281 KBC (Truk Engkel)"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 font-mono font-semibold ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Row 2: Alamat Proyek & Nama Mandor */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={`font-bold block mb-1 flex items-center gap-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <MapPin className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Alamat Drop / Lokasi Proyek <span className="text-rose-500">*</span></span>
-                  </label>
-                  <input
-                    type="text"
-                    value={doProjectAddress}
-                    onChange={(e) => setDoProjectAddress(e.target.value)}
-                    placeholder="Contoh: Proyek Ruko Sentosa Blok C4, Jl. Pemuda"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 font-medium ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className={`font-bold block mb-1 flex items-center gap-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <UserCheck className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Nama Mandor / Penerima Proyek <span className="text-rose-500">*</span></span>
-                  </label>
-                  <input
-                    type="text"
-                    value={doForemanName}
-                    onChange={(e) => setDoForemanName(e.target.value)}
-                    placeholder="Contoh: Mandor Yanto (0812-xxxx)"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 font-medium ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Row 3: Jam Pengiriman & Catatan Rute */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className={`font-bold block mb-1 flex items-center gap-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <Clock className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Jam Rencana Kirim</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={doDeliveryTime}
-                    onChange={(e) => setDoDeliveryTime(e.target.value)}
-                    placeholder="Contoh: 14:30 WIB"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 font-mono text-center font-bold ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className={`font-bold block mb-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>Catatan Akses Jalan / Kuli Bongkar</label>
-                  <input
-                    type="text"
-                    value={doNotes}
-                    onChange={(e) => setDoNotes(e.target.value)}
-                    placeholder="Contoh: Jalan cor beton, siap kuli bongkar di lokasi"
-                    className={`w-full px-3 py-2 rounded-xl border focus:outline-none focus:border-amber-500 ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Ringkasan Muatan Fisik */}
-              <div className={`p-3 rounded-xl border space-y-2 ${
-                isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
-              }`}>
-                <div className="flex items-center justify-between text-xs">
-                  <span className={`font-bold flex items-center gap-1.5 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
-                    <Package className="w-4 h-4 text-amber-500" />
-                    <span>Daftar Muatan Fisik Material (Tanpa Harga):</span>
-                  </span>
-                  <span className={`text-[10px] font-mono ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
-                    {(cart.length > 0 ? cart : lastCompletedDoItems).length} Material Siap Angkut
-                  </span>
-                </div>
-
-                <div className={`max-h-36 overflow-y-auto border rounded-lg ${isLight ? 'border-slate-300 bg-white' : 'border-[#30363d] bg-[#0d1117]'}`}>
-                  <table className="w-full text-left text-[11px]">
-                    <thead className={`font-bold uppercase text-[9px] border-b ${
-                      isLight ? 'bg-slate-100 text-slate-700 border-slate-300' : 'bg-[#161b22] text-gray-400 border-[#30363d]'
-                    }`}>
-                      <tr>
-                        <th className="py-1 px-2">No</th>
-                        <th className="py-1 px-2">Deskripsi Material</th>
-                        <th className="py-1 px-2 text-center">Qty Fisik</th>
-                        <th className="py-1 px-2 text-center">Satuan / Armada</th>
-                      </tr>
-                    </thead>
-                    <tbody className={`divide-y ${
-                      isLight ? 'divide-slate-200 text-slate-800' : 'divide-[#30363d] text-gray-200'
-                    }`}>
-                      {(cart.length > 0 ? cart : lastCompletedDoItems).map((it, idx) => (
-                        <tr key={`do-item-${it.product?.id || idx}`} className={isLight ? 'hover:bg-slate-50' : 'hover:bg-[#161b22]'}>
-                          <td className="py-1 px-2 font-mono text-center opacity-70">{idx + 1}</td>
-                          <td className="py-1 px-2 font-medium">
-                            <div className={`font-bold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>{it.product.name}</div>
-                            <div className="text-[10px] opacity-70 font-mono">{it.product.id || it.product.barcode}</div>
-                          </td>
-                          <td className="py-1 px-2 text-center font-mono font-bold text-amber-600 dark:text-amber-400">
-                            {it.quantity}
-                          </td>
-                          <td className="py-1 px-2 text-center font-mono">
-                            <span className={`px-1.5 py-0.5 rounded border text-[10px] ${
-                              isLight ? 'bg-slate-100 border-slate-300 text-slate-700' : 'bg-black/40 border-gray-700 text-gray-300'
-                            }`}>
-                              {it.selectedUnit || it.product.unit || 'Pcs'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className={`text-[10px] italic ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
-                  * Dokumen Surat Jalan DO resmi diserahkan ke kuli & sopir tanpa mencantumkan nominal rupiah tagihan.
-                </p>
-              </div>
-            </div>
-
-            {/* Footer Buttons */}
-            <div className={`px-5 py-3 border-t flex items-center justify-between ${
-              isLight ? 'bg-slate-100 border-slate-300' : 'bg-[#12161f] border-gray-700/40'
-            }`}>
-              <button
-                type="button"
-                onClick={() => setIsDoModalOpen(false)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 transition cursor-pointer"
-              >
-                Batal
-              </button>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsPreviewDoOpen(true)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition shadow-md active:scale-95"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span>Preview Surat Jalan Material</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDoModalOpen(false);
-                    showToast(`Penugasan armada ${doVehiclePlate} (Sopir: ${doDriverName}) berhasil disimpan!`);
-                  }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 cursor-pointer transition shadow-md active:scale-95"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Simpan Penugasan</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODAL 2: PREVIEW CETAK SURAT JALAN DO RESMI (LAYOUT CETAK TANPA HARGA)    */}
-      {/* ========================================================================= */}
-      {isPreviewDoOpen && (
-        <div
-          id="modal-preview-do"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-in fade-in"
-          onClick={() => setIsPreviewDoOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-2xl bg-white text-slate-900 border border-slate-300 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[95vh] animate-in zoom-in-95"
-          >
-            {/* Action Bar (Top) */}
-            <div className="px-5 py-3 bg-slate-100 border-b border-slate-300 flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-amber-600" />
-                <span>Format Cetak Surat Jalan Pengiriman (DO Fisik)</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-1 cursor-pointer transition shadow-xs"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Cetak DO</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsPreviewDoOpen(false)}
-                  className="p-1 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 transition cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Printable Paper Document (NO PRICES - PHYSICAL ONLY) */}
-            <div id="printable-delivery-order" className="p-6 sm:p-8 space-y-4 overflow-y-auto flex-1 font-sans text-xs bg-white text-slate-900">
-              {/* Header Surat Jalan */}
-              <div className="border-b-2 border-slate-900 pb-3 flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">🏗️</span>
-                    <h1 className="text-lg font-black tracking-tight uppercase text-slate-950">
-                      DEPO BAHAN BANGUNAN NUSANTARA
-                    </h1>
-                  </div>
-                  <p className="text-[11px] text-slate-600 font-medium">
-                    Jl. Raya Industri Bahan Bangunan No. 88 • Hotline Logistik: (021) 7788-9900
-                  </p>
-                </div>
-                <div className="text-right font-mono">
-                  <div className="text-xs font-black uppercase text-amber-700 tracking-wider">
-                    SURAT JALAN / DELIVERY ORDER
-                  </div>
-                  <div className="text-sm font-bold text-slate-900">
-                    DO-{lastDoReceiptNumber || receiptNumber || '2026-0929-01'}
-                  </div>
-                  <div className="text-[10px] text-slate-500">
-                    Tanggal: {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Detail Penugasan Grid */}
-              <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px]">
-                <div className="space-y-1">
-                  <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Pengemudi / Sopir Toko:</span>
-                    <span className="font-bold text-slate-900">{doDriverName}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">No. Polisi Armada:</span>
-                    <span className="font-mono font-bold text-slate-900">{doVehiclePlate}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Jam Rencana Pengiriman:</span>
-                    <span className="font-mono font-bold text-amber-700">{doDeliveryTime}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1 border-l border-slate-200 pl-4">
-                  <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Mandor / Penerima Proyek:</span>
-                    <span className="font-bold text-slate-900">{doForemanName}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Alamat Drop Material:</span>
-                    <span className="font-medium text-slate-900">{doProjectAddress}</span>
-                  </div>
-                  {doNotes && (
-                    <div>
-                      <span className="text-slate-500 block text-[10px] uppercase font-bold">Catatan Rute:</span>
-                      <span className="text-slate-700 italic">{doNotes}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Physical Material Table (NO PRICES) */}
-              <div className="border border-slate-300 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-200 border-b border-slate-300 font-bold uppercase text-[10px] text-slate-800">
-                    <tr>
-                      <th className="py-2 px-2.5 text-center w-10">No</th>
-                      <th className="py-2 px-2.5">Kode Material</th>
-                      <th className="py-2 px-2.5">Nama Barang & Spesifikasi Armada</th>
-                      <th className="py-2 px-2.5 text-center">Kuantitas Fisik</th>
-                      <th className="py-2 px-2.5 text-center w-24">Cek Gudang</th>
-                      <th className="py-2 px-2.5 text-center w-24">Cek Proyek</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-medium">
-                    {(cart.length > 0 ? cart : lastCompletedDoItems).map((it, idx) => (
-                      <tr key={`print-do-${it.product?.id || idx}`}>
-                        <td className="py-2 px-2.5 text-center font-mono font-bold text-slate-600">{idx + 1}</td>
-                        <td className="py-2 px-2.5 font-mono text-[11px] font-bold text-slate-800">
-                          {it.product?.id || it.product?.barcode || '-'}
-                        </td>
-                        <td className="py-2 px-2.5">
-                          <div className="font-bold text-slate-900 text-xs">{it.product.name}</div>
-                          <div className="text-[10px] text-slate-600">
-                            Satuan/Armada: <span className="font-semibold text-slate-900">{it.selectedUnit || it.product.unit || 'Pcs'}</span>
-                          </div>
-                        </td>
-                        <td className="py-2 px-2.5 text-center font-mono font-black text-sm text-slate-950">
-                          {it.quantity} {it.selectedUnit || it.product.unit}
-                        </td>
-                        <td className="py-2 px-2.5 text-center font-mono text-slate-400">
-                          [ &nbsp;&nbsp;&nbsp; ]
-                        </td>
-                        <td className="py-2 px-2.5 text-center font-mono text-slate-400">
-                          [ &nbsp;&nbsp;&nbsp; ]
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Disclaimer */}
-              <div className="text-[10px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                <span className="font-bold">Perhatian:</span> Harap periksa jenis dan kuantitas material bangunan fisik saat serah terima di lokasi proyek sebelum ditandatangani. Barang yang sudah diturunkan dari armada tidak dapat ditukar kecuali ada cacat pabrikasi/kerusakan saat transit.
-              </div>
-
-              {/* 3 Column Signature Area */}
-              <div className="grid grid-cols-3 gap-4 pt-4 text-center text-xs">
-                <div className="space-y-12">
-                  <div className="font-bold text-slate-700 text-[11px] uppercase">
-                    Pengemudi / Sopir
-                  </div>
-                  <div>
-                    <div className="border-b border-slate-400 mx-6"></div>
-                    <div className="text-[11px] font-bold text-slate-900 mt-1">
-                      ( {doDriverName.split(' ')[0] || 'Sopir Toko'} )
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-12">
-                  <div className="font-bold text-slate-700 text-[11px] uppercase">
-                    Checker / Petugas Gudang
-                  </div>
-                  <div>
-                    <div className="border-b border-slate-400 mx-6"></div>
-                    <div className="text-[11px] font-bold text-slate-900 mt-1">
-                      ( {activeUser?.name || 'Checker Depo'} )
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-12">
-                  <div className="font-bold text-slate-700 text-[11px] uppercase">
-                    Penerima / Mandor Proyek
-                  </div>
-                  <div>
-                    <div className="border-b border-slate-400 mx-6"></div>
-                    <div className="text-[11px] font-bold text-slate-900 mt-1">
-                      ( {doForemanName.split(' ')[0] || 'Mandor Penerima'} )
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-5 py-3 bg-slate-100 border-t border-slate-300 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setIsPreviewDoOpen(false)}
-                className="px-3.5 py-1.5 rounded-xl border border-slate-300 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition cursor-pointer"
-              >
-                ← Kembali ke Form
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsPreviewDoOpen(false);
-                  setIsDoModalOpen(false);
-                  showToast('Surat Jalan Pengiriman DO siap diserahkan ke sopir dan kuli!');
-                }}
-                className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition cursor-pointer"
-              >
-                Selesai / Tutup
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* ========================================================================= */}
-      {/* MODAL SHIFT KASIR & REKONSILIASI KAS (APS POS4: 32_ShiftKasir)             */}
-      {/* ========================================================================= */}
-      {/* 1. Modal Buka Shift Kasir (Wajib di awal shift jika belum dibuka) */}
       <OpenShiftModal
         isOpen={isOpenShiftModalOpen}
         onClose={() => setIsOpenShiftModalOpen(false)}
         onSuccess={() => {
           setIsOpenShiftModalOpen(false);
-          const ind = getTerminalIndustry(activeTerminal);
-          setCart(INDUSTRY_DEMO_CARTS[ind] || INDUSTRY_DEMO_CARTS.retail);
           setIsRegisterOpen(true);
         }}
         isLight={isLight}
       />
 
-      {/* 2. Modal Quick Action Tarik Kas / Petty Cash Kasir Keluar */}
       <PettyCashModal
         isOpen={isPettyCashModalOpen}
         onClose={() => setIsPettyCashModalOpen(false)}
         isLight={isLight}
+        reasonPresets={pettyCashReasonPresets}
+        activeShiftOverride={activeStationShift}
       />
 
-      {/* 3. Modal Tutup Shift Kasir & Rekonsiliasi Kas (End of Day) */}
       <CloseShiftModal
         isOpen={isCloseShiftModalOpen}
         onClose={() => setIsCloseShiftModalOpen(false)}
@@ -7557,7 +9442,22 @@ export const PosModule: React.FC = () => {
         isLight={isLight}
       />
 
-      {/* 4. Mini Summary Receipt Modal Cetak Rekonsiliasi Shift Kasir */}
+      <QuickZReportModal
+        isOpen={isQuickZReportOpen}
+        onClose={() => setIsQuickZReportOpen(false)}
+        onZReportClosed={(closedShift) => {
+          setClosedShiftForReceipt(closedShift);
+        }}
+        activeStationCode={activeStationCode}
+        activeTerminalName={resolveSynchronizedTerminalDisplayName(
+          activeStationCode,
+          activeSector,
+          businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+        )}
+        activeTerminalId={activeTerminal?.id || activeStationCode}
+        isLight={isLight}
+      />
+
       {closedShiftForReceipt && (
         <ShiftSummaryReceiptModal
           shift={closedShiftForReceipt}
@@ -7566,153 +9466,255 @@ export const PosModule: React.FC = () => {
         />
       )}
 
-      {/* 5. Modal Verifikasi PIN Khusus Akses Backend / ERP Kasir 02 (Hybrid) */}
-      {isHybridPinModalOpen && pendingHybridModule && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      {/* Modal Pemilih / Ganti Loket PC */}
+      {isStationPickerOpen && (
+        <div
+          id="modal-switch-pc-station"
+          className="fixed inset-0 z-[75] bg-black/65 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setIsStationPickerOpen(false)}
+        >
           <div
-            className={`w-full max-w-sm rounded-3xl border-2 border-amber-500 shadow-2xl p-6 ${
-              isLight ? 'bg-white text-slate-900' : 'bg-[#161b22] text-white'
+            className={`w-full max-w-xl rounded-2xl border shadow-2xl overflow-hidden ${
+              isLight
+                ? 'bg-white border-slate-300 text-slate-900'
+                : 'bg-slate-900 border-slate-700 text-slate-100'
             }`}
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
-            <div className="text-center mb-5">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center mb-3 text-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.35)]">
-                <KeyRound className="w-7 h-7" />
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/15 border border-cyan-500/35 text-cyan-500 flex items-center justify-center">
+                  <ArrowLeftRight className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Ganti Loket PC Perangkat Ini</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Pilih loket tujuan untuk mengikat perangkat ini tanpa menampilkan kartu loket lain di layar utama.
+                  </p>
+                </div>
               </div>
-              <h3 className="text-lg font-black tracking-tight text-amber-600 dark:text-amber-400">
-                Verifikasi Otorisasi PIN
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Akses Modul Backend ERP:{' '}
-                <span className="font-bold text-slate-800 dark:text-slate-200">
-                  {pendingHybridModule.label}
-                </span>
-              </p>
+              <button
+                type="button"
+                onClick={() => setIsStationPickerOpen(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="Tutup modal ganti loket"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            {/* PIN Display Dots */}
-            <div className="mb-4">
-              <div className="flex justify-center gap-3 my-2">
-                {[0, 1, 2, 3].map((idx) => {
-                  const filled = hybridPinInput.length > idx;
-                  return (
-                    <div
-                      key={idx}
-                      className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
-                        filled
-                          ? 'bg-amber-500 border-amber-500 scale-110 shadow-[0_0_10px_rgba(245,158,11,0.6)]'
-                          : 'border-slate-300 dark:border-slate-700 bg-transparent'
-                      }`}
-                    />
-                  );
-                })}
-              </div>
+            <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+              {visiblePosIdentities.map((stCard) => {
+                const stShift = getOpenShiftForStation(stCard.stationCode);
+                const isCurrentStation =
+                  (boundStation && boundStation.stationCode === stCard.stationCode) ||
+                  (!boundStation && activeStationCode === stCard.stationCode);
+                return (
+                  <button
+                    key={stCard.stationCode}
+                    type="button"
+                    onClick={() => handleSwitchDeviceStation(stCard)}
+                    className={`w-full text-left p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition ${
+                      isCurrentStation
+                        ? isLight
+                          ? 'bg-cyan-50 border-cyan-400 ring-1 ring-cyan-400/50'
+                          : 'bg-cyan-500/15 border-cyan-400/60 ring-1 ring-cyan-400/30'
+                        : isLight
+                        ? 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                        : 'bg-slate-950/70 hover:bg-slate-800/80 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-xl shrink-0">{stCard.emoji}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800">
+                            {stCard.stationCode}
+                          </span>
+                          <span className="text-xs font-semibold truncate">{stCard.posName}</span>
+                          {isCurrentStation && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-2.5 h-2.5" />
+                              AKTIF
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          {stCard.posTypeLabel} · Struk: INV-{stCard.receiptPrefixTag}-...
+                        </div>
+                      </div>
+                    </div>
 
-              {hybridPinError && (
-                <p className="text-xs text-rose-500 text-center font-semibold mt-2 animate-shake">
-                  {hybridPinError}
-                </p>
-              )}
+                    <div className="shrink-0 text-right">
+                      {stShift && stShift.status === 'OPEN' && stShift.isPaused ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                          <Coffee className="w-3 h-3" />
+                          Istirahat ({stShift.cashierName})
+                        </span>
+                      ) : stShift && stShift.status === 'OPEN' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Online ({stShift.cashierName})
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30">
+                          Belum Buka Shift
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
-            {/* Keypad 0-9 */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => (
+            <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+              {boundStation ? (
                 <button
-                  key={digit}
                   type="button"
                   onClick={() => {
-                    if (hybridPinInput.length < 6) {
-                      const next = hybridPinInput + digit;
-                      setHybridPinInput(next);
-                      setHybridPinError(null);
-                      if (next.length === 4) {
-                        handleVerifyHybridPin(next);
-                      }
-                    }
+                    const prevCode = boundStation.stationCode;
+                    unbindPosStation();
+                    setIsStationPickerOpen(false);
+                    showToast(`Kunci loket ${prevCode} pada PC ini dilepas.`);
                   }}
-                  className={`py-3 rounded-2xl font-black text-lg border cursor-pointer active:scale-95 transition ${
+                  className="px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>Lepas Kunci ({boundStation.stationCode})</span>
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Klik loket untuk mengikat perangkat ini.
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsStationPickerOpen(false)}
+                className={`px-3.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
+                  isLight
+                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                }`}
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Verifikasi PIN Otorisasi Manajemen (6 Digit) untuk Ganti Loket PC / Pindah Divisi */}
+      {pendingPosAuthAction && (
+        <div
+          id="modal-pos-mgmt-auth-pin"
+          className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPendingPosAuthAction(null)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden ${
+              isLight
+                ? 'bg-white border-amber-400 text-slate-900'
+                : 'bg-slate-900 border-amber-500/50 text-slate-100'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-500 flex items-center justify-center shrink-0">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">PIN Otorisasi Manajemen</h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {pendingPosAuthAction.type === 'SWITCH_STATION'
+                      ? 'Konfirmasi keamanan untuk Ganti Loket PC'
+                      : `Tujuan: ${pendingPosAuthAction.label}`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingPosAuthAction(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="Tutup modal verifikasi PIN"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmPosMgmtPin} className="p-5 space-y-4">
+              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>
+                Masukkan <strong>PIN Otorisasi Manajemen (6 digit)</strong> yang diatur di Konsol SuperAdmin sebelum melanjutkan.
+              </p>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="input-verify-pos-mgmt-pin"
+                  className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                >
+                  PIN 6 Digit
+                </label>
+                <div className="relative">
+                  <input
+                    id="input-verify-pos-mgmt-pin"
+                    type={showPosMgmtPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    autoFocus
+                    maxLength={6}
+                    value={posMgmtPinInput}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      setPosMgmtPinInput(digits);
+                      setPosMgmtPinError(null);
+                    }}
+                    placeholder="••••••"
+                    className={`w-full px-4 py-3 pr-11 rounded-xl border font-mono font-bold text-lg tracking-[0.4em] text-center outline-none transition ${
+                      posMgmtPinError
+                        ? 'border-rose-500 bg-rose-500/10 text-rose-500'
+                        : isLight
+                        ? 'bg-slate-50 border-slate-300 focus:border-amber-500 text-slate-900'
+                        : 'bg-slate-950 border-slate-700 focus:border-amber-400 text-amber-300'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPosMgmtPin((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-400 cursor-pointer"
+                    aria-label="Tampilkan atau sembunyikan PIN"
+                  >
+                    {showPosMgmtPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {posMgmtPinError && (
+                <div className="p-2.5 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-500 dark:text-rose-300 text-xs font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{posMgmtPinError}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPendingPosAuthAction(null)}
+                  className={`px-4 py-2 rounded-xl border text-xs font-semibold cursor-pointer ${
                     isLight
-                      ? 'bg-slate-100 hover:bg-amber-100/70 border-slate-200 text-slate-800'
-                      : 'bg-[#21262d] hover:bg-[#30363d] border-[#30363d] text-white hover:border-amber-500/40'
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
                   }`}
                 >
-                  {digit}
+                  Batal
                 </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setHybridPinInput('');
-                  setHybridPinError(null);
-                }}
-                className="py-3 rounded-2xl font-bold text-xs border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 cursor-pointer active:scale-95 transition"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (hybridPinInput.length < 6) {
-                    const next = hybridPinInput + '0';
-                    setHybridPinInput(next);
-                    setHybridPinError(null);
-                    if (next.length === 4) {
-                      handleVerifyHybridPin(next);
-                    }
-                  }
-                }}
-                className={`py-3 rounded-2xl font-black text-lg border cursor-pointer active:scale-95 transition ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-amber-100/70 border-slate-200 text-slate-800'
-                    : 'bg-[#21262d] hover:bg-[#30363d] border-[#30363d] text-white hover:border-amber-500/40'
-                }`}
-              >
-                0
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setHybridPinInput((prev) => prev.slice(0, -1));
-                  setHybridPinError(null);
-                }}
-                className={`py-3 rounded-2xl font-bold text-xs border cursor-pointer active:scale-95 transition ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-600'
-                    : 'bg-[#21262d] hover:bg-[#30363d] border-[#30363d] text-slate-300'
-                }`}
-              >
-                ⌫ Del
-              </button>
-            </div>
-
-            {/* Quick PIN Presets & Action Buttons */}
-            <div className="flex items-center justify-between text-[11px] text-slate-400 mb-4 px-1">
-              <span>PIN Kasir 02: <strong className="text-amber-500 font-mono">2222</strong></span>
-              <span>PIN Default: <strong className="text-slate-500 dark:text-slate-300 font-mono">1234</strong></span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsHybridPinModalOpen(false);
-                  setPendingHybridModule(null);
-                  setHybridPinInput('');
-                  setHybridPinError(null);
-                }}
-                className="py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-xs transition cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={() => handleVerifyHybridPin()}
-                className="py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/25 transition cursor-pointer"
-              >
-                Verifikasi PIN ↵
-              </button>
-            </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Verifikasi &amp; Lanjutkan</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

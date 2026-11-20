@@ -44,15 +44,15 @@ export const AutoPoSummaryModal: React.FC<AutoPoSummaryModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-3xl rounded-2xl p-6 shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+        className={`w-full max-w-3xl rounded-2xl p-6 relative border my-8 flex flex-col max-h-[92vh] ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-all p-1 active:scale-[0.99] cursor-pointer"
           title="Tutup Modal"
         >
           <X className="w-5 h-5" />
@@ -66,17 +66,17 @@ export const AutoPoSummaryModal: React.FC<AutoPoSummaryModalProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h3
-                className={`font-bold text-base leading-tight ${
+                className={`font-medium text-base leading-6 ${
                   isLight ? 'text-slate-900' : 'text-white'
                 }`}
               >
                 {title}
               </h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <span className="text-[10px] font-mono font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                 Integrasi {sourceModule} ➔ Purchasing
               </span>
             </div>
-            <p className="text-[11px] text-gray-400 mt-0.5">
+            <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400 mt-0.5">
               Draf PO berhasil digenerate otomatis berdasarkan Safety Stock, dikelompokkan per Supplier Utama.
             </p>
           </div>
@@ -86,25 +86,25 @@ export const AutoPoSummaryModal: React.FC<AutoPoSummaryModalProps> = ({
         <div
           className={`grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl border mb-4 text-xs ${
             isLight
-              ? 'bg-amber-500/5 border-amber-500/20 text-slate-800'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              ? 'bg-amber-500/5 border-amber-500/30 shadow-[0_0_16px_rgba(245,158,11,0.12)] text-slate-800'
+              : 'bg-amber-500/10 border-amber-500/30 shadow-[0_0_16px_rgba(245,158,11,0.1)] text-amber-200'
           }`}
         >
           <div>
-            <div className="text-[10px] text-gray-400">Total Draf PO Diterbitkan</div>
-            <div className="font-mono font-black text-lg text-amber-400">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Total Draf PO Diterbitkan</div>
+            <div className="font-mono font-semibold text-lg leading-7 text-amber-400">
               {generatedPOs.length} Dokumen PO
             </div>
           </div>
           <div>
-            <div className="text-[10px] text-gray-400">Total Item / SKU Direstock</div>
-            <div className="font-mono font-black text-lg text-sky-400">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Total Item / SKU Direstock</div>
+            <div className="font-mono font-semibold text-lg leading-7 text-sky-400">
               {totalItemsCount} SKU / Bahan
             </div>
           </div>
           <div>
-            <div className="text-[10px] text-gray-400">Estimasi Total Nilai Pengadaan</div>
-            <div className="font-mono font-black text-lg text-emerald-400">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Estimasi Total Nilai Pengadaan</div>
+            <div className="font-mono font-semibold text-lg leading-7 text-emerald-400">
               Rp {totalAmountAll.toLocaleString('id-ID')}
             </div>
           </div>
@@ -259,7 +259,7 @@ export const AutoPoSummaryModal: React.FC<AutoPoSummaryModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium text-xs cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition-all font-medium text-xs cursor-pointer active:scale-[0.99]"
             >
               Tutup Ringkasan
             </button>
@@ -270,7 +270,7 @@ export const AutoPoSummaryModal: React.FC<AutoPoSummaryModalProps> = ({
                   onClose();
                   onViewInPurchasing();
                 }}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs shadow-[0_0_15px_rgba(245,158,11,0.35)] flex items-center gap-1.5 cursor-pointer transition active:scale-95"
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-medium text-xs shadow-[0_0_15px_rgba(245,158,11,0.35)] flex items-center gap-1.5 cursor-pointer transition-all active:scale-[0.99]"
               >
                 <span>Buka di Modul Purchasing</span>
                 <ExternalLink className="w-3.5 h-3.5" />

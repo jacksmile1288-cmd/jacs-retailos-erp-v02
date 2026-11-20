@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { CashierShift } from '../../types';
+import { resolveSynchronizedTerminalDisplayName } from '../../utils/terminalConfigUtils';
 import {
   Wallet,
   Clock,
@@ -30,12 +31,27 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
   onSuccess,
   isLight = false,
 }) => {
-  const { activeUser, activeTerminal, openCashierShift, showToast, openPinAuth } = useApp();
+  const {
+    activeUser,
+    activeTerminal,
+    openCashierShift,
+    showToast,
+    openPinAuth,
+    activeSector,
+    businessDomainConfig,
+    businessProfile,
+  } = useApp();
   const [initialCash, setInitialCash] = useState<number>(200000);
   const [notes, setNotes] = useState<string>('Modal awal kasir operasional reguler');
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const syncedTerminalLabel = resolveSynchronizedTerminalDisplayName(
+    activeTerminal?.stationCode || activeTerminal?.id || activeTerminal?.name,
+    activeSector,
+    businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,48 +77,34 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div
-        className={`w-full max-w-lg rounded-3xl p-6 sm:p-7 shadow-2xl relative border overflow-hidden transition-all ${
+        className={`w-full max-w-lg rounded-2xl p-5 sm:p-6 shadow-2xl relative border overflow-hidden transition-all ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-100 shadow-[0_0_50px_rgba(0,0,0,0.8)]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         }`}
       >
         {/* Accent Strip */}
-        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-blue-500" />
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500" />
 
         {/* Header */}
-        <div className={`flex items-start justify-between gap-3.5 mb-5 pb-4 border-b ${
-          isLight ? 'border-slate-200' : 'border-slate-700/40'
-        }`}>
+        <div className="flex items-start justify-between gap-3.5 mb-5 pb-4 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.3)] shrink-0">
-              <Wallet className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.2)] shrink-0">
+              <Wallet className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`font-mono uppercase tracking-wider ${
-                  isLight
-                    ? 'bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs px-2.5 py-0.5 rounded-full'
-                    : 'text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                }`}>
+                <span className="text-[11px] font-mono font-normal px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 uppercase tracking-wide">
                   APS POS4: 32_ShiftKasir
                 </span>
-                <span className={
-                  isLight
-                    ? 'bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs px-2.5 py-0.5 rounded-full'
-                    : 'text-xs text-gray-400 font-medium'
-                }>
+                <span className="text-xs font-mono font-normal text-slate-500 dark:text-slate-400">
                   Buka Register POS
                 </span>
               </div>
-              <h2
-                className={`text-xl font-black tracking-tight mt-1 ${
-                  isLight ? 'text-slate-950' : 'text-white'
-                }`}
-              >
+              <h2 className="text-base sm:text-lg font-medium tracking-tight mt-1 text-slate-900 dark:text-white">
                 Buka Shift Kasir Baru
               </h2>
-              <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-600 font-medium' : 'text-gray-400'}`}>
+              <p className="text-xs leading-5 font-normal text-slate-500 dark:text-slate-400 mt-0.5">
                 Verifikasi saldo modal kembalian di laci kasir sebelum memulai sesi penjualan.
               </p>
             </div>
@@ -111,10 +113,10 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className={`p-2 rounded-xl border transition cursor-pointer shrink-0 ${
+              className={`p-1.5 rounded-xl border transition cursor-pointer shrink-0 ${
                 isLight
                   ? 'border-slate-300 hover:bg-slate-100 text-slate-500 hover:text-slate-900'
-                  : 'border-[#30363d] hover:bg-[#21262d] text-gray-400 hover:text-white'
+                  : 'border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-white'
               }`}
               title="Tutup Modal"
             >
@@ -165,7 +167,7 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
             <div className="truncate">
               <span className={`block ${isLight ? 'text-slate-700 font-semibold text-xs' : 'text-[10px] text-gray-400 font-medium'}`}>Terminal POS</span>
               <span className={`truncate block font-mono ${isLight ? 'text-slate-950 font-black text-sm' : 'font-bold text-slate-900 dark:text-white'}`}>
-                {activeTerminal.name}
+                {syncedTerminalLabel}
               </span>
             </div>
           </div>
@@ -198,10 +200,10 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
                   setInitialCash(Math.max(0, Number(e.target.value) || 0));
                   setError(null);
                 }}
-                className={`w-full pl-11 pr-4 py-3 rounded-2xl border text-base font-black font-mono outline-none transition ${
+                className={`w-full pl-11 pr-4 py-3 rounded-xl border text-base font-mono font-semibold outline-none transition ${
                   isLight
-                    ? 'bg-slate-50 border-slate-300 text-slate-950 focus:border-emerald-500 focus:bg-white'
-                    : 'bg-[#0d1117] border-[#30363d] text-white focus:border-emerald-500 shadow-inner'
+                    ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500 focus:bg-white'
+                    : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-400'
                 }`}
                 placeholder="200000"
                 required
@@ -211,18 +213,18 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
 
             {/* Quick Preset Buttons */}
             <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-              <span className={`mr-1 ${isLight ? 'text-slate-700 font-semibold text-xs' : 'text-[11px] text-gray-400'}`}>Pilihan Cepat:</span>
+              <span className={`mr-1 ${isLight ? 'text-slate-600 text-xs' : 'text-[11px] text-slate-400'}`}>Pilihan Cepat:</span>
               {PRESET_AMOUNTS.map((amt) => (
                 <button
                   key={amt}
                   type="button"
                   onClick={() => setInitialCash(amt)}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition cursor-pointer border ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono font-normal transition cursor-pointer border active:scale-[0.99] ${
                     initialCash === amt
-                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
                       : isLight
-                      ? 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 font-bold text-xs'
-                      : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-gray-300'
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                      : 'bg-slate-800/60 hover:bg-slate-700 border-slate-700 text-slate-300'
                   }`}
                 >
                   Rp {(amt / 1000).toLocaleString('id-ID')}k
@@ -232,7 +234,7 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
           </div>
 
           <div>
-            <label className={`block mb-1 ${isLight ? 'text-slate-700 font-semibold text-xs' : 'text-xs font-bold text-gray-300'}`}>
+            <label className={`block mb-1 text-xs leading-5 font-normal ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
               Catatan Pembukaan Shift (Opsional)
             </label>
             <input
@@ -240,30 +242,26 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Contoh: Shift Pagi, Uang kembalian pecahan 5rb, 10rb lengkap"
-              className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-none font-medium transition ${
+              className={`w-full px-3.5 py-2.5 rounded-xl border text-xs leading-5 font-normal outline-none transition ${
                 isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-[#0052FF]'
-                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
+                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500'
+                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-400'
               }`}
             />
           </div>
 
           {error && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 dark:text-rose-400 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
           {/* SOP Notice */}
-          <div className={
-            isLight
-              ? 'bg-amber-50 border border-amber-300 text-amber-950 font-medium text-xs p-3 rounded-lg leading-relaxed flex items-start gap-2.5'
-              : 'p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] leading-relaxed flex items-start gap-2.5'
-          }>
-            <ShieldCheck className={`w-4 h-4 shrink-0 mt-0.5 ${isLight ? 'text-amber-900' : 'text-amber-400'}`} />
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs leading-relaxed flex items-start gap-2.5">
+            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
             <div>
-              <span className={`font-bold ${isLight ? 'text-amber-900' : ''}`}>SOP Kasir JacS:</span> Saldo kas awal wajib dihitung fisik
+              <span className="font-medium">SOP Kasir:</span> Saldo kas awal wajib dihitung fisik
               dari laci kasir (Cash Drawer). Setiap penjualan tunai, non-tunai, dan tarik kas akan
               terikat otomatis ke ID Shift ini hingga proses Tutup Shift (End of Day).
             </div>
@@ -275,10 +273,10 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className={`py-3.5 px-4 rounded-2xl border text-xs font-bold transition cursor-pointer ${
+                className={`py-3 px-4 rounded-xl border text-xs font-normal transition cursor-pointer active:scale-[0.99] ${
                   isLight
                     ? 'border-slate-300 hover:bg-slate-100 text-slate-700'
-                    : 'border-[#30363d] hover:bg-[#21262d] text-gray-300'
+                    : 'border-slate-700 hover:bg-slate-800 text-slate-300'
                 }`}
               >
                 Nanti Saja
@@ -287,7 +285,7 @@ export const OpenShiftModal: React.FC<OpenShiftModalProps> = ({
             <button
               id="btn-confirm-open-shift"
               type="submit"
-              className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.4)] transition cursor-pointer active:scale-[0.99]"
+              className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition cursor-pointer active:scale-[0.99]"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>Buka Shift & Masuk Register Kasir</span>

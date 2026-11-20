@@ -1,5 +1,10 @@
 import React from 'react';
 import { CashierShift } from '../../types';
+import { useApp } from '../../context/AppContext';
+import {
+  getSectorTerminalSubtitle,
+  resolveSynchronizedTerminalDisplayName,
+} from '../../utils/terminalConfigUtils';
 import {
   Printer,
   X,
@@ -26,9 +31,25 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
   onClose,
   isLight = false,
 }) => {
+  const { businessProfile, activeSector, businessDomainConfig } = useApp();
+
   const handlePrint = () => {
     window.print();
   };
+
+  const activeBusinessName = (
+    businessProfile?.name ||
+    businessProfile?.businessName ||
+    'BARBER HUMAIRA'
+  ).trim();
+  const primaryModel =
+    businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType;
+  const sectorTerminalSubtitle = getSectorTerminalSubtitle(activeSector, primaryModel);
+  const syncedTerminalName = resolveSynchronizedTerminalDisplayName(
+    shift.stationCode || shift.terminalId || shift.terminalName,
+    activeSector,
+    primaryModel
+  );
 
   const diff = shift.difference || 0;
   const isMatch = diff === 0;
@@ -37,10 +58,10 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 overflow-y-auto animate-in fade-in duration-200">
       <div
-        className={`w-full max-w-md rounded-3xl p-6 shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+        className={`w-full max-w-md rounded-3xl p-6 relative border my-8 flex flex-col max-h-[92vh] transition-all ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-100 shadow-[0_0_50px_rgba(0,0,0,0.8)]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-100'
         }`}
       >
         {/* Accent Strip */}
@@ -48,25 +69,25 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
 
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1 cursor-pointer"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1 cursor-pointer active:scale-[0.99]"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Modal Title */}
         <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-700/40 shrink-0">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
             <Receipt className="w-5 h-5" />
           </div>
           <div>
             <h3
-              className={`font-black text-base leading-tight ${
+              className={`font-medium text-base leading-tight ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
               Mini Summary Rekonsiliasi Shift
             </h3>
-            <p className="text-[11px] text-gray-400">
+            <p className="text-[11px] text-gray-400 font-normal">
               Struk penyelesaian kasir resmi (Z-Report Settlement)
             </p>
           </div>
@@ -81,10 +102,10 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
             {/* Header Struk */}
             <div className="text-center pb-3 border-b border-dashed border-slate-400">
               <div className="font-black text-sm tracking-wider uppercase">
-                JacS RetailOS ERP
+                {activeBusinessName}
               </div>
               <div className="text-[10px] text-slate-600 font-sans">
-                PT. Mitra Retailindo Utama • Store Terminal
+                {activeBusinessName} • {sectorTerminalSubtitle}
               </div>
               <div className="mt-1.5 font-bold uppercase tracking-wide text-xs bg-slate-100 py-1 rounded border border-slate-300">
                 *** LAPORAN TUTUP SHIFT KASIR (Z-REPORT) ***
@@ -99,7 +120,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Terminal:</span>
-                <span className="font-bold">{shift.terminalName}</span>
+                <span className="font-bold">{syncedTerminalName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Operator Kasir:</span>
@@ -131,6 +152,12 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
                 <span>(+) Penjualan Tunai:</span>
                 <span className="font-bold">
                   Rp {shift.totalCashSales.toLocaleString('id-ID')}
+                </span>
+              </div>
+              <div className="flex justify-between text-amber-700">
+                <span>(-) Total Retur Tunai:</span>
+                <span className="font-bold">
+                  -Rp {(shift.totalSalesReturnCash || 0).toLocaleString('id-ID')}
                 </span>
               </div>
               <div className="flex justify-between text-rose-700">
@@ -228,7 +255,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
           <button
             type="button"
             onClick={handlePrint}
-            className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+            className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-[0.99]"
           >
             <Printer className="w-4 h-4" />
             <span>Cetak Struk Rekonsiliasi (Print)</span>
@@ -237,7 +264,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition cursor-pointer active:scale-95"
+            className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition cursor-pointer active:scale-[0.99]"
           >
             <CheckCircle2 className="w-4 h-4" />
             <span>Selesai & Selesai Shift</span>

@@ -221,7 +221,7 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
     (sales || []).forEach((sale: Sale) => {
       const dateToCheck = sale.created_at || sale.date || '';
-      if (!isSaleInPeriod(dateToCheck)) return;
+      if (!isSaleInPeriod(dateToCheck) || (sale.status !== 'COMPLETED' && sale.status !== 'PAID')) return;
 
       const session = getSaleSession(dateToCheck);
       if (selectedSession !== 'ALL' && session !== selectedSession) return;
@@ -275,54 +275,7 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       let evening = recorded ? recorded.eveningQty : 0;
 
       // Realistic baseline enrichment
-      if (qtySold === 0) {
-        const hash = (pId + name).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-        const lowerCat = category.toLowerCase();
-        const lowerName = name.toLowerCase();
-
-        const isFastCategory =
-          lowerCat.includes('sembako') ||
-          lowerCat.includes('minum') ||
-          lowerCat.includes('snack') ||
-          lowerCat.includes('makan') ||
-          lowerCat.includes('rokok') ||
-          lowerName.includes('mie') ||
-          lowerName.includes('aqua') ||
-          lowerName.includes('kopi') ||
-          lowerName.includes('beras');
-
-        const isSlowCategory =
-          lowerCat.includes('alat') ||
-          lowerCat.includes('bangunan') ||
-          lowerCat.includes('perkakas') ||
-          lowerCat.includes('elektronik') ||
-          lowerCat.includes('gadget');
-
-        let baseUnits = 0;
-        if (isFastCategory) {
-          baseUnits = 18 + (hash % 45);
-        } else if (isSlowCategory) {
-          baseUnits = (hash % 10) === 0 ? 0 : (hash % 4);
-        } else {
-          baseUnits = 6 + (hash % 18);
-        }
-
-        let sessionFactor = 1.0;
-        if (selectedSession === 'MORNING') {
-          sessionFactor = lowerCat.includes('sembako') || lowerCat.includes('sarapan') || lowerName.includes('roti') ? 0.5 : 0.25;
-        } else if (selectedSession === 'AFTERNOON') {
-          sessionFactor = lowerCat.includes('minum') || lowerName.includes('dingin') ? 0.45 : 0.35;
-        } else if (selectedSession === 'EVENING') {
-          sessionFactor = lowerCat.includes('snack') || lowerCat.includes('rokok') ? 0.45 : 0.4;
-        }
-
-        qtySold = Math.max(0, Math.round(baseUnits * sessionFactor));
-        revenue = qtySold * sellPrice;
-
-        morning = Math.round(qtySold * 0.3);
-        afternoon = Math.round(qtySold * 0.35);
-        evening = Math.max(0, qtySold - morning - afternoon);
-      }
+      // Session metrics are already initialized
 
       const profit = Math.round(qtySold * realizedMarginNominal);
       const currentStock = prod.stock ?? 15;
@@ -1097,13 +1050,15 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       {/* Module Title Banner */}
       <div
         className={`p-5 rounded-2xl border transition duration-200 no-print ${
-          isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div
-              className={`inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-[11px] font-bold mb-2 border ${
+              className={`inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal tracking-wide mb-2 border ${
                 isLight
                   ? 'bg-cyan-50 text-cyan-800 border-cyan-200'
                   : 'bg-cyan-950/60 border-cyan-500/40 text-cyan-300'
@@ -1112,10 +1067,10 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
               <Zap className="w-3.5 h-3.5" />
               <span>Product Intelligence Engine • Multi-Mode Telemetry &amp; AI Analyst</span>
             </div>
-            <h3 className={`text-xl sm:text-2xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+            <h3 className={`text-xl leading-7 font-medium tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
               Product Trend &amp; Sales Velocity Intelligence
             </h3>
-            <p className="text-xs text-[#8b949e] mt-1 max-w-3xl">
+            <p className="text-xs leading-5 text-slate-500 dark:text-slate-400 font-normal mt-1 max-w-3xl">
               Pusat analitik eksekutif: kurva pergerakan harian/mingguan (Volume vs Omzet), perbandingan ranking produk/brand &amp; sesi belanja, tabel audit tabulasi komprehensif, serta asisten cerdas AI Executive Retail Analyst.
             </p>
           </div>
@@ -1124,7 +1079,7 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
             <button
               type="button"
               onClick={handleExportExcel}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-2 transition cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center gap-2 active:scale-[0.99] transition cursor-pointer ${
                 isLight
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 shadow-xs'
                   : 'bg-emerald-950/50 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
@@ -1137,7 +1092,7 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
             <button
               type="button"
               onClick={handleResetFilters}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 active:scale-[0.99] transition cursor-pointer ${
                 isLight
                   ? 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
                   : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
@@ -1155,23 +1110,23 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5 no-print">
         {/* Card 1: Omzet Produk Terfilter */}
         <div
-          className={`p-4 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-4 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] hover:border-cyan-500/50'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
           <div className="flex items-center justify-between text-cyan-500 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Total Omzet Produk
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              TOTAL OMZET PRODUK
             </span>
             <TrendingUp className="w-4 h-4" />
           </div>
           <div>
-            <div className={`text-xl font-black font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>
+            <div className={`text-lg leading-7 font-semibold font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>
               Rp {kpiSummary.totalRevenue.toLocaleString('id-ID')}
             </div>
-            <div className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium mt-1">
+            <div className="text-[11px] text-cyan-600 dark:text-cyan-400 font-normal mt-1">
               {kpiSummary.totalUnitsSold.toLocaleString('id-ID')} unit terjual
             </div>
           </div>
@@ -1182,23 +1137,23 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
         {/* Card 2: Realized Gross Profit & Margin % */}
         <div
-          className={`p-4 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-4 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] hover:border-emerald-500/50'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
           <div className="flex items-center justify-between text-emerald-500 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Realized Margin %
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              REALIZED MARGIN %
             </span>
             <Percent className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+            <div className="text-lg leading-7 font-semibold font-mono text-emerald-600 dark:text-emerald-400">
               {kpiSummary.weightedMarginPercent.toFixed(1)}%
             </div>
-            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium mt-1">
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-normal mt-1">
               Laba: Rp {kpiSummary.totalProfit.toLocaleString('id-ID')}
             </div>
           </div>
@@ -1209,28 +1164,28 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
         {/* Card 3: Velocity Composition */}
         <div
-          className={`p-4 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-4 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] hover:border-blue-500/50'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
           <div className="flex items-center justify-between text-blue-500 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Perputaran Velocity
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              PERPUTARAN VELOCITY
             </span>
             <Layers className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5 text-xs font-mono font-bold">
+            <div className="flex items-center gap-1.5 text-xs font-mono font-medium">
               <span className="text-emerald-500">{kpiSummary.fastMovingCount} Fast</span>
               <span className="text-slate-400">/</span>
               <span className="text-cyan-400">{kpiSummary.stableCount} Stb</span>
               <span className="text-slate-400">/</span>
               <span className="text-amber-400">{kpiSummary.slowMovingCount} Slow</span>
             </div>
-            <div className="text-[11px] text-rose-500 font-bold mt-1">
-              {kpiSummary.deadStockCount} SKU Dead Stock (0 Penjualan)
+            <div className="text-[11px] text-rose-500 font-normal mt-1">
+              {kpiSummary.deadStockCount} SKU Dead Stock
             </div>
           </div>
           <div className="text-[10px] text-slate-400 dark:text-slate-500 border-t border-slate-700/20 pt-2 mt-2">
@@ -1238,25 +1193,32 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
           </div>
         </div>
 
-        {/* Card 4: Restock Kritis & Estimasi PO */}
+        {/* Card 4: Restock Kritis & Estimasi PO (Amber Warning Glow) */}
         <div
-          className={`p-4 rounded-xl border flex flex-col justify-between transition ${
-            isLight
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] hover:border-amber-500/50'
+          className={`p-4 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
+            kpiSummary.criticalRestockCount > 0
+              ? isLight
+                ? 'bg-white border-amber-500/70 shadow-[0_0_16px_rgba(245,158,11,0.18)]'
+                : 'bg-[#161b22] border-amber-500/40 shadow-[0_0_16px_rgba(245,158,11,0.12)]'
+              : isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
           <div className="flex items-center justify-between text-amber-500 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Restock Kritis
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              RESTOCK KRITIS
             </span>
-            <AlertTriangle className="w-4 h-4" />
+            <div className="flex items-center gap-1">
+              {kpiSummary.criticalRestockCount > 0 && <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />}
+              <AlertTriangle className="w-4 h-4 text-amber-500" />
+            </div>
           </div>
           <div>
-            <div className="text-xl font-black font-mono text-amber-500">
+            <div className="text-lg leading-7 font-semibold font-mono text-amber-500">
               {kpiSummary.criticalRestockCount} SKU
             </div>
-            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-medium mt-1">
+            <div className="text-[11px] text-slate-600 dark:text-slate-300 font-normal mt-1">
               Est. Modal: Rp {kpiSummary.totalEstimatedPoCost.toLocaleString('id-ID')}
             </div>
           </div>
@@ -1267,23 +1229,23 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
         {/* Card 5: Peluang Promo & Bundling */}
         <div
-          className={`p-4 rounded-xl border flex flex-col justify-between transition ${
+          className={`p-4 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] hover:border-purple-500/50'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
           <div className="flex items-center justify-between text-purple-500 mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Peluang Promo Margin
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest uppercase text-slate-500 dark:text-slate-400">
+              PELUANG PROMO MARGIN
             </span>
             <Gift className="w-4 h-4" />
           </div>
           <div>
-            <div className="text-xl font-black font-mono text-purple-500 dark:text-purple-400">
+            <div className="text-lg leading-7 font-semibold font-mono text-purple-600 dark:text-purple-400">
               {kpiSummary.promoOpportunityCount} SKU
             </div>
-            <div className="text-[11px] text-purple-600 dark:text-purple-300 font-medium mt-1">
+            <div className="text-[11px] text-purple-600 dark:text-purple-300 font-normal mt-1">
               Slow Moving tapi Margin &ge; 20%
             </div>
           </div>
@@ -1296,13 +1258,15 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       {/* FILTER CONTROLS TOOLBAR (Bertingkat, Waktu & Sesi) */}
       <div
         className={`p-4 rounded-xl border space-y-3.5 no-print ${
-          isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#161b22]/90 border-[#30363d]'
+          isLight
+            ? 'bg-slate-50 border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22]/90 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
             <Filter className="w-4 h-4 text-cyan-500" />
-            <span>Kontrol Filter Bertingkat, Waktu &amp; Sesi Belanja</span>
+            <span className="font-medium text-sm">Kontrol Filter Bertingkat, Waktu &amp; Sesi Belanja</span>
           </div>
           <div className="text-[11px] text-slate-500 font-mono">
             Menampilkan {filteredMetrics.length} dari {trendMetrics.length} total produk
@@ -2556,20 +2520,16 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       {/* QUICK MODAL 1: KONFIRMASI BUAT PO SUPPLIER SATUAN */}
       {poModalProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs no-print">
-          <div
-            className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-amber-500/40 text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-700/30">
+          <div className="w-full max-w-md rounded-2xl app-card p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700/50">
               <div className="flex items-center gap-2">
-                <Truck className="w-5 h-5 text-amber-400" />
-                <h4 className="font-bold text-sm">Buat Draf PO Supplier Cepat</h4>
+                <Truck className="w-5 h-5 text-amber-500" />
+                <h4 className="font-bold text-sm app-text-title">Buat Draf PO Supplier Cepat</h4>
               </div>
               <button
                 type="button"
                 onClick={() => setPoModalProduct(null)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2577,26 +2537,26 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
             <div className="space-y-3 text-xs">
               <div>
-                <span className="text-slate-400 block mb-0.5">Produk:</span>
-                <span className="font-bold text-sm">{poModalProduct.name}</span>
-                <span className="text-[11px] text-slate-400 block font-mono">
+                <span className="app-text-sub block mb-0.5">Produk:</span>
+                <span className="font-bold text-sm app-text-title">{poModalProduct.name}</span>
+                <span className="text-[11px] app-text-sub block font-mono">
                   SKU: {poModalProduct.sku} · Barcode: {poModalProduct.barcode}
                 </span>
               </div>
 
               <div>
-                <span className="text-slate-400 block mb-0.5">Supplier / Pemasok:</span>
-                <span className="font-bold text-amber-300">{poModalProduct.supplier}</span>
+                <span className="app-text-sub block mb-0.5">Supplier / Pemasok:</span>
+                <span className="font-bold text-amber-700 dark:text-amber-400">{poModalProduct.supplier}</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-900/60 border border-slate-700 font-mono">
+              <div className="grid grid-cols-2 gap-3 p-3 rounded-lg app-card-subtle font-mono">
                 <div>
-                  <span className="text-slate-400 block text-[10px]">Sisa Stok:</span>
-                  <span className="font-bold text-rose-400">{poModalProduct.currentStock} {poModalProduct.unit}</span>
+                  <span className="app-text-sub block text-[10px]">Sisa Stok:</span>
+                  <span className="font-bold text-rose-600 dark:text-rose-400">{poModalProduct.currentStock} {poModalProduct.unit}</span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px]">HPP per Unit:</span>
-                  <span className="font-bold">Rp {poModalProduct.costPrice.toLocaleString('id-ID')}</span>
+                  <span className="app-text-sub block text-[10px]">HPP per Unit:</span>
+                  <span className="font-bold app-text-title">Rp {poModalProduct.costPrice.toLocaleString('id-ID')}</span>
                 </div>
               </div>
 
@@ -2645,20 +2605,16 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
       {/* QUICK MODAL 2: KONFIRMASI JADIKAN PROGRAM PROMO SATUAN */}
       {promoModalProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs no-print">
-          <div
-            className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-purple-500/40 text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-700/30">
+          <div className="w-full max-w-md rounded-2xl app-card p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700/50">
               <div className="flex items-center gap-2">
-                <Gift className="w-5 h-5 text-purple-400" />
-                <h4 className="font-bold text-sm">Aktivasi Program Promo / Bundling</h4>
+                <Gift className="w-5 h-5 text-purple-500" />
+                <h4 className="font-bold text-sm app-text-title">Aktivasi Program Promo / Bundling</h4>
               </div>
               <button
                 type="button"
                 onClick={() => setPromoModalProduct(null)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2666,20 +2622,20 @@ export const ProductTrendIntelligence: React.FC<ProductTrendIntelligenceProps> =
 
             <div className="space-y-3 text-xs">
               <div>
-                <span className="text-slate-400 block mb-0.5">Produk Terpilih:</span>
-                <span className="font-bold text-sm">{promoModalProduct.name}</span>
+                <span className="app-text-sub block mb-0.5">Produk Terpilih:</span>
+                <span className="font-bold text-sm app-text-title">{promoModalProduct.name}</span>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-bold">
                     {promoModalProduct.velocityStatus}
                   </span>
-                  <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                  <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
                     Margin Asli: {promoModalProduct.realizedMarginPercent.toFixed(1)}%
                   </span>
                 </div>
               </div>
 
               <div>
-                <label className="text-slate-300 block font-bold mb-1">Nama Program Promosi:</label>
+                <label className="app-text-sub block font-bold mb-1">Nama Program Promosi:</label>
                 <input
                   type="text"
                   value={promoNameInput}

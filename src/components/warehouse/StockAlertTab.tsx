@@ -18,6 +18,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { StockOpnameModal } from './StockOpnameModal';
+import { filterProductsByBusinessDomain } from '../../utils/buildingDomainIsolation';
 
 interface StockAlertTabProps {
   isLight?: boolean;
@@ -29,16 +30,23 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
   isEn = false,
 }) => {
   const {
-    products,
+    products: rawProducts,
+    businessDomainConfig,
     getProductAlertThreshold,
     createPurchaseRequest,
     getDefaultSupplierForProduct,
+    createAutoReorderPO,
     setActiveNav,
     activeUser,
     showToast,
     purchaseRequests,
     purchasing,
   } = useApp();
+
+  const products = useMemo(
+    () => filterProductsByBusinessDomain(rawProducts || [], businessDomainConfig),
+    [rawProducts, businessDomainConfig]
+  );
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProductForOpname, setSelectedProductForOpname] = useState<Product | null>(null);
@@ -230,40 +238,73 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
     setIsOpnameModalOpen(true);
   };
 
+  const hasAlerts = lowStockProducts.length > 0;
+  const hasUnhandled = unhandledAlerts.length > 0;
+
   return (
-    <div id="warehouse-stock-alert-tab" className="space-y-6 animate-in fade-in duration-200">
+    <div id="warehouse-stock-alert-tab" className="space-y-6 animate-in fade-in duration-200 font-sans">
       {/* 1. Header Banner */}
       <div
-        className={`p-5 rounded-2xl border transition duration-200 ${
-          isLight
-            ? 'bg-gradient-to-r from-amber-50 via-slate-50 to-orange-50 border-amber-200 text-slate-800'
-            : 'bg-gradient-to-r from-amber-950/30 via-slate-900 to-orange-950/20 border-amber-500/30 text-white shadow-[0_0_25px_rgba(245,158,11,0.12)]'
+        className={`p-5 rounded-2xl border transition-all duration-200 ${
+          hasAlerts
+            ? isLight
+              ? 'border-rose-500/80 bg-rose-500/5 shadow-[0_0_18px_rgba(244,63,94,0.22)] text-slate-900'
+              : 'border-rose-500/75 bg-rose-500/10 shadow-[0_0_18px_rgba(244,63,94,0.2)] text-white'
+            : isLight
+            ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)] text-slate-900'
+            : 'border-amber-500/70 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.18)] text-white'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-slate-950 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(245,158,11,0.4)]">
-              <AlertTriangle className="w-6 h-6 stroke-[2.5]" />
+            <div
+              className={`w-11 h-11 rounded-2xl border flex items-center justify-center shrink-0 ${
+                hasAlerts
+                  ? isLight
+                    ? 'bg-rose-50 text-rose-600 border-rose-500/60'
+                    : 'bg-rose-500/15 text-rose-400 border-rose-500/40'
+                  : isLight
+                  ? 'bg-amber-50 text-amber-600 border-amber-500/60'
+                  : 'bg-amber-500/15 text-amber-400 border-amber-500/40'
+              }`}
+            >
+              <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap mb-1">
-                <span className={`px-2.5 py-0.5 rounded-full font-mono uppercase tracking-wider ${
-                  isLight
-                    ? 'bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs'
-                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-black'
-                }`}>
-                  Warehouse Stock Alert • Integrasi Purchasing
+              <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal uppercase tracking-widest border ${
+                    hasAlerts
+                      ? isLight
+                        ? 'bg-rose-50 border-rose-500/60 text-rose-700'
+                        : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                      : isLight
+                      ? 'bg-amber-50 border-amber-500/60 text-amber-700'
+                      : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                  }`}
+                >
+                  {hasAlerts && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+                  <span>Warehouse Stock Alert • Integrasi Purchasing</span>
                 </span>
-                <span className={`text-xs font-mono ${isLight ? 'text-slate-600 font-semibold' : 'text-gray-400'}`}>
-                  {unhandledAlerts.length} Alert Aktif {lowStockProducts.length - unhandledAlerts.length > 0 ? `(${lowStockProducts.length - unhandledAlerts.length} Dalam Proses Restock/PR)` : ''}
+                <span className={`text-[11px] font-mono font-normal tracking-widest uppercase ${
+                  hasUnhandled
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : isLight
+                    ? 'text-slate-600'
+                    : 'text-slate-400'
+                }`}>
+                  {unhandledAlerts.length} Alert Aktif{' '}
+                  {lowStockProducts.length - unhandledAlerts.length > 0
+                    ? `(${lowStockProducts.length - unhandledAlerts.length} Dalam Proses Restock/PR)`
+                    : ''}
                 </span>
               </div>
-              <h3 className={`text-lg sm:text-xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+              <h3 className={`text-base font-medium tracking-tight ${isLight ? 'text-slate-950' : 'text-white'}`}>
                 {isEn
                   ? 'Warehouse Stock Alert & Purchasing Requisition Bridge'
                   : 'Peringatan Stok Minimum Gudang & Penghubung Pengadaan (PR)'}
               </h3>
-              <p className={`text-xs max-w-2xl leading-relaxed mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+              <p className={`text-sm font-normal max-w-2xl leading-relaxed mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                 {isEn
                   ? 'Identify SKUs below safety thresholds and instantly auto-generate Purchase Requisitions to prevent retail out-of-stock.'
                   : 'Deteksi produk yang berada di bawah batas minimum (Safety Stock) dan langsung buat draf Purchase Requisition ke modul Purchasing.'}
@@ -277,23 +318,27 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
               id="btn-auto-generate-all-pr"
               type="button"
               onClick={handleGenerateAllPR}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs shadow-[0_0_18px_rgba(245,158,11,0.35)] transition cursor-pointer active:scale-95"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all duration-200 cursor-pointer active:scale-[0.99] ${
+                hasAlerts
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500/50 shadow-[0_0_16px_rgba(244,63,94,0.28)]'
+                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-400/50 shadow-[0_0_16px_rgba(245,158,11,0.28)]'
+              }`}
             >
-              <Zap className="w-4 h-4 fill-current" />
+              <Zap className="w-4 h-4" />
               <span>Auto Generate All PR ({lowStockProducts.length} Alert)</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveNav('purchasing')}
-              className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-bold text-xs border transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl font-medium text-sm border transition-all duration-200 cursor-pointer active:scale-[0.99] ${
                 isLight
-                  ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 shadow-sm'
-                  : 'bg-slate-800/80 hover:bg-slate-700 text-white border-slate-700'
+                  ? 'bg-white hover:bg-cyan-50 text-slate-800 border-cyan-500/60 shadow-[0_0_12px_rgba(6,182,212,0.12)]'
+                  : 'bg-[#161b22] hover:bg-slate-800 text-white border-cyan-500/35'
               }`}
             >
               <span>{isEn ? 'Open Purchasing Module' : 'Buka Modul Purchasing'}</span>
-              <ExternalLink className={`w-3.5 h-3.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`} />
+              <ExternalLink className={`w-4 h-4 ${isLight ? 'text-cyan-600' : 'text-cyan-400'}`} />
             </button>
           </div>
         </div>
@@ -302,95 +347,126 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
       {/* 2. 4 Telemetry Metrics */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div
-          className={`p-4 rounded-2xl border flex items-center justify-between ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 ${
+            hasAlerts
+              ? isLight
+                ? 'border-rose-500/80 bg-rose-500/5 shadow-[0_0_18px_rgba(244,63,94,0.22)] hover:shadow-[0_0_24px_rgba(244,63,94,0.32)] text-slate-900'
+                : 'border-rose-500/75 bg-rose-500/10 shadow-[0_0_18px_rgba(244,63,94,0.2)] hover:shadow-[0_0_24px_rgba(244,63,94,0.3)] text-white'
+              : isLight
+              ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)] hover:shadow-[0_0_24px_rgba(245,158,11,0.32)] text-slate-900'
+              : 'border-amber-500/70 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.18)] hover:shadow-[0_0_24px_rgba(245,158,11,0.28)] text-white'
           }`}
         >
           <div>
-            <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] text-gray-400 font-medium'}`}>
-              {isEn ? 'Stock Alert Items' : 'Total Produk Kritis'}
+            <span className={`flex items-center gap-1.5 text-[11px] font-mono font-normal tracking-widest uppercase ${
+              hasAlerts ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+            }`}>
+              {hasAlerts && <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />}
+              <span>{isEn ? 'Stock Alert Items' : 'Total Produk Kritis'}</span>
             </span>
-            <span className={`text-2xl font-black font-mono mt-1 block ${isLight ? 'text-slate-950' : 'text-amber-400'}`}>
+            <span className={`text-lg font-mono font-medium mt-1 block ${
+              hasAlerts ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'
+            }`}>
               {lowStockProducts.length} Produk
             </span>
-            <span className={`text-xs mt-0.5 block font-mono ${isLight ? 'text-rose-950 font-bold' : 'text-amber-400/80 text-[10px]'}`}>
-              {lowStockProducts.length === 4 ? '4 Alert (Di Bawah Minimum)' : `${lowStockProducts.length} Perlu Restock`}
+            <span className={`text-sm font-normal mt-0.5 block ${
+              hasAlerts ? 'text-rose-600 dark:text-rose-300' : isLight ? 'text-amber-700' : 'text-amber-300/80'
+            }`}>
+              {lowStockProducts.length === 0 ? 'Aman (Tidak ada kritis)' : `${lowStockProducts.length} Perlu Restock`}
             </span>
           </div>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
-            isLight ? 'bg-rose-100 text-rose-950 border-rose-300' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+            hasAlerts
+              ? isLight
+                ? 'bg-rose-50 text-rose-600 border-rose-300'
+                : 'bg-rose-500/15 text-rose-400 border-rose-500/35'
+              : isLight
+              ? 'bg-amber-50 text-amber-600 border-amber-300'
+              : 'bg-amber-500/15 text-amber-400 border-amber-500/35'
           }`}>
             <AlertTriangle className="w-5 h-5" />
           </div>
         </div>
 
         <div
-          className={`p-4 rounded-2xl border flex items-center justify-between ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-slate-900'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-white'
           }`}
         >
           <div>
-            <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] text-gray-400 font-medium'}`}>
+            <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+              isLight ? 'text-slate-600' : 'text-gray-400'
+            }`}>
               {isEn ? 'Total Deficit Units' : 'Total Defisit Unit'}
             </span>
-            <span className={`text-2xl font-black font-mono mt-1 block ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>
+            <span className={`text-lg font-mono font-medium mt-1 block ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>
               {totalDeficitUnits} Unit
             </span>
-            <span className={`text-xs mt-0.5 block font-medium ${isLight ? 'text-slate-700' : 'text-gray-400 text-[10px]'}`}>
+            <span className={`text-sm font-normal mt-0.5 block ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
               Untuk kembali ke batas aman
             </span>
           </div>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
-            isLight ? 'bg-blue-100 text-blue-950 border-blue-300' : 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+            isLight ? 'bg-cyan-50 text-cyan-600 border-cyan-300' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
           }`}>
             <TrendingDown className="w-5 h-5" />
           </div>
         </div>
 
         <div
-          className={`p-4 rounded-2xl border flex items-center justify-between ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-slate-900'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-white'
           }`}
         >
           <div>
-            <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] text-gray-400 font-medium'}`}>
+            <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+              isLight ? 'text-slate-600' : 'text-gray-400'
+            }`}>
               {isEn ? 'Estimated Reorder Cost' : 'Estimasi Biaya Restock'}
             </span>
-            <span className={`text-2xl font-black font-mono mt-1 block ${isLight ? 'text-slate-950' : 'text-emerald-400'}`}>
+            <span className={`text-lg font-mono font-medium mt-1 block ${isLight ? 'text-slate-950' : 'text-emerald-400'}`}>
               Rp {totalEstimatedCost.toLocaleString('id-ID')}
             </span>
-            <span className={`text-xs mt-0.5 block font-medium ${isLight ? 'text-slate-700' : 'text-gray-400 text-[10px]'}`}>
+            <span className={`text-sm font-normal mt-0.5 block ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
               Berdasarkan HPP pemasok resmi
             </span>
           </div>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
-            isLight ? 'bg-emerald-100 text-emerald-950 border-emerald-300' : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+            isLight ? 'bg-emerald-50 text-emerald-600 border-emerald-300' : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
           }`}>
             <ShoppingBag className="w-5 h-5" />
           </div>
         </div>
 
         <div
-          className={`p-4 rounded-2xl border flex items-center justify-between ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d]'
+          className={`p-4 rounded-2xl border flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-slate-900'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)] text-white'
           }`}
         >
           <div>
-            <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] text-gray-400 font-medium'}`}>
+            <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+              isLight ? 'text-slate-600' : 'text-gray-400'
+            }`}>
               {isEn ? 'Purchasing Integration' : 'Status Integrasi Purchasing'}
             </span>
-            <span className={`text-sm font-black mt-1 block flex items-center gap-1.5 ${
+            <span className={`text-lg font-mono font-medium mt-1 flex items-center gap-1.5 ${
               isLight ? 'text-slate-950' : 'text-white'
             }`}>
-              <CheckCircle2 className={`w-4 h-4 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`} />
+              <CheckCircle2 className={`w-4 h-4 shrink-0 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`} />
               <span>Siap Terbitkan PR</span>
             </span>
-            <span className={`text-xs mt-0.5 block font-semibold ${isLight ? 'text-emerald-800' : 'text-emerald-400 text-[10px]'}`}>
+            <span className={`text-sm font-normal mt-0.5 block ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
               1-Klik kirim ke antrean approval
             </span>
           </div>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
-            isLight ? 'bg-purple-100 text-purple-950 border-purple-300' : 'bg-purple-500/15 text-purple-400 border-purple-500/30'
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
+            isLight ? 'bg-cyan-50 text-cyan-600 border-cyan-300' : 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
           }`}>
             <FilePlus2 className="w-5 h-5" />
           </div>
@@ -400,33 +476,39 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
       {/* 3. Toolbar & Search */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-cyan-500" />
           <input
             type="text"
             placeholder={isEn ? 'Search low-stock products, SKU...' : 'Cari produk alert, SKU, kategori...'}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className={`w-full pl-9 pr-4 py-2 rounded-xl text-xs border outline-none transition ${
+            className={`w-full pl-9 pr-4 py-2 rounded-xl text-sm font-normal border outline-none transition-all duration-200 ${
               isLight
-                ? 'bg-white border-slate-300 text-slate-900 focus:border-indigo-600'
-                : 'bg-[#161b22] border-[#30363d] text-white focus:border-amber-500'
+                ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_14px_rgba(6,182,212,0.14)] focus:border-cyan-500 focus:shadow-[0_0_20px_rgba(6,182,212,0.28)]'
+                : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_14px_rgba(6,182,212,0.08)] focus:border-cyan-400 focus:shadow-[0_0_20px_rgba(6,182,212,0.24)]'
             }`}
           />
         </div>
 
-        <span className={`text-xs font-mono self-end sm:self-center ${isLight ? 'text-slate-700 font-semibold' : 'text-gray-400'}`}>
+        <span className={`text-[11px] font-mono font-normal tracking-widest uppercase self-end sm:self-center ${
+          isLight ? 'text-slate-600' : 'text-gray-400'
+        }`}>
           Menampilkan {filteredProducts.length} dari {lowStockProducts.length} SKU Kritis
         </span>
       </div>
 
-      {/* 4. Daftar 4 Produk di Bawah Minimum Stock */}
+      {/* 4. Daftar Produk di Bawah Minimum Stock */}
       {filteredProducts.length === 0 ? (
         <div className={`p-12 text-center rounded-2xl border border-dashed flex flex-col items-center justify-center ${
-          isLight ? 'bg-slate-50 border-slate-300 text-slate-700' : 'border-slate-700/60 text-gray-400'
+          isLight
+            ? 'bg-amber-500/5 border-amber-500/70 shadow-[0_0_16px_rgba(245,158,11,0.15)] text-slate-700'
+            : 'bg-amber-500/5 border-amber-500/50 shadow-[0_0_16px_rgba(245,158,11,0.1)] text-gray-400'
         }`}>
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-2" />
-          <p className={`font-bold text-sm ${isLight ? 'text-slate-950' : 'text-white'}`}>Seluruh Produk Memiliki Stok Aman!</p>
-          <p className={`text-xs mt-1 ${isLight ? 'text-slate-600' : 'text-gray-500'}`}>
+          <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-2" />
+          <p className={`font-medium text-base ${isLight ? 'text-slate-950' : 'text-white'}`}>
+            Seluruh Produk Memiliki Stok Aman!
+          </p>
+          <p className={`text-sm font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
             Tidak ada SKU yang berada di bawah ambang batas minimum saat ini.
           </p>
         </div>
@@ -447,129 +529,138 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
             return (
               <div
                 key={p.id}
-                className={`p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between ${
-                  isLight
-                    ? 'bg-white border-slate-300 hover:border-slate-400 shadow-xs'
-                    : 'bg-[#161b22] border-amber-500/30 hover:border-amber-500/60 shadow-[0_0_15px_rgba(245,158,11,0.08)]'
+                className={`p-5 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex flex-col justify-between ${
+                  isOut
+                    ? isLight
+                      ? 'bg-white border-rose-500/80 shadow-[0_0_18px_rgba(244,63,94,0.2)] hover:shadow-[0_0_24px_rgba(244,63,94,0.3)]'
+                      : 'bg-[#161b22] border-rose-500/70 shadow-[0_0_18px_rgba(244,63,94,0.16)] hover:shadow-[0_0_24px_rgba(244,63,94,0.28)]'
+                    : isLight
+                    ? 'bg-white border-amber-500/80 shadow-[0_0_18px_rgba(245,158,11,0.18)] hover:shadow-[0_0_24px_rgba(245,158,11,0.28)]'
+                    : 'bg-[#161b22] border-amber-500/60 shadow-[0_0_18px_rgba(245,158,11,0.14)] hover:shadow-[0_0_24px_rgba(245,158,11,0.26)]'
                 }`}
               >
                 <div>
                   {/* Top Bar: SKU, Status Badge */}
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`font-mono ${
+                      <span className={`font-mono font-normal text-[11px] tracking-widest uppercase px-2.5 py-0.5 rounded border ${
                         isLight
-                          ? 'bg-blue-100 border border-blue-300 text-blue-950 font-bold text-xs px-2 py-0.5 rounded'
-                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-black px-2.5 py-0.5 rounded'
+                          ? 'bg-cyan-50 border-cyan-500/60 text-cyan-800'
+                          : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
                       }`}>
                         {p.id}
                       </span>
-                      <span className={`text-[10px] font-mono ${isLight ? 'text-slate-600 font-semibold' : 'text-gray-400'}`}>
+                      <span className={`text-[11px] font-mono font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                         Barcode: {p.barcode || '-'}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-wrap justify-end">
                       {restockStatus && (
-                        <span className={`font-mono ${
+                        <span className={`font-mono font-normal text-[11px] px-2.5 py-0.5 rounded-full border ${
                           isLight
-                            ? 'bg-blue-100 border border-blue-300 text-blue-950 font-bold text-xs px-2 py-0.5 rounded'
-                            : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold px-2.5 py-0.5 rounded-full'
+                            ? 'bg-cyan-50 border-cyan-500/60 text-cyan-800'
+                            : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'
                         }`}>
                           ✓ {restockStatus.label}
                         </span>
                       )}
                       <span
-                        className={`font-mono uppercase tracking-wider ${
-                          isLight
-                            ? 'bg-rose-100 border border-rose-300 text-rose-950 font-bold text-xs px-2 py-0.5 rounded'
-                            : isOut
-                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px] font-black animate-pulse px-2.5 py-0.5 rounded-full'
-                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-black px-2.5 py-0.5 rounded-full'
+                        className={`inline-flex items-center gap-1.5 font-mono font-normal text-[11px] uppercase tracking-widest px-2.5 py-0.5 rounded-full border ${
+                          isOut
+                            ? isLight
+                              ? 'bg-rose-50 border-rose-500/70 text-rose-700'
+                              : 'bg-rose-500/15 text-rose-300 border-rose-500/45'
+                            : isLight
+                            ? 'bg-amber-50 border-amber-500/70 text-amber-700'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/45'
                         }`}
                       >
-                        {isOut ? 'OUT OF STOCK (0)' : `LOW STOCK (${currentStock})`}
+                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isOut ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                        <span>{isOut ? 'OUT OF STOCK (0)' : `LOW STOCK (${currentStock})`}</span>
                       </span>
                     </div>
                   </div>
 
                   {/* Title & Brand */}
-                  <h4 className={`font-black text-sm line-clamp-1 ${isLight ? 'text-slate-950' : 'text-white'}`}>{p.name}</h4>
-                  <div className={`text-[11px] mt-0.5 flex items-center gap-2 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
+                  <h4 className={`font-medium text-base line-clamp-1 ${isLight ? 'text-slate-950' : 'text-white'}`}>{p.name}</h4>
+                  <div className={`text-sm font-normal mt-0.5 flex items-center gap-2 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                     <span>{p.category || 'Barang Umum'}</span>
                     <span>•</span>
-                    <span>Brand: <strong className={isLight ? 'text-slate-950 font-bold' : 'text-gray-300'}>{p.brand || 'Original'}</strong></span>
+                    <span>
+                      Brand: <span className={`font-medium ${isLight ? 'text-slate-900' : 'text-gray-200'}`}>{p.brand || 'Original'}</span>
+                    </span>
                   </div>
 
                   {/* Stock Metrics Grid */}
-                  <div className={`grid grid-cols-3 gap-2.5 my-3.5 p-3 rounded-xl border text-xs ${
+                  <div className={`grid grid-cols-3 gap-2.5 my-3.5 p-3 rounded-xl border ${
                     isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 shadow-2xs'
-                      : 'bg-slate-900/60 border-slate-800'
+                      ? 'bg-slate-50 border-cyan-500/40 text-slate-900'
+                      : 'bg-[#0d1117] border-cyan-500/25'
                   }`}>
                     <div>
-                      <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'}`}>
-                        Stok Riil Saat Ini
+                      <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                        isLight ? 'text-slate-600' : 'text-gray-400'
+                      }`}>
+                        Stok Riil
                       </span>
                       <span
-                        className={`font-mono mt-0.5 block ${
-                          isLight
-                            ? 'text-slate-950 font-black text-sm'
-                            : isOut
-                            ? 'text-base font-black text-rose-400'
-                            : 'text-base font-black text-amber-400'
+                        className={`text-lg font-mono font-medium mt-0.5 block ${
+                          isOut
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : 'text-amber-600 dark:text-amber-400'
                         }`}
                       >
-                        {currentStock} {p.unit || 'Unit'}
+                        {currentStock} <span className="text-sm font-normal">{p.unit || 'Unit'}</span>
                       </span>
                     </div>
 
                     <div>
-                      <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'}`}>
-                        Batas Minimum (Safety)
-                      </span>
-                      <span className={`font-mono mt-0.5 block ${isLight ? 'text-slate-950 font-black text-sm' : 'text-base font-bold text-gray-300'}`}>
-                        {minStock} {p.unit || 'Unit'}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className={`block ${isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'}`}>
-                        Defisit Pengadaan
-                      </span>
-                      <span className={`font-mono mt-0.5 block ${
-                        isLight
-                          ? 'text-slate-950 font-black text-sm'
-                          : 'text-base font-black text-cyan-400'
+                      <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                        isLight ? 'text-slate-600' : 'text-gray-400'
                       }`}>
-                        +{deficitQty} {p.unit || 'Unit'}
+                        Minimum
+                      </span>
+                      <span className={`text-lg font-mono font-medium mt-0.5 block ${isLight ? 'text-slate-900' : 'text-gray-200'}`}>
+                        {minStock} <span className="text-sm font-normal">{p.unit || 'Unit'}</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                        isLight ? 'text-slate-600' : 'text-gray-400'
+                      }`}>
+                        Defisit
+                      </span>
+                      <span className={`text-lg font-mono font-medium mt-0.5 block ${isLight ? 'text-cyan-700' : 'text-cyan-400'}`}>
+                        +{deficitQty} <span className="text-sm font-normal">{p.unit || 'Unit'}</span>
                       </span>
                     </div>
                   </div>
 
                   {/* Procurement & Supplier Info */}
-                  <div className="space-y-1 text-xs mb-4">
-                    <div className={`flex items-center justify-between ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
+                  <div className="space-y-1 text-sm font-normal mb-4">
+                    <div className={`flex items-center justify-between ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                       <span>Estimasi Harga Modal (HPP):</span>
-                      <span className={`font-mono ${isLight ? 'text-slate-950 font-black' : 'text-gray-200 font-medium'}`}>
+                      <span className={`font-mono font-normal ${isLight ? 'text-slate-900' : 'text-gray-200'}`}>
                         Rp {unitCost.toLocaleString('id-ID')} / {p.unit || 'Unit'}
                       </span>
                     </div>
-                    <div className={`flex items-center justify-between ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
+                    <div className={`flex items-center justify-between ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                       <span>Total Estimasi Biaya PR:</span>
-                      <span className={`font-mono ${isLight ? 'text-slate-950 font-black' : 'text-emerald-400 font-bold'}`}>
+                      <span className={`font-mono font-medium ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
                         Rp {estimatedCost.toLocaleString('id-ID')}
                       </span>
                     </div>
-                    <div className={`flex items-center justify-between pt-1 border-t ${
-                      isLight ? 'border-slate-300 text-slate-700 font-medium' : 'border-slate-800 text-gray-400'
+                    <div className={`flex items-center justify-between pt-1.5 border-t ${
+                      isLight ? 'border-slate-200 text-slate-600' : 'border-slate-800 text-gray-400'
                     }`}>
-                      <span className="flex items-center gap-1">
-                        <Building2 className={`w-3.5 h-3.5 ${isLight ? 'text-slate-600' : 'text-gray-500'}`} />
+                      <span className="flex items-center gap-1.5">
+                        <Building2 className={`w-3.5 h-3.5 ${isLight ? 'text-slate-500' : 'text-gray-500'}`} />
                         <span>Supplier Rekanan:</span>
                       </span>
-                      <span className={`truncate max-w-[180px] ${isLight ? 'text-slate-950 font-bold' : 'text-gray-300 font-semibold'}`}>
-                        {supplier}
+                      <span className={`truncate max-w-[180px] font-medium ${isLight ? 'text-slate-900' : 'text-gray-200'}`}>
+                        {typeof supplier === 'string' ? supplier : (supplier?.name || 'Supplier Rekanan Lokal')}
                       </span>
                     </div>
                   </div>
@@ -577,37 +668,56 @@ export const StockAlertTab: React.FC<StockAlertTabProps> = ({
 
                 {/* Bottom Action Buttons */}
                 <div className={`pt-3 border-t flex items-center justify-between gap-2 ${
-                  isLight ? 'border-slate-300' : 'border-slate-800'
+                  isLight ? 'border-slate-200' : 'border-slate-800'
                 }`}>
                   <button
                     type="button"
                     id={`btn-opname-${p.id}`}
                     onClick={() => handleOpenOpname(p)}
-                    className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                    className={`px-3.5 py-2 rounded-xl border flex items-center gap-1.5 text-sm font-medium transition-all duration-200 cursor-pointer active:scale-[0.99] ${
                       isLight
-                        ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800 font-semibold text-xs'
-                        : 'border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-gray-300 font-bold text-xs'
+                        ? 'bg-white hover:bg-cyan-50 border-cyan-500/60 text-slate-800 shadow-[0_0_10px_rgba(6,182,212,0.1)]'
+                        : 'border-cyan-500/35 bg-[#0d1117] hover:bg-slate-800 text-gray-200'
                     }`}
                     title="Periksa fisik nyata vs stok sistem"
                   >
-                    <ClipboardCheck className={`w-3.5 h-3.5 ${isLight ? 'text-slate-800' : 'text-cyan-400'}`} />
+                    <ClipboardCheck className={`w-4 h-4 ${isLight ? 'text-cyan-600' : 'text-cyan-400'}`} />
                     <span>Opname Fisik</span>
                   </button>
 
-                  <button
-                    type="button"
-                    id={`btn-auto-pr-${p.id}`}
-                    disabled={generatingPrId === p.id}
-                    onClick={() => handleAutoGeneratePR(p)}
-                    className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95 disabled:opacity-50 ${
-                      isLight
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black'
-                    }`}
-                  >
-                    <FilePlus2 className={`w-4 h-4 ${isLight ? 'text-white' : 'fill-slate-950'}`} />
-                    <span>Auto Generate PR</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      id={`btn-auto-po-${p.id}`}
+                      onClick={() => createAutoReorderPO(p)}
+                      className={`px-3 py-2 rounded-xl font-medium text-xs flex items-center gap-1.5 border transition-all duration-200 cursor-pointer active:scale-[0.99] ${
+                        isLight
+                          ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-500/50 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400/50 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                      }`}
+                      title="Buat Draft PO otomatis ke modul Purchasing dengan rekomendasi jumlah pesanan dan badge AUTO-REORDER"
+                    >
+                      <ShoppingBag className="w-3.5 h-3.5" />
+                      <span>+ Buat Draft PO</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id={`btn-auto-pr-${p.id}`}
+                      disabled={generatingPrId === p.id}
+                      onClick={() => handleAutoGeneratePR(p)}
+                      className={`px-3 py-2 rounded-xl font-medium text-xs flex items-center gap-1.5 border transition-all duration-200 cursor-pointer active:scale-[0.99] disabled:opacity-50 ${
+                        isOut
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500/50 shadow-[0_0_12px_rgba(244,63,94,0.25)]'
+                          : isLight
+                          ? 'bg-cyan-600 hover:bg-cyan-700 text-white border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                      }`}
+                    >
+                      <FilePlus2 className="w-3.5 h-3.5" />
+                      <span>Auto PR</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             );

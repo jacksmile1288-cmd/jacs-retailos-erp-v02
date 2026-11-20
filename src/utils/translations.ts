@@ -20,8 +20,8 @@ export const DIVISIONS_TRANSLATIONS: Record<Language, Record<string, DivisionTex
     executive: {
       id: 'executive',
       code: '02',
-      name: 'Eksekutif & Manajerial',
-      sub: 'KPI, Margin & Antrean Persetujuan',
+      name: 'Eksekutif & Manajemen',
+      sub: 'KPI, Analitik & Otorisasi',
       desc: 'Pantau omset, margin profitabilitas, efisiensi operasional, dan persetujuan dokumen berisiko tinggi.',
     },
     hr: {

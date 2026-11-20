@@ -38,15 +38,15 @@ export const AutoReorderSummaryModal: React.FC<AutoReorderSummaryModalProps> = (
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-3xl rounded-2xl p-6 shadow-2xl relative border my-8 max-h-[92vh] flex flex-col ${
+        className={`w-full max-w-3xl rounded-2xl p-6 relative border my-8 max-h-[92vh] flex flex-col ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-all p-1 active:scale-[0.99] cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -59,18 +59,18 @@ export const AutoReorderSummaryModal: React.FC<AutoReorderSummaryModalProps> = (
           <div>
             <div className="flex items-center gap-2">
               <h3
-                className={`font-black text-lg ${
+                className={`font-medium text-base leading-6 ${
                   isLight ? 'text-slate-900' : 'text-white'
                 }`}
               >
                 Auto-Generate Purchase Order Berhasil
               </h3>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold text-xs border border-emerald-500/30">
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-normal text-xs border border-emerald-500/30">
                 {pos.length} Draf PO Diterbitkan
               </span>
             </div>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Integrasi Gudang (Warehouse) $\rightarrow$ Pengadaan (Purchasing): Produk kritis otomatis dikelompokkan berdasarkan supplier utama.
+            <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400 mt-0.5">
+              Integrasi Gudang (Warehouse) ➔ Pengadaan (Purchasing): Produk kritis otomatis dikelompokkan berdasarkan supplier utama.
             </p>
           </div>
         </div>
@@ -79,31 +79,31 @@ export const AutoReorderSummaryModal: React.FC<AutoReorderSummaryModalProps> = (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-4 shrink-0">
           <div
             className={`p-3 rounded-xl border ${
-              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              isLight ? 'bg-slate-50 border-slate-200 shadow-sm' : 'bg-[#0d1117] border-[#30363d]'
             }`}
           >
-            <div className="text-[11px] text-gray-400">Total Draf PO Diterbitkan</div>
-            <div className="text-lg font-black font-mono text-amber-400 mt-0.5">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Total Draf PO Diterbitkan</div>
+            <div className="text-lg leading-7 font-semibold font-mono text-amber-400 mt-0.5">
               {pos.length} Berkas PO
             </div>
           </div>
           <div
             className={`p-3 rounded-xl border ${
-              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              isLight ? 'bg-slate-50 border-slate-200 shadow-sm' : 'bg-[#0d1117] border-[#30363d]'
             }`}
           >
-            <div className="text-[11px] text-gray-400">Jumlah SKU Di-restock</div>
-            <div className="text-lg font-black font-mono text-sky-400 mt-0.5">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Jumlah SKU Di-restock</div>
+            <div className="text-lg leading-7 font-semibold font-mono text-sky-400 mt-0.5">
               {totalItemsCount} SKU Kritis
             </div>
           </div>
           <div
             className={`p-3 rounded-xl border ${
-              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              isLight ? 'bg-slate-50 border-slate-200 shadow-sm' : 'bg-[#0d1117] border-[#30363d]'
             }`}
           >
-            <div className="text-[11px] text-gray-400">Estimasi Nilai Pengadaan</div>
-            <div className="text-lg font-black font-mono text-emerald-400 mt-0.5">
+            <div className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">Estimasi Nilai Pengadaan</div>
+            <div className="text-lg leading-7 font-semibold font-mono text-emerald-400 mt-0.5">
               Rp {totalAmountAllPos.toLocaleString('id-ID')}
             </div>
           </div>
@@ -231,7 +231,7 @@ export const AutoReorderSummaryModal: React.FC<AutoReorderSummaryModalProps> = (
                   onClose();
                   onGoToExecutive();
                 }}
-                className="px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99]"
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>Lihat Antrean Approval Eksekutif</span>
@@ -240,7 +240,7 @@ export const AutoReorderSummaryModal: React.FC<AutoReorderSummaryModalProps> = (
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold text-xs transition cursor-pointer shadow-sm"
+              className="px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-medium text-xs transition-all cursor-pointer shadow-sm active:scale-[0.99]"
             >
               Selesai & Tutup
             </button>

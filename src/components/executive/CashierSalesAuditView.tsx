@@ -6,7 +6,6 @@ import {
   Receipt,
   Calendar,
   CalendarDays,
-  Search,
   Download,
   Printer,
   RotateCcw,
@@ -22,7 +21,6 @@ import {
   Layers,
   Sparkles,
   FileText,
-  X,
 } from 'lucide-react';
 
 interface CashierSalesAuditViewProps {
@@ -40,6 +38,12 @@ export interface AggregatedSalesItem {
   unitPrice: number;
   totalPrice: number;
   unit?: string;
+}
+
+export interface DateGroupItem {
+  date: string;
+  formattedDate: string;
+  items: AggregatedSalesItem[];
 }
 
 export type SortColumnField =
@@ -115,6 +119,8 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
 
   // Mode Filter: 'MONTH_YEAR' atau 'DATE_RANGE'
   const [filterMode, setFilterMode] = useState<PeriodMode>('MONTH_YEAR');
+  const [reportType, setReportType] = useState<'TRANSACTIONS' | 'PRODUCTS'>('TRANSACTIONS');
+  const [selectedTerminal, setSelectedTerminal] = useState<string>('ALL');
 
   // Filter Bulan & Tahun (Default: Oktober 2026 sesuai tanggal sistem ERP)
   const [selectedMonth, setSelectedMonth] = useState<number>(10); // 1 - 12 (Oktober = 10)
@@ -124,8 +130,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
   const [startDate, setStartDate] = useState<string>('2026-10-01');
   const [endDate, setEndDate] = useState<string>('2026-10-31');
 
-  // Search Barcode / Nama Produk / Category / Packaging
-  const [searchQuery, setSearchQuery] = useState<string>('');
+
 
   // Sorting Table 8 Kolom
   const [sortField, setSortField] = useState<SortColumnField>('totalPrice');
@@ -206,7 +211,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
     const orderMap = new Map<string, Sale>();
     
     // 1. Masukkan data riil dari context
-    [...sales, ...salesHistory].forEach((sale) => {
+    [...(sales || []), ...(salesHistory || [])].forEach((sale) => {
       if (sale && (sale.transaction_id || (sale as any).id)) {
         const id = sale.transaction_id || (sale as any).id;
         orderMap.set(id, sale);
@@ -221,13 +226,13 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
       return d === '2026-10';
     });
 
-    if (!hasOctoberSales && products.length > 0) {
+    if (!hasOctoberSales && (products || []).length > 0) {
       // Buat struk kasir realistis untuk periode Oktober 2026
-      const realisticRetailProducts = products.filter(
-        (p) => p.itemType !== 'RAW_MATERIAL' && (p.sell_price || p.sellingPrice || 0) > 0
+      const realisticRetailProducts = (products || []).filter(
+        (p) => p && p.itemType !== 'RAW_MATERIAL' && (p.sell_price || p.sellingPrice || 0) > 0
       );
 
-      const catalog = realisticRetailProducts.length > 0 ? realisticRetailProducts : products;
+      const catalog = realisticRetailProducts.length > 0 ? realisticRetailProducts : (products || []);
 
       // Generate realistic daily cashier shifts across October 2026
       const octDates = [
@@ -238,7 +243,8 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
       octDates.forEach((dateStr, dIdx) => {
         // Setiap hari ada 3-4 struk kasir
         for (let receiptNum = 1; receiptNum <= 3; receiptNum++) {
-          const transId = `TRX-${dateStr.replace(/-/g, '')}-POS${dIdx + 1}${receiptNum}`;
+          const termIdx = (dIdx % 6) + 1;
+          const transId = `TRX-${dateStr.replace(/-/g, '')}-T0${termIdx}-${receiptNum}`;
           if (orderMap.has(transId)) return;
 
           // Pilih 3-5 item produk
@@ -266,17 +272,18 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
 
           orderMap.set(transId, {
             transaction_id: transId,
-            receipt_number: `RCP-POS-${dateStr.slice(5).replace('-', '')}-${String(receiptNum).padStart(3, '0')}`,
+            receipt_number: `RCP-T0${termIdx}-${dateStr.slice(5).replace('-', '')}-${String(receiptNum).padStart(3, '0')}`,
             date: dateStr,
-            cashier_id: 'USR-003',
+            cashier_id: `USR-00${termIdx}`,
             cashier_name: dIdx % 2 === 0 ? 'Andi Pratama' : 'Dewi Lestari',
-            terminal_name: `KASIR 0${(dIdx % 3) + 1}`,
+            terminal_id: `T-0${termIdx}`,
+            terminal_name: `KASIR 0${termIdx} (${termIdx === 1 ? 'Retail' : termIdx === 2 ? 'F&B' : termIdx === 3 ? 'Hardware' : termIdx === 4 ? 'Fashion' : termIdx === 5 ? 'Apotek' : 'Workshop'})`,
             customer_name: 'Pelanggan Umum (Walk-in)',
             items_summary: items.map((it) => `${it.product.name} (${it.quantity})`).join(', '),
             subtotal: total,
             discount: 0,
-            total_amount: total,
-            payment_method: (dIdx % 2 === 0 ? 'QRIS' : 'CASH') as any,
+            total_amount: Math.round(total * 1.11),
+            payment_method: (dIdx % 3 === 0 ? 'QRIS' : dIdx % 3 === 1 ? 'CASH' : 'DEBIT') as any,
             status: 'PAID',
             created_at: `${dateStr} 10:30:00`,
             items,
@@ -288,7 +295,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
     return Array.from(orderMap.values());
   }, [sales, salesHistory, products]);
 
-  // Filter struk berdasarkan rentang tanggal aktif
+  // Filter struk berdasarkan rentang tanggal & terminal aktif
   const filteredOrders = useMemo(() => {
     const startTimestamp = new Date(activeStart + 'T00:00:00').getTime();
     const endTimestamp = new Date(activeEnd + 'T23:59:59').getTime();
@@ -303,9 +310,63 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
         : rawDate.split(' ')[0];
 
       const saleTime = new Date(datePart + 'T12:00:00').getTime();
-      return saleTime >= startTimestamp && saleTime <= endTimestamp;
+      if (saleTime < startTimestamp || saleTime > endTimestamp) return false;
+
+      if (selectedTerminal !== 'ALL') {
+        const termName = (sale.terminal_name || '').toUpperCase();
+        const termId = (sale.terminalId || sale.terminal_id || '').toUpperCase();
+        const target = selectedTerminal.toUpperCase();
+        if (!termName.includes(target) && !termId.includes(target)) {
+          return false;
+        }
+      }
+
+      return true;
     });
-  }, [allCompletedOrders, activeStart, activeEnd]);
+  }, [allCompletedOrders, activeStart, activeEnd, selectedTerminal]);
+
+  // Transaksi Rows & Summary untuk reportType === 'TRANSACTIONS'
+  const transactionRows = useMemo(() => {
+    return filteredOrders.map((sale, idx) => {
+      const qty = (sale.items || []).reduce((sum, it) => sum + (it.quantity || 1), 0);
+      const subtotal = sale.subtotal || sale.total_amount || 0;
+      const discount = sale.discount || 0;
+      const tax = (sale as any).tax || Math.round(subtotal * 0.11);
+      const totalAmount = sale.total_amount || (subtotal - discount + tax);
+      const paymentMethod = sale.payment_method || 'CASH';
+      const status = sale.status || 'PAID';
+      const terminalKasir = `${sale.terminal_name || 'KASIR 01'} (${sale.cashier_name || 'Staff'})`;
+
+      return {
+        no: idx + 1,
+        invoiceNo: sale.receipt_number || sale.transaction_id || `TRX-${idx}`,
+        dateTime: sale.created_at || sale.date || '-',
+        terminalKasir,
+        qty,
+        subtotal,
+        discount,
+        tax,
+        totalAmount,
+        status,
+        paymentMethod,
+      };
+    });
+  }, [filteredOrders]);
+
+  const transactionSummary = useMemo(() => {
+    const totalRevenue = transactionRows.reduce((sum, r) => sum + r.totalAmount, 0);
+    const totalTransactions = transactionRows.length;
+    const totalGrossProfit = Math.round(totalRevenue * 0.32); // Est 32% margin
+    const basketSize = totalTransactions > 0 ? Math.round(totalRevenue / totalTransactions) : 0;
+    const totalQty = transactionRows.reduce((sum, r) => sum + r.qty, 0);
+    return {
+      totalRevenue,
+      totalTransactions,
+      totalGrossProfit,
+      basketSize,
+      totalQty,
+    };
+  }, [transactionRows]);
 
   // Agregasi Data: Kelompokkan item berdasarkan Barcode / Code ID,
   // lalu jumlahkan QTY dan Total Subtotal Harga secara presisi dengan data Category, Detail Name & Packaging
@@ -392,20 +453,8 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
       }
     );
 
-    // Filter berdasarkan query pencarian (Barcode, Nama Produk, Category, atau Packaging)
-    const filteredByQuery = list.filter((item) => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return (
-        item.barcode.toLowerCase().includes(q) ||
-        item.productName.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q) ||
-        item.packaging.toLowerCase().includes(q)
-      );
-    });
-
     // Sorting 8 Kolom
-    filteredByQuery.sort((a, b) => {
+    list.sort((a, b) => {
       let comparison = 0;
       if (sortField === 'no') {
         comparison = a.no - b.no;
@@ -428,11 +477,11 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
     });
 
     // Re-index No urut setelah sorting
-    return filteredByQuery.map((item, idx) => ({
+    return list.map((item, idx) => ({
       ...item,
       no: idx + 1,
     }));
-  }, [filteredOrders, searchQuery, sortField, sortOrder]);
+  }, [filteredOrders, sortField, sortOrder]);
 
   // Ringkasan Total Metrik
   const summaryMetrics = useMemo(() => {
@@ -459,205 +508,214 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
     }
   };
 
-  // Unduh Excel (.xlsx) mengikuti standar format Toko MD Mart dengan 8 Kolom Lengkap
-  const exportToExcel = () => {
-    if (aggregatedItems.length === 0) return;
+  // Grouping items by date for table display
 
-    const rawStoreName = businessProfile?.name || 'TOKO MD MART';
-    const storeAddress = businessProfile?.address || 'Jl. Raya Utama No. 88, Kawasan Niaga';
-    const userName = currentUser?.name || 'Dewi Lestari';
+  const dateGroupedItems: DateGroupItem[] = useMemo(() => {
+    const map = new Map<string, Map<string, {
+      barcode: string;
+      category: string;
+      productName: string;
+      packaging: string;
+      qty: number;
+      totalPrice: number;
+      priceSum: number;
+      priceCount: number;
+    }>>();
 
-    // Format Lembar Kerja Excel Mengikuti Standar Toko MD Mart:
-    // Baris 1: LAPORAN PENJUALAN PER BARANG | [NAMA TOKO]
-    // Baris 2: Alamat Lengkap Toko
-    // Baris 3: PERIODE : [Tgl Awal] S/D [Tgl Akhir]
-    // Baris 4: JENIS : CASH / QRIS / DEBIT / SEMUA METODE | Operator: [Nama User Aktif]
-    // Baris 5: (Spasi kosong pemisah)
-    // Baris 6: Header Tabel 8 Kolom: [NO, CATEGORY, BARCODE / CODE ID, NAMA PRODUCT DETAIL, PACKAGING, QTY, HARGA, TOTAL HARGA]
-    const aoaData: any[][] = [
-      [`LAPORAN PENJUALAN PER BARANG | ${rawStoreName.toUpperCase()}`],
-      [storeAddress],
-      [`PERIODE : ${activeStart} S/D ${activeEnd}`],
-      [`JENIS : CASH / QRIS / DEBIT / SEMUA METODE | Operator: ${userName}`],
-      [],
-      ['NO', 'CATEGORY', 'BARCODE / CODE ID', 'NAMA PRODUCT DETAIL', 'PACKAGING', 'QTY', 'HARGA', 'TOTAL HARGA'],
-    ];
+    (filteredOrders || []).forEach((sale) => {
+      if (!sale) return;
+      const rawDate = (sale.date || sale.created_at || '2026-10-20').substring(0, 10);
+      const items = sale.items || [];
 
-    // Baris Data: Format nominal angka murni rapi tanpa karakter rusak
-    aggregatedItems.forEach((item) => {
-      aoaData.push([
-        item.no,
-        item.category,
-        item.barcode,
-        item.productName,
-        item.packaging,
-        item.qty,
-        item.unitPrice,
-        item.totalPrice,
-      ]);
+      if (!map.has(rawDate)) {
+        map.set(rawDate, new Map());
+      }
+      const itemMap = map.get(rawDate)!;
+
+      items.forEach((item) => {
+        if (!item) return;
+        const prod = item.product;
+        const barcode =
+          prod?.barcode ||
+          prod?.plu ||
+          (prod as any)?.code ||
+          (prod as any)?.sku ||
+          prod?.id ||
+          'NO-BARCODE';
+
+        const category = extractProductCategory(prod, item);
+        const productName = extractProductDetailName(prod, item);
+        const packaging = extractProductPackaging(prod, item);
+
+        const qty = Number(item.quantity || 1);
+        const sellPrice =
+          Number(item.customPrice) ||
+          Number(prod?.sell_price) ||
+          Number(prod?.sellingPrice) ||
+          (item.subtotal && qty > 0 ? Math.round(item.subtotal / qty) : 0);
+
+        const subtotal = Number(item.subtotal) || qty * sellPrice;
+
+        if (itemMap.has(barcode)) {
+          const existing = itemMap.get(barcode)!;
+          existing.qty += qty;
+          existing.totalPrice += subtotal;
+          existing.priceSum += sellPrice;
+          existing.priceCount += 1;
+        } else {
+          itemMap.set(barcode, {
+            barcode,
+            category,
+            productName,
+            packaging,
+            qty,
+            totalPrice: subtotal,
+            priceSum: sellPrice,
+            priceCount: 1,
+          });
+        }
+      });
     });
 
-    // Baris Paling Bawah: Baris TOTAL akumulasi Qty dan Grand Total Nilai Rp
-    aoaData.push([
-      '',
-      '',
-      '',
-      'TOTAL PENJUALAN',
-      '',
-      summaryMetrics.totalQty,
-      '',
-      summaryMetrics.totalRevenue,
-    ]);
+    const sortedDates = Array.from(map.keys()).sort((a, b) => b.localeCompare(a));
+    let globalNo = 1;
 
-    const worksheet = XLSX.utils.aoa_to_sheet(aoaData);
+    return sortedDates.map((dateStr) => {
+      const itemMap = map.get(dateStr)!;
+      const groupList: AggregatedSalesItem[] = Array.from(itemMap.values()).map(
+        (entry) => {
+          const unitPrice =
+            entry.qty > 0
+              ? Math.round(entry.totalPrice / entry.qty)
+              : Math.round(entry.priceSum / entry.priceCount);
 
-    // Atur lebar kolom (column widths) 8 kolom agar rapi dan terbaca di Excel
-    worksheet['!cols'] = [
-      { wch: 6 },  // NO
-      { wch: 18 }, // CATEGORY
-      { wch: 18 }, // BARCODE / CODE ID
-      { wch: 45 }, // NAMA PRODUCT DETAIL
-      { wch: 12 }, // PACKAGING
-      { wch: 12 }, // QTY
-      { wch: 16 }, // HARGA
-      { wch: 20 }, // TOTAL HARGA
+          return {
+            no: globalNo++,
+            category: entry.category,
+            barcode: entry.barcode,
+            productName: entry.productName,
+            packaging: entry.packaging,
+            qty: entry.qty,
+            unitPrice,
+            totalPrice: entry.totalPrice,
+          };
+        }
+      );
+
+      groupList.sort((a, b) => a.productName.localeCompare(b.productName));
+
+      const parts = dateStr.split('-');
+      const formattedDate =
+        parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : dateStr;
+
+      return {
+        date: dateStr,
+        formattedDate,
+        items: groupList,
+      };
+    });
+  }, [filteredOrders]);
+
+  // Unduh Excel (.xlsx) dengan Header Dokumen Resmi & Tabel Terstruktur
+  const exportToExcel = () => {
+    const rawStoreName = businessProfile?.name || 'LIMA SMART';
+    const storeAddress = businessProfile?.address || 'Jl. Raya Utama No. 88, Kawasan Niaga';
+    const userName = currentUser?.name || 'Kasir / Staff';
+    const nowStr = new Date().toLocaleString('id-ID');
+
+    const aoaData: any[][] = [
+      [rawStoreName.toUpperCase()],
+      [storeAddress],
+      ['LAPORAN ANALISIS PENJUALAN HARIAN & PRODUK'],
+      [`Periode: ${activeStart} s/d ${activeEnd}`],
+      [`Tanggal Penarikan: ${nowStr} | Operator: ${userName}`],
+      [],
     ];
 
+    if (reportType === 'TRANSACTIONS') {
+      aoaData.push(['NO', 'NO FAKTUR / STRUK', 'WAKTU / TANGGAL', 'TERMINAL & KASIR', 'QTY', 'SUBTOTAL', 'DISKON', 'PPN', 'TOTAL AKHIR', 'STATUS', 'METODE BAYAR']);
+      transactionRows.forEach((r) => {
+        aoaData.push([r.no, r.invoiceNo, r.dateTime, r.terminalKasir, r.qty, r.subtotal, r.discount, r.tax, r.totalAmount, r.status, r.paymentMethod]);
+      });
+      aoaData.push(['', '', '', 'TOTAL KONSOLIDASI', transactionSummary.totalQty, '', '', '', transactionSummary.totalRevenue, '', '']);
+    } else {
+      aoaData.push(['NO', 'CATEGORY', 'BARCODE / CODE ID', 'NAMA PRODUCT DETAIL', 'PACKAGING', 'QTY', 'HARGA', 'TOTAL HARGA']);
+      aggregatedItems.forEach((item) => {
+        aoaData.push([item.no, item.category, item.barcode, item.productName, item.packaging, item.qty, item.unitPrice, item.totalPrice]);
+      });
+      aoaData.push(['', '', '', 'TOTAL PENJUALAN', '', summaryMetrics.totalQty, '', summaryMetrics.totalRevenue]);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet(aoaData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Laporan Penjualan Kasir');
-
-    // Sistem Penamaan File Otomatis: [NAMA_TOKO]_SALES_PRODUCT_[YYYYMMDD_AWAL]_sd_[YYYYMMDD_AKHIR].xlsx
-    const cleanStoreCode = rawStoreName
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '') || 'MD_MART';
-
-    const yyyymmddStart = activeStart.replace(/-/g, '');
-    const yyyymmddEnd = activeEnd.replace(/-/g, '');
-    const fileName = `${cleanStoreCode}_SALES_PRODUCT_${yyyymmddStart}_sd_${yyyymmddEnd}.xlsx`;
-
+    
+    const cleanStoreCode = rawStoreName.toUpperCase().replace(/[^A-Z0-9]/g, '_') || 'LIMA_SMART';
+    const fileName = `${cleanStoreCode}_SALES_REPORT_${activeStart.replace(/-/g, '')}_sd_${activeEnd.replace(/-/g, '')}.xlsx`;
     XLSX.writeFile(workbook, fileName);
-
     showToast?.(`File Excel berhasil diunduh: ${fileName}`);
   };
 
-  // Unduh Text Dot-Matrix (.txt) super ringan fixed-width 130 karakter mengikuti standar POS Vita Mart
+  // Unduh Text Dot-Matrix (.txt) ringkas & rapi dengan Header Dokumen Resmi
   const downloadDotMatrixTxt = () => {
-    if (aggregatedItems.length === 0) return;
-
-    const storeName = (businessProfile?.name || 'VITA MART').toUpperCase();
+    const storeName = (businessProfile?.name || 'LIMA SMART').toUpperCase();
     const storeAddress = businessProfile?.address || 'Jl. Raya Utama No. 88, Kawasan Niaga';
-    const userName = currentUser?.name || 'Dewi Lestari';
+    const userName = currentUser?.name || 'Kasir / Staff';
+    const nowStr = new Date().toLocaleString('id-ID');
 
-    // Tanggal & Jam Cetak realtime
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const printDateTime = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-
-    // Standar lebar fixed-width 130 karakter printer dot matrix POS
     const pageWidth = 130;
     const divider = '-'.repeat(pageWidth);
     const doubleDivider = '='.repeat(pageWidth);
 
-    // Baris 1: [NAMA TOKO / ENTERPRISE] rata kiri, Tanggal & Jam Cetak realtime di kanan, Halaman: 1
-    const rightHeader1 = `Tgl: ${printDateTime}  Halaman: 1`;
-    const leftHeader1 = `[${storeName}]`;
-    const spaces1 = Math.max(2, pageWidth - leftHeader1.length - rightHeader1.length);
-    const line1 = `${leftHeader1}${' '.repeat(spaces1)}${rightHeader1}`;
-
-    // Baris 2: Alamat Toko resmi dan Nama Pengguna yang mencetak (misal: "Dewi Lestari")
-    const rightHeader2 = `Dicetak Oleh: ${userName}`;
-    const maxAddrLen = pageWidth - rightHeader2.length - 14;
-    const cleanAddr = storeAddress.length > maxAddrLen ? storeAddress.slice(0, maxAddrLen - 3) + '...' : storeAddress;
-    const leftHeader2 = `Alamat Toko: ${cleanAddr}`;
-    const spaces2 = Math.max(2, pageWidth - leftHeader2.length - rightHeader2.length);
-    const line2 = `${leftHeader2}${' '.repeat(spaces2)}${rightHeader2}`;
-
-    // Baris 3: *** LAPORAN PENJUALAN KASIR PER BARANG ***
-    const title = '*** LAPORAN PENJUALAN KASIR PER BARANG ***';
-    const titlePadding = Math.max(0, Math.floor((pageWidth - title.length) / 2));
-    const line3 = `${' '.repeat(titlePadding)}${title}`;
-
-    // Baris 4: Periode Transaksi: [Tgl Awal] s/d [Tgl Akhir] (Semua Shift & Terminal)
-    const line4 = `Periode Transaksi : ${activeStart} s/d ${activeEnd} (Semua Shift & Terminal)`;
-
-    // Header Kolom Fixed-Width 130 Karakter (8 Kolom):
-    // No.(5) + 2 + Category(15) + 2 + Barcode(14) + 2 + Nama Product Detail(38) + 2 + Pack.(7) + 2 + Qty(7) + 2 + Harga(14) + 2 + Total Harga(16) = 130
-    const colHeader =
-      'No.'.padStart(5, ' ') +
-      '  ' +
-      'Category'.padEnd(15, ' ') +
-      '  ' +
-      'Barcode'.padEnd(14, ' ') +
-      '  ' +
-      'Nama Product Detail'.padEnd(38, ' ') +
-      '  ' +
-      'Pack.'.padEnd(7, ' ') +
-      '  ' +
-      'Qty'.padStart(7, ' ') +
-      '  ' +
-      'Harga (Rp)'.padStart(14, ' ') +
-      '  ' +
-      'Total Harga (Rp)'.padStart(16, ' ');
-
-    // Kolom Data Rata Spasi Fixed-Width
-    const dataLines = aggregatedItems.map((item) => {
-      const seq = String(item.no).padStart(5, ' ');
-      const cat = item.category.slice(0, 15).padEnd(15, ' ');
-      const barcode = item.barcode.slice(0, 14).padEnd(14, ' ');
-      const name = item.productName.slice(0, 38).padEnd(38, ' ');
-      const pack = (item.packaging || 'Pcs').slice(0, 7).padEnd(7, ' ');
-      const qty = String(item.qty.toLocaleString('id-ID')).padStart(7, ' ');
-      const price = item.unitPrice.toLocaleString('id-ID').padStart(14, ' ');
-      const total = item.totalPrice.toLocaleString('id-ID').padStart(16, ' ');
-      return `${seq}  ${cat}  ${barcode}  ${name}  ${pack}  ${qty}  ${price}  ${total}`;
-    });
-
-    // Baris Total Akumulasi Tabel (89 + 7 + 18 + 16 = 130)
-    const totalQtyStr = summaryMetrics.totalQty.toLocaleString('id-ID');
-    const totalRevStr = summaryMetrics.totalRevenue.toLocaleString('id-ID');
-    const totalLabel = `TOTAL KESELURUHAN (${summaryMetrics.uniqueProductsCount} ITEM):`.padEnd(89, ' ');
-    const tableTotalLine = `${totalLabel}${totalQtyStr.padStart(7, ' ')}${' '.repeat(18)}${totalRevStr.padStart(16, ' ')}`;
-
-    // Footer: Ringkasan Total Akumulasi Qty Terjual dan Grand Total Nilai Penjualan (Rp)
-    const footerLines = [
-      divider,
-      tableTotalLine,
+    const lines = [
+      storeName,
+      `Alamat: ${storeAddress}`,
+      'LAPORAN ANALISIS PENJUALAN HARIAN & PRODUK',
+      `Periode: ${activeStart} s/d ${activeEnd}`,
+      `Tanggal Penarikan: ${nowStr} | Operator: ${userName}`,
       doubleDivider,
-      `Ringkasan Grand Total Penjualan Kasir:`,
-      `  • Grand Total Nilai Penjualan (Rp) : Rp ${summaryMetrics.totalRevenue.toLocaleString('id-ID')}`,
-      `  • Total Akumulasi Qty Terjual      : ${summaryMetrics.totalQty.toLocaleString('id-ID')} Unit / Pcs`,
-      `  • Total Dokumen Struk POS Selesai  : ${summaryMetrics.totalReceipts} Struk Kasir`,
-      divider,
-      '*** AKHIR DOKUMEN LAPORAN PENJUALAN KASIR - STANDAR POS VITA MART ***',
     ];
 
-    const allContent = [
-      line1,
-      line2,
-      line3,
-      line4,
-      divider,
-      colHeader,
-      divider,
-      ...dataLines,
-      ...footerLines,
-    ].join('\r\n');
+    if (reportType === 'TRANSACTIONS') {
+      const colHeader = 'No.'.padStart(4, ' ') + '  ' + 'No Faktur'.padEnd(18, ' ') + '  ' + 'Waktu/Tanggal'.padEnd(20, ' ') + '  ' + 'Terminal & Kasir'.padEnd(26, ' ') + '  ' + 'Qty'.padStart(6, ' ') + '  ' + 'Total Akhir (Rp)'.padStart(16, ' ') + '  ' + 'Metode'.padEnd(10, ' ');
+      lines.push(colHeader);
+      lines.push(divider);
 
-    // Sistem Penamaan File Otomatis: [NAMA_TOKO]_SALES_PRODUCT_[YYYYMMDD_AWAL]_sd_[YYYYMMDD_AKHIR].txt
-    const cleanStoreCode = (businessProfile?.name || 'VITA_MART')
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_|_$/g, '') || 'VITA_MART';
+      transactionRows.forEach((r) => {
+        const no = String(r.no).padStart(4, ' ');
+        const inv = r.invoiceNo.padEnd(18, ' ');
+        const dt = r.dateTime.padEnd(20, ' ');
+        const term = r.terminalKasir.slice(0, 26).padEnd(26, ' ');
+        const qty = String(r.qty).padStart(6, ' ');
+        const tot = r.totalAmount.toLocaleString('id-ID').padStart(16, ' ');
+        const meth = r.paymentMethod.padEnd(10, ' ');
+        lines.push(`${no}  ${inv}  ${dt}  ${term}  ${qty}  ${tot}  ${meth}`);
+      });
+      lines.push(doubleDivider);
+      lines.push(`Total Transaksi: ${transactionSummary.totalTransactions} Struk | Total Qty: ${transactionSummary.totalQty} | Grand Total: Rp ${transactionSummary.totalRevenue.toLocaleString('id-ID')}`);
+    } else {
+      const colHeader = 'No.'.padStart(4, ' ') + '  ' + 'Category'.padEnd(15, ' ') + '  ' + 'Barcode'.padEnd(14, ' ') + '  ' + 'Nama Produk Detail'.padEnd(38, ' ') + '  ' + 'Qty'.padStart(6, ' ') + '  ' + 'Harga (Rp)'.padStart(14, ' ') + '  ' + 'Total (Rp)'.padStart(16, ' ');
+      lines.push(colHeader);
+      lines.push(divider);
 
-    const yyyymmddStart = activeStart.replace(/-/g, '');
-    const yyyymmddEnd = activeEnd.replace(/-/g, '');
-    const fileName = `${cleanStoreCode}_SALES_PRODUCT_${yyyymmddStart}_sd_${yyyymmddEnd}.txt`;
+      aggregatedItems.forEach((item) => {
+        const no = String(item.no).padStart(4, ' ');
+        const cat = item.category.slice(0, 15).padEnd(15, ' ');
+        const bar = item.barcode.slice(0, 14).padEnd(14, ' ');
+        const name = item.productName.slice(0, 38).padEnd(38, ' ');
+        const qty = String(item.qty).padStart(6, ' ');
+        const prc = item.unitPrice.toLocaleString('id-ID').padStart(14, ' ');
+        const tot = item.totalPrice.toLocaleString('id-ID').padStart(16, ' ');
+        lines.push(`${no}  ${cat}  ${bar}  ${name}  ${qty}  ${prc}  ${tot}`);
+      });
+      lines.push(doubleDivider);
+      lines.push(`Grand Total Penjualan Produk: Rp ${summaryMetrics.totalRevenue.toLocaleString('id-ID')}`);
+    }
 
-    // Download text blob
-    const blob = new Blob([allContent], { type: 'text/plain;charset=utf-8' });
+    const cleanStoreCode = storeName.replace(/[^A-Z0-9]/g, '_') || 'LIMA_SMART';
+    const fileName = `${cleanStoreCode}_SalesReport.txt`;
+
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -667,7 +725,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    showToast?.(`File TXT Dot-Matrix berhasil diunduh: ${fileName}`);
+    showToast?.(`File TXT berhasil diunduh: ${fileName}`);
   };
 
   // Print Rekapitulasi Audit
@@ -681,14 +739,14 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
       <div
         className={`p-5 rounded-2xl border transition duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1.5">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal tracking-wide border ${
                 isLight
                   ? 'bg-emerald-50 text-emerald-800 border-slate-200'
                   : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
@@ -697,30 +755,30 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 POS Struk & Completed Orders
               </span>
               <span className="text-xs text-slate-500">•</span>
-              <span className={`text-xs font-mono font-bold ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+              <span className={`text-[11px] font-mono font-normal tracking-wide ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
                 {filteredOrders.length} Struk Teranalisis
               </span>
             </div>
             <h3
-              className={`text-xl sm:text-2xl font-black tracking-tight ${
+              className={`text-xl leading-7 font-medium tracking-tight ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
-              Laporan Penjualan Kasir (POS Sales Audit)
+              {isEn ? 'Cashier Sales Audit Report (POS Sales Audit)' : 'Laporan Penjualan Kasir'}
             </h3>
-            <p className="text-xs text-[#8b949e]">
+            <p className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400">
               Rekapitulasi agregasi transaksi kasir riil berdasarkan barcode/item code dengan filter periode bulan, rentang tanggal, dan preset cepat.
             </p>
           </div>
 
           {/* Action Buttons: TXT Ringan, Excel & Cetak Rekap (Kompak Sejajar 1 Baris) */}
-          <div className="flex items-center flex-nowrap gap-2 sm:gap-2.5 shrink-0 overflow-x-auto">
+          <div className="flex items-center flex-nowrap gap-2 sm:gap-2.5 shrink-0 overflow-x-auto print:hidden">
             {/* Tombol Biru Modern: TXT Ringan (.txt) */}
             <button
               type="button"
               onClick={downloadDotMatrixTxt}
               disabled={aggregatedItems.length === 0}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 transition cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 active:scale-[0.99] transition-all cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
                 isLight
                   ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 disabled:opacity-50'
                   : 'bg-blue-600 hover:bg-blue-500 text-white font-medium border-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.35)] disabled:opacity-50'
@@ -728,7 +786,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
               title="Unduh format TXT dot-matrix ringan"
             >
               <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span className="whitespace-nowrap shrink-0">TXT Ringan (.txt)</span>
+              <span className="whitespace-nowrap shrink-0 font-medium">TXT Ringan (.txt)</span>
             </button>
 
             {/* Tombol Hijau: Excel (.xlsx) */}
@@ -736,15 +794,15 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
               type="button"
               onClick={exportToExcel}
               disabled={aggregatedItems.length === 0}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 transition cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 active:scale-[0.99] transition-all cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
                 isLight
                   ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 disabled:opacity-50'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)] disabled:opacity-50'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-medium border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)] disabled:opacity-50'
               }`}
               title="Unduh format spreadsheet Excel"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span className="whitespace-nowrap shrink-0">Excel (.xlsx)</span>
+              <span className="whitespace-nowrap shrink-0 font-medium">Excel (.xlsx)</span>
             </button>
 
             {/* Tombol Cetak Rekap */}
@@ -752,7 +810,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
               type="button"
               onClick={handlePrint}
               disabled={aggregatedItems.length === 0}
-              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 transition cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
+              className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 sm:gap-2 active:scale-[0.99] transition-all cursor-pointer border whitespace-nowrap shrink-0 shadow-sm ${
                 isLight
                   ? 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 disabled:opacity-50'
                   : 'bg-[#21262d] hover:bg-[#30363d] text-slate-200 border-[#30363d] disabled:opacity-50'
@@ -760,7 +818,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
               title="Cetak Rekapitulasi Kasir"
             >
               <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span className="whitespace-nowrap shrink-0">Cetak Rekap</span>
+              <span className="whitespace-nowrap shrink-0 font-medium">Cetak Rekap</span>
             </button>
           </div>
         </div>
@@ -768,130 +826,119 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Omzet */}
+        {/* Total Omzet Kotor */}
         <div
-          className={`p-4 rounded-xl border transition ${
+          className={`p-4 rounded-xl border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-[#8b949e] mb-1">
-            <span className="font-semibold">Total Omzet Penjualan</span>
+          <div className="flex items-center justify-between text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 mb-1">
+            <span>TOTAL OMZET KOTOR</span>
             <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500">
               <Coins className="w-4 h-4" />
             </div>
           </div>
           <div
-            className={`text-xl sm:text-2xl font-black ${
+            className={`text-lg leading-7 font-mono font-semibold ${
               isLight ? 'text-slate-900' : 'text-white'
             }`}
           >
-            Rp {summaryMetrics.totalRevenue.toLocaleString('id-ID')}
+            Rp {transactionSummary.totalRevenue.toLocaleString('id-ID')}
           </div>
-          <div className="text-[11px] text-[#8b949e] mt-1 flex items-center gap-1.5">
-            <span className="text-emerald-500 font-bold">Periode:</span>
-            <span className="font-mono">{periodLabel}</span>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1.5">
+            <span className="text-emerald-500 font-medium">Terminal:</span>
+            <span className="font-mono">{selectedTerminal === 'ALL' ? 'Semua Terminal' : selectedTerminal}</span>
           </div>
         </div>
 
-        {/* Total Qty */}
+        {/* Total Transaksi */}
         <div
-          className={`p-4 rounded-xl border transition ${
+          className={`p-4 rounded-xl border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-[#8b949e] mb-1">
-            <span className="font-semibold">Total Qty Terjual</span>
+          <div className="flex items-center justify-between text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 mb-1">
+            <span>TOTAL TRANSAKSI</span>
             <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
               <ShoppingBag className="w-4 h-4" />
             </div>
           </div>
           <div
-            className={`text-xl sm:text-2xl font-black ${
+            className={`text-lg leading-7 font-mono font-semibold ${
               isLight ? 'text-slate-900' : 'text-white'
             }`}
           >
-            {summaryMetrics.totalQty.toLocaleString('id-ID')}{' '}
-            <span className="text-sm font-normal text-slate-500">Unit / Pcs</span>
+            {transactionSummary.totalTransactions.toLocaleString('id-ID')}{' '}
+            <span className="text-xs font-normal text-slate-500">Struk</span>
           </div>
-          <div className="text-[11px] text-[#8b949e] mt-1">
-            Volume agregat baris produk kasir
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+            Total Qty Terjual: <span className="text-emerald-500 dark:text-emerald-400 font-mono font-semibold">{transactionSummary.totalQty.toLocaleString('id-ID')}</span> Unit
           </div>
         </div>
 
-        {/* Item Produk Unik */}
+        {/* Total Laba Kotor / Margin */}
         <div
-          className={`p-4 rounded-xl border transition ${
+          className={`p-4 rounded-xl border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-[#8b949e] mb-1">
-            <span className="font-semibold">Produk Unik (SKU / Barcode)</span>
+          <div className="flex items-center justify-between text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 mb-1">
+            <span>EST. LABA KOTOR</span>
             <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-500">
               <Layers className="w-4 h-4" />
             </div>
           </div>
           <div
-            className={`text-xl sm:text-2xl font-black ${
-              isLight ? 'text-slate-900' : 'text-white'
+            className={`text-lg leading-7 font-mono font-semibold ${
+              isLight ? 'text-emerald-600' : 'text-emerald-400'
             }`}
           >
-            {summaryMetrics.uniqueProductsCount}{' '}
-            <span className="text-sm font-normal text-slate-500">Barang</span>
+            Rp {transactionSummary.totalGrossProfit.toLocaleString('id-ID')}
           </div>
-          <div className="text-[11px] text-[#8b949e] mt-1">
-            Dikelompokkan secara unik per barcode
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+            Estimasi margin rata-rata ~32%
           </div>
         </div>
 
-        {/* Struk Kasir / Receipts */}
+        {/* Rata-rata Belanja (Basket Size) */}
         <div
-          className={`p-4 rounded-xl border transition ${
+          className={`p-4 rounded-xl border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
             isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
           }`}
         >
-          <div className="flex items-center justify-between text-xs text-[#8b949e] mb-1">
-            <span className="font-semibold">Jumlah Struk / Transaksi</span>
+          <div className="flex items-center justify-between text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 mb-1">
+            <span>RATA-RATA BELANJA</span>
             <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
               <Receipt className="w-4 h-4" />
             </div>
           </div>
           <div
-            className={`text-xl sm:text-2xl font-black ${
+            className={`text-lg leading-7 font-mono font-semibold ${
               isLight ? 'text-slate-900' : 'text-white'
             }`}
           >
-            {summaryMetrics.totalReceipts}{' '}
-            <span className="text-sm font-normal text-slate-500">Struk POS</span>
+            Rp {transactionSummary.basketSize.toLocaleString('id-ID')}
           </div>
-          <div className="text-[11px] text-[#8b949e] mt-1">
-            Rata-rata:{' '}
-            <span className="font-mono font-bold text-slate-400">
-              Rp{' '}
-              {summaryMetrics.totalReceipts > 0
-                ? Math.round(
-                    summaryMetrics.totalRevenue / summaryMetrics.totalReceipts
-                  ).toLocaleString('id-ID')
-                : '0'}
-              /struk
-            </span>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+            Per transaksi struk kasir aktif
           </div>
         </div>
       </div>
 
       {/* Control Filter Bar (Bulan/Tahun, Rentang Tanggal, Quick Presets & Search) */}
       <div
-        className={`p-4 rounded-2xl border transition duration-200 space-y-4 ${
+        className={`p-4 rounded-2xl border transition duration-200 space-y-4 print:hidden ${
           isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -900,11 +947,11 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             <button
               type="button"
               onClick={() => setFilterMode('MONTH_YEAR')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 active:scale-[0.99] transition cursor-pointer ${
                 filterMode === 'MONTH_YEAR'
                   ? isLight
                     ? 'bg-white text-emerald-700 shadow-sm'
-                    : 'bg-emerald-500 text-slate-950 font-black'
+                    : 'bg-emerald-500 text-slate-950 font-medium'
                   : isLight
                   ? 'text-slate-600 hover:text-slate-900'
                   : 'text-slate-400 hover:text-white'
@@ -917,11 +964,11 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             <button
               type="button"
               onClick={() => setFilterMode('DATE_RANGE')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 active:scale-[0.99] transition cursor-pointer ${
                 filterMode === 'DATE_RANGE'
                   ? isLight
                     ? 'bg-white text-emerald-700 shadow-sm'
-                    : 'bg-emerald-500 text-slate-950 font-black'
+                    : 'bg-emerald-500 text-slate-950 font-medium'
                   : isLight
                   ? 'text-slate-600 hover:text-slate-900'
                   : 'text-slate-400 hover:text-white'
@@ -934,11 +981,11 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
 
           {/* Quick Preset Buttons (Ergonomic Spacing) */}
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-xs text-[#8b949e] font-semibold whitespace-nowrap">Tombol Cepat:</span>
+            <span className="text-xs text-[#8b949e] font-normal whitespace-nowrap">Tombol Cepat:</span>
             <button
               type="button"
               onClick={() => applyPreset('THIS_WEEK')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer whitespace-nowrap ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border active:scale-[0.99] transition cursor-pointer whitespace-nowrap ${
                 filterMode === 'DATE_RANGE' && startDate === '2026-10-19' && endDate === '2026-10-25'
                   ? isLight
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs'
@@ -954,7 +1001,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             <button
               type="button"
               onClick={() => applyPreset('THIS_MONTH')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer whitespace-nowrap ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border active:scale-[0.99] transition cursor-pointer whitespace-nowrap ${
                 filterMode === 'MONTH_YEAR' && selectedMonth === 10 && selectedYear === 2026
                   ? isLight
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs'
@@ -970,7 +1017,7 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             <button
               type="button"
               onClick={() => applyPreset('TODAY')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer whitespace-nowrap ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border active:scale-[0.99] transition cursor-pointer whitespace-nowrap ${
                 filterMode === 'DATE_RANGE' && startDate === '2026-10-20' && endDate === '2026-10-20'
                   ? isLight
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs'
@@ -1068,30 +1115,6 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             </div>
           )}
 
-          {/* Search Barcode / Product Name */}
-          <div className="relative w-full lg:w-80 shrink-0">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" />
-            <input
-              type="text"
-              placeholder="Cari Barcode / Code ID / Nama Produk..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full pl-9 pr-8 py-2 rounded-xl text-xs font-medium border transition outline-none focus:ring-2 focus:ring-emerald-500 ${
-                isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400'
-                  : 'bg-[#0d1117] border-[#30363d] text-white placeholder-slate-500'
-              }`}
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
         </div>
       </div>
 
@@ -1100,15 +1123,15 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
       <div
         className={`rounded-2xl border overflow-hidden transition duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr
-                className={`border-b select-none ${
+                className={`border-b select-none font-mono font-normal tracking-widest text-[11px] leading-4 uppercase ${
                   isLight
                     ? 'bg-slate-100/80 border-slate-200 text-slate-700'
                     : 'bg-[#0d1117] border-[#30363d] text-slate-300'
@@ -1117,12 +1140,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 1. NO */}
                 <th
                   onClick={() => handleSort('no')}
-                  className="py-3.5 px-3 font-bold text-center w-12 cursor-pointer hover:text-emerald-500 transition"
+                  className="py-3.5 px-3 text-center w-12 cursor-pointer hover:text-cyan-500 transition"
                 >
                   <div className="flex items-center justify-center gap-1">
                     <span>NO</span>
                     {sortField === 'no' && (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     )}
                   </div>
                 </th>
@@ -1130,12 +1153,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 2. CATEGORY */}
                 <th
                   onClick={() => handleSort('category')}
-                  className="py-3.5 px-3 font-bold cursor-pointer hover:text-emerald-500 transition w-36"
+                  className="py-3.5 px-3 cursor-pointer hover:text-cyan-500 transition w-36"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>CATEGORY</span>
                     {sortField === 'category' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1145,12 +1168,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 3. BARCODE / CODE ID */}
                 <th
                   onClick={() => handleSort('barcode')}
-                  className="py-3.5 px-3 font-bold cursor-pointer hover:text-emerald-500 transition w-36"
+                  className="py-3.5 px-3 cursor-pointer hover:text-cyan-500 transition w-36"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>BARCODE / CODE ID</span>
                     {sortField === 'barcode' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1160,12 +1183,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 4. NAMA PRODUCT DETAIL */}
                 <th
                   onClick={() => handleSort('productName')}
-                  className="py-3.5 px-3 font-bold cursor-pointer hover:text-emerald-500 transition min-w-[220px]"
+                  className="py-3.5 px-3 cursor-pointer hover:text-cyan-500 transition min-w-[220px]"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>NAMA PRODUCT DETAIL</span>
                     {sortField === 'productName' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1175,12 +1198,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 5. PACKAGING */}
                 <th
                   onClick={() => handleSort('packaging')}
-                  className="py-3.5 px-3 font-bold text-center cursor-pointer hover:text-emerald-500 transition w-24"
+                  className="py-3.5 px-3 text-center cursor-pointer hover:text-cyan-500 transition w-24"
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <span>PACKAGING</span>
                     {sortField === 'packaging' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1190,12 +1213,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 6. QTY */}
                 <th
                   onClick={() => handleSort('qty')}
-                  className="py-3.5 px-3 font-bold text-right cursor-pointer hover:text-emerald-500 transition w-24"
+                  className="py-3.5 px-3 text-right cursor-pointer hover:text-cyan-500 transition w-24"
                 >
                   <div className="flex items-center justify-end gap-1.5">
                     <span>QTY</span>
                     {sortField === 'qty' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1205,12 +1228,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 7. HARGA */}
                 <th
                   onClick={() => handleSort('unitPrice')}
-                  className="py-3.5 px-3 font-bold text-right cursor-pointer hover:text-emerald-500 transition w-32"
+                  className="py-3.5 px-3 text-right cursor-pointer hover:text-cyan-500 transition w-32"
                 >
                   <div className="flex items-center justify-end gap-1.5">
                     <span>HARGA</span>
                     {sortField === 'unitPrice' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1220,12 +1243,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                 {/* 8. TOTAL HARGA */}
                 <th
                   onClick={() => handleSort('totalPrice')}
-                  className="py-3.5 px-3 font-bold text-right cursor-pointer hover:text-emerald-500 transition w-36"
+                  className="py-3.5 px-3 text-right cursor-pointer hover:text-cyan-500 transition w-36"
                 >
                   <div className="flex items-center justify-end gap-1.5">
                     <span>TOTAL HARGA</span>
                     {sortField === 'totalPrice' ? (
-                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                      sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-cyan-500" /> : <ArrowDown className="w-3 h-3 text-cyan-500" />
                     ) : (
                       <ArrowUpDown className="w-3 h-3 text-slate-500" />
                     )}
@@ -1235,12 +1258,12 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             </thead>
 
             <tbody className="divide-y divide-slate-700/20">
-              {aggregatedItems.length === 0 ? (
+              {dateGroupedItems.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Receipt className="w-8 h-8 opacity-40 text-slate-400" />
-                      <p className="font-semibold text-sm">Tidak ada transaksi kasir pada periode terpilih</p>
+                      <p className="font-medium text-sm">Tidak ada transaksi kasir pada periode terpilih</p>
                       <p className="text-xs text-slate-500">
                         Coba ubah filter bulan ({periodLabel}) atau gunakan tombol cepat "Bulan Ini" / "Minggu Ini".
                       </p>
@@ -1248,77 +1271,100 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
                   </td>
                 </tr>
               ) : (
-                aggregatedItems.map((item, idx) => (
-                  <tr
-                    key={`${item.barcode}-${idx}`}
-                    className={`transition duration-150 hover:bg-emerald-500/5 ${
-                      idx % 2 === 1
-                        ? isLight
-                          ? 'bg-slate-50/50'
-                          : 'bg-[#1c2129]/40'
-                        : ''
-                    }`}
-                  >
-                    {/* 1. NO */}
-                    <td className="py-3 px-3 text-center font-mono text-slate-400">
-                      {item.no}
-                    </td>
-
-                    {/* 2. CATEGORY */}
-                    <td className="py-3 px-3">
-                      <span className={`inline-block font-semibold px-2 py-0.5 rounded text-[11px] border whitespace-nowrap ${
+                dateGroupedItems.map((group) => (
+                  <React.Fragment key={group.date}>
+                    {/* Date Header Row (Group by Date) */}
+                    <tr
+                      className={`font-medium ${
                         isLight
-                          ? 'bg-purple-50 text-purple-700 border-purple-200'
-                          : 'bg-purple-950/40 text-purple-300 border-purple-500/30'
-                      }`}>
-                        {item.category}
-                      </span>
-                    </td>
+                          ? 'bg-emerald-50/90 text-emerald-950 border-y border-emerald-300'
+                          : 'bg-[#1f2937] text-emerald-300 border-y border-emerald-500/30'
+                      }`}
+                    >
+                      <td colSpan={8} className="py-2.5 px-3">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-emerald-500" />
+                          <span className="font-medium">Tanggal: {group.formattedDate}</span>
+                          <span className="text-xs font-normal opacity-75 ml-2">
+                            ({group.items.length} jenis item produk terjual)
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* Item rows for this date */}
+                    {group.items.map((item, idx) => (
+                      <tr
+                        key={`${group.date}-${item.barcode}-${idx}`}
+                        className={`transition duration-150 hover:bg-emerald-500/5 ${
+                          idx % 2 === 1
+                            ? isLight
+                              ? 'bg-slate-50/50'
+                              : 'bg-[#1c2129]/40'
+                            : ''
+                        }`}
+                      >
+                        {/* 1. NO */}
+                        <td className="py-3 px-3 text-center font-mono text-slate-400">
+                          {item.no}
+                        </td>
 
-                    {/* 3. BARCODE / CODE ID */}
-                    <td className="py-3 px-3">
-                      <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] border ${
-                        isLight
-                          ? 'bg-slate-100 text-slate-800 border-slate-200'
-                          : 'bg-[#0d1117] text-emerald-400 border-emerald-500/30'
-                      }`}>
-                        {item.barcode}
-                      </span>
-                    </td>
+                        {/* 2. CATEGORY */}
+                        <td className="py-3 px-3">
+                          <span className={`inline-block font-mono font-normal tracking-wide px-2 py-0.5 rounded text-[11px] border whitespace-nowrap ${
+                            isLight
+                              ? 'bg-purple-50 text-purple-700 border-purple-200'
+                              : 'bg-purple-950/40 text-purple-300 border-purple-500/30'
+                          }`}>
+                            {item.category}
+                          </span>
+                        </td>
 
-                    {/* 4. NAMA PRODUCT DETAIL */}
-                    <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-900 dark:text-slate-100">
-                        {item.productName}
-                      </div>
-                    </td>
+                        {/* 3. BARCODE / CODE ID */}
+                        <td className="py-3 px-3">
+                          <span className={`inline-block font-mono font-normal px-2 py-0.5 rounded text-[11px] border ${
+                            isLight
+                              ? 'bg-slate-100 text-slate-800 border-slate-200'
+                              : 'bg-[#0d1117] text-emerald-400 border-emerald-500/30'
+                          }`}>
+                            {item.barcode}
+                          </span>
+                        </td>
 
-                    {/* 5. PACKAGING */}
-                    <td className="py-3 px-3 text-center">
-                      <span className={`inline-block font-mono font-bold px-2 py-0.5 rounded text-[11px] border ${
-                        isLight
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-amber-950/40 text-amber-300 border-amber-500/30'
-                      }`}>
-                        {item.packaging}
-                      </span>
-                    </td>
+                        {/* 4. NAMA PRODUCT DETAIL */}
+                        <td className="py-3 px-3">
+                          <div className="text-sm font-normal text-slate-900 dark:text-slate-100">
+                            {item.productName}
+                          </div>
+                        </td>
 
-                    {/* 6. QTY */}
-                    <td className="py-3 px-3 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
-                      {item.qty.toLocaleString('id-ID')}
-                    </td>
+                        {/* 5. PACKAGING */}
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-block font-mono font-normal px-2 py-0.5 rounded text-[11px] border ${
+                            isLight
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-amber-950/40 text-amber-300 border-amber-500/30'
+                          }`}>
+                            {item.packaging}
+                          </span>
+                        </td>
 
-                    {/* 7. HARGA */}
-                    <td className="py-3 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
-                      Rp {item.unitPrice.toLocaleString('id-ID')}
-                    </td>
+                        {/* 6. QTY */}
+                        <td className="py-3 px-3 text-right font-mono font-semibold text-slate-800 dark:text-slate-200">
+                          {item.qty.toLocaleString('id-ID')}
+                        </td>
 
-                    {/* 8. TOTAL HARGA */}
-                    <td className="py-3 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
-                      Rp {item.totalPrice.toLocaleString('id-ID')}
-                    </td>
-                  </tr>
+                        {/* 7. HARGA */}
+                        <td className="py-3 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                          Rp {item.unitPrice.toLocaleString('id-ID')}
+                        </td>
+
+                        {/* 8. TOTAL HARGA */}
+                        <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                          Rp {item.totalPrice.toLocaleString('id-ID')}
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 ))
               )}
             </tbody>
@@ -1327,25 +1373,25 @@ export const CashierSalesAuditView: React.FC<CashierSalesAuditViewProps> = ({
             {aggregatedItems.length > 0 && (
               <tfoot>
                 <tr
-                  className={`border-t-2 font-bold ${
+                  className={`border-t-2 font-medium ${
                     isLight
                       ? 'bg-slate-100 border-slate-300 text-slate-900'
                       : 'bg-[#0d1117] border-emerald-500/40 text-white'
                   }`}
                 >
-                  <td colSpan={5} className="py-3.5 px-3 text-left font-black tracking-wide">
+                  <td colSpan={5} className="py-3.5 px-3 text-left font-medium tracking-wide">
                     <div className="flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                       <span>TOTAL PENJUALAN AUDIT KASIR ({summaryMetrics.uniqueProductsCount} ITEM PRODUK)</span>
                     </div>
                   </td>
-                  <td className="py-3.5 px-3 text-right font-mono font-black text-blue-600 dark:text-blue-400">
+                  <td className="py-3.5 px-3 text-right font-mono font-semibold text-blue-600 dark:text-blue-400">
                     {summaryMetrics.totalQty.toLocaleString('id-ID')}
                   </td>
                   <td className="py-3.5 px-3 text-right font-mono text-slate-500">
                     -
                   </td>
-                  <td className="py-3.5 px-3 text-right font-mono font-black text-base text-emerald-600 dark:text-emerald-400">
+                  <td className="py-3.5 px-3 text-right font-mono font-semibold text-base text-emerald-600 dark:text-emerald-400">
                     Rp {summaryMetrics.totalRevenue.toLocaleString('id-ID')}
                   </td>
                 </tr>

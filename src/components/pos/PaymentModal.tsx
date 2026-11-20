@@ -15,8 +15,12 @@ import {
   ShieldCheck,
   ArrowRight,
   BookOpen,
+  FileSpreadsheet,
+  Calculator,
+  Shirt,
+  Clock,
 } from 'lucide-react';
-import { CartItem, Customer, PaymentMethod, Terminal } from '../../types';
+import { CartItem, Customer, LaundryPaymentStatus, PaymentMethod, Terminal } from '../../types';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -34,12 +38,39 @@ interface PaymentModalProps {
   selectedCustomer: Customer | null;
   onSelectCustomer?: (customer: Customer | null) => void;
   customers?: Customer[];
-  onConfirmPayment: (overrideMethod?: string) => void;
+  onConfirmPayment: (
+    overrideMethod?: string,
+    creditMeta?: { dpAmount: number; tempoDays: number; dueDate: string; remainingBalance: number }
+  ) => void;
   isLight?: boolean;
   language?: string;
   activeTerminal: Terminal;
   onHoldOrder?: () => void;
   onOpenQris?: () => void;
+  activeBusinessRole?: string;
+  promoSavingsTotal?: number;
+  isBuildingBulkMode?: boolean;
+  onRequestCreditLimitIncrease?: (payload: {
+    contractorName: string;
+    customerId?: string;
+    currentCreditLimit?: number;
+    requestedCreditLimit: number;
+    outstandingBalance: number;
+    projectTitle: string;
+    reason: string;
+  }) => void;
+  isLaundryMode?: boolean;
+  laundryPayStatus?: LaundryPaymentStatus;
+  setLaundryPayStatus?: (status: LaundryPaymentStatus) => void;
+  laundryDpAmount?: number;
+  setLaundryDpAmount?: (amount: number) => void;
+  laundryMetaSummary?: {
+    customerName?: string;
+    customerPhone?: string;
+    totalPieces?: number;
+    estimatedDoneStr?: string;
+    slaLabel?: string;
+  };
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
@@ -64,16 +95,56 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   activeTerminal,
   onHoldOrder,
   onOpenQris,
+  activeBusinessRole,
+  promoSavingsTotal = 0,
+  isBuildingBulkMode = false,
+  onRequestCreditLimitIncrease,
+  isLaundryMode = false,
+  laundryPayStatus,
+  setLaundryPayStatus,
+  laundryDpAmount,
+  setLaundryDpAmount,
+  laundryMetaSummary,
 }) => {
   const isEn = language === 'en';
   const [customerSearch, setCustomerSearch] = useState('');
   const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false);
   const [tempoDays, setTempoDays] = useState(30);
+  const [dpAmount, setDpAmount] = useState(0);
+  const [internalLaundryPayStatus, setInternalLaundryPayStatus] = useState<LaundryPaymentStatus>('LUNAS_AWAL');
+  const cashInputRef = useRef<HTMLInputElement>(null);
+
+  const activeLaundryPayStatus: LaundryPaymentStatus =
+    laundryPayStatus ?? internalLaundryPayStatus;
+  const handleSelectLaundryPayStatus = (st: LaundryPaymentStatus) => {
+    if (setLaundryPayStatus) setLaundryPayStatus(st);
+    else setInternalLaundryPayStatus(st);
+  };
+  const effectiveLaundryDpRaw =
+    laundryDpAmount !== undefined ? laundryDpAmount : dpAmount;
+  const handleChangeLaundryDp = (val: number) => {
+    const clamped = Math.max(0, Math.min(grandTotal, val || 0));
+    if (setLaundryDpAmount) setLaundryDpAmount(clamped);
+    setDpAmount(clamped);
+  };
 
   const isCreditAr =
     paymentMethod === 'KREDIT / TEMPO (AR)' ||
     paymentMethod === 'KREDIT' ||
     paymentMethod === 'AR_CREDIT';
+
+  useEffect(() => {
+    if (isOpen) {
+      setDpAmount(0);
+    }
+  }, [isOpen, grandTotal]);
+
+  const effectiveDp = Math.max(0, Math.min(grandTotal, Number(dpAmount) || 0));
+  const remainingBalance = Math.max(0, grandTotal - effectiveDp);
+  const contractorLimit = Number(selectedCustomer?.credit_limit) || 50000000;
+  const contractorOutstanding = Number(selectedCustomer?.outstanding_balance) || 0;
+  const projectedExposure = contractorOutstanding + remainingBalance;
+  const isOverLimit = Boolean(selectedCustomer && projectedExposure > contractorLimit);
 
   // Calculate Due Date preview for AR
   const dueDateStr = React.useMemo(() => {
@@ -104,6 +175,35 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     Math.ceil(grandTotal / 100000) * 100000,
   ].filter((val, idx, self) => val >= grandTotal && self.indexOf(val) === idx);
 
+  // Auto focus input tunai
+  useEffect(() => {
+    if (isOpen && paymentMethod === 'CASH') {
+      setTimeout(() => {
+        cashInputRef.current?.focus();
+        cashInputRef.current?.select();
+      }, 100);
+    }
+  }, [isOpen, paymentMethod]);
+
+  const isLaundryDeferredPay =
+    isLaundryMode && activeLaundryPayStatus !== 'LUNAS_AWAL';
+  const activeDpNominal = isLaundryMode
+    ? activeLaundryPayStatus === 'BAYAR_AMBIL'
+      ? 0
+      : activeLaundryPayStatus === 'DP'
+      ? Math.max(0, Math.min(grandTotal, Number(effectiveLaundryDpRaw) || 0))
+      : grandTotal
+    : effectiveDp;
+  const activeRemainingNominal = isLaundryMode
+    ? Math.max(0, grandTotal - activeDpNominal)
+    : remainingBalance;
+  const isSubmitDisabled = isLaundryMode
+    ? activeLaundryPayStatus === 'LUNAS_AWAL' &&
+      paymentMethod === 'CASH' &&
+      cashGiven < grandTotal
+    : (paymentMethod === 'CASH' && cashGiven < grandTotal) ||
+      (isCreditAr && !selectedCustomer);
+
   // Keyboard shortcut listener
   useEffect(() => {
     if (!isOpen) return;
@@ -112,497 +212,559 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
-      } else if (e.key === 'Enter' || e.key === 'F10') {
+      } else if (e.key === 'Enter') {
         // Prevent enter if searching customer
         if (document.activeElement?.id === 'ar-customer-search-input') return;
         e.preventDefault();
+        if (isLaundryMode) {
+          if (isSubmitDisabled) return;
+          onConfirmPayment(
+            undefined,
+            isLaundryDeferredPay
+              ? {
+                  dpAmount: activeDpNominal,
+                  tempoDays: 7,
+                  dueDate: dueDateStr,
+                  remainingBalance: activeRemainingNominal,
+                }
+              : undefined
+          );
+          return;
+        }
         if (isCreditAr && !selectedCustomer) {
           setIsCustomerPickerOpen(true);
           return;
         }
-        onConfirmPayment();
+        onConfirmPayment(
+          isCreditAr ? 'KREDIT / TEMPO (AR)' : undefined,
+          isCreditAr
+            ? { dpAmount: effectiveDp, tempoDays, dueDate: dueDateStr, remainingBalance }
+            : undefined
+        );
+      } else if (document.activeElement?.tagName !== 'INPUT') {
+        if (e.key === '1') {
+          setPaymentMethod('CASH');
+        } else if (e.key === '2') {
+          setPaymentMethod('QRIS');
+        } else if (e.key === '3') {
+          setPaymentMethod('EDC_DEBIT');
+        } else if (e.key === '4' && !isLaundryMode) {
+          setPaymentMethod('KREDIT / TEMPO (AR)');
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isCreditAr, selectedCustomer, onClose, onConfirmPayment]);
+  }, [
+    isOpen,
+    isCreditAr,
+    isLaundryMode,
+    isLaundryDeferredPay,
+    isSubmitDisabled,
+    activeDpNominal,
+    activeRemainingNominal,
+    selectedCustomer,
+    onClose,
+    onConfirmPayment,
+    setPaymentMethod,
+    effectiveDp,
+    tempoDays,
+    dueDateStr,
+    remainingBalance,
+  ]);
 
   if (!isOpen) return null;
 
   return (
     <div
-      id="modal-payment-confirm"
-      tabIndex={-1}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in"
+      id="modal-payment-checkout"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-4 animate-in fade-in"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-2xl p-4 sm:p-6 border shadow-[0_20px_60px_rgba(0,0,0,0.9)] relative animate-in zoom-in-95 space-y-4 ${
+        className={`max-w-xl w-full max-h-[85vh] p-5 flex flex-col justify-between overflow-hidden rounded-xl border relative animate-in zoom-in-95 transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-900 shadow-slate-300'
-            : 'bg-[#161b22] border-[#30363d] text-white'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         }`}
       >
-        {/* Tombol Tutup [X] */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute top-4 right-4 text-white bg-slate-800 hover:bg-rose-600 border border-slate-600 hover:border-rose-500 p-2 rounded-xl transition cursor-pointer shadow-md group"
-          title="Tutup / Batal [Esc]"
-        >
-          <X className="w-5 h-5 stroke-[2.5]" />
-        </button>
-
-        {/* Header Modal */}
-        <div className="flex items-center gap-3 pr-10">
-          <div className="w-11 h-11 rounded-xl bg-blue-500/20 text-[#0052FF] dark:text-[#58a6ff] border border-blue-500/30 flex items-center justify-center shrink-0">
-            <Receipt className="w-6 h-6" />
+        {/* Header Section */}
+        <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <Receipt className="w-5 h-5 text-emerald-500" />
+            <h2 className="text-base leading-6 font-medium tracking-tight uppercase">Checkout Pembayaran</h2>
           </div>
-          <div>
-            <h3 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white">
-              {isEn ? 'Confirm Payment & Receipt' : 'Konfirmasi Pembayaran Kasir POS'}
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-gray-400">
-              <span className="font-mono font-bold text-[#0052FF] dark:text-[#58a6ff]">{receiptNumber}</span> • Terminal:{' '}
-              <span className="font-bold text-slate-800 dark:text-slate-200">{activeTerminal.name}</span>
-            </p>
-          </div>
+          <p className="text-xs leading-5 text-slate-400 font-mono font-normal">
+            Struk: <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{receiptNumber}</span>
+          </p>
         </div>
 
-        {/* METODE PEMBAYARAN SELECTOR */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-gray-400 mb-1.5">
-            {isEn ? 'Select Payment Method' : 'Pilihan Metode Pembayaran'}
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {/* 1. Tunai */}
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('CASH')}
-              className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
-                paymentMethod === 'CASH'
-                  ? 'border-[#0052FF] bg-[#0052FF]/10 text-[#0052FF] dark:text-[#58a6ff] shadow-sm font-black'
-                  : isLight
-                  ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                  : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
-              }`}
-            >
-              <Banknote className="w-5 h-5 text-emerald-500" />
-              <span className="text-xs font-bold leading-tight">💵 Tunai</span>
-              <span className="text-[10px] text-gray-400">Cash / Laci</span>
-            </button>
-
-            {/* 2. QRIS */}
-            <button
-              type="button"
-              onClick={() => {
-                setPaymentMethod('QRIS');
-                if (onOpenQris) onOpenQris();
-              }}
-              className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
-                paymentMethod === 'QRIS'
-                  ? 'border-[#0052FF] bg-[#0052FF]/10 text-[#0052FF] dark:text-[#58a6ff] shadow-sm font-black'
-                  : isLight
-                  ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                  : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
-              }`}
-            >
-              <QrCode className="w-5 h-5 text-rose-500" />
-              <span className="text-xs font-bold leading-tight">📱 QRIS</span>
-              <span className="text-[10px] text-gray-400">Dinamis Bank</span>
-            </button>
-
-            {/* 3. Debit EDC */}
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('EDC_DEBIT')}
-              className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center ${
-                paymentMethod === 'EDC_DEBIT'
-                  ? 'border-[#0052FF] bg-[#0052FF]/10 text-[#0052FF] dark:text-[#58a6ff] shadow-sm font-black'
-                  : isLight
-                  ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 font-semibold'
-                  : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
-              }`}
-            >
-              <CreditCard className="w-5 h-5 text-blue-500" />
-              <span className="text-xs font-bold leading-tight">💳 EDC Debit</span>
-              <span className="text-[10px] text-gray-400">Transfer Bank</span>
-            </button>
-
-            {/* 4. KREDIT / TEMPO (AR) */}
-            <button
-              type="button"
-              onClick={() => {
-                setPaymentMethod('KREDIT / TEMPO (AR)');
-                if (!selectedCustomer) {
-                  setIsCustomerPickerOpen(true);
-                }
-              }}
-              className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition cursor-pointer text-center relative ${
-                isCreditAr
-                  ? 'border-purple-600 bg-purple-500/15 text-purple-600 dark:text-purple-400 shadow-sm font-black ring-2 ring-purple-500/20'
-                  : isLight
-                  ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-purple-50 font-semibold'
-                  : 'border-[#30363d] bg-[#0d1117] text-gray-300 hover:bg-[#21262d] font-semibold'
-              }`}
-            >
-              <span className="absolute -top-1.5 -right-1 text-[8px] font-black px-1.5 py-0.2 rounded-full bg-purple-600 text-white uppercase tracking-tight shadow">
-                AR
-              </span>
-              <BookOpen className="w-5 h-5 text-purple-500" />
-              <span className="text-xs font-bold leading-tight">📋 Kredit / Tempo</span>
-              <span className="text-[10px] text-purple-600 dark:text-purple-400 font-medium">Piutang (AR)</span>
-            </button>
+        {/* GRAND TOTAL DISPLAY (COMPACT) */}
+        <div className={`border rounded-xl py-2 px-3 mb-2.5 text-center transition-all ${
+          isLight 
+            ? 'bg-emerald-500/5 border-emerald-500/40 shadow-[0_0_16px_rgba(16,185,129,0.15)] text-slate-900' 
+            : 'bg-slate-950 border-emerald-500/40 shadow-[0_0_16px_rgba(16,185,129,0.15)] text-white'
+        }`}>
+          <span className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 uppercase block">Total Tagihan</span>
+          <div className="text-2xl font-mono font-semibold text-emerald-600 dark:text-emerald-400 tracking-tight">
+            Rp {grandTotal.toLocaleString('id-ID')}
           </div>
-        </div>
-
-        {/* DETAIL KHUSUS METODE PEMBAYARAN KREDIT / TEMPO (AR) */}
-        {isCreditAr && (
-          <div className="p-3.5 sm:p-4 rounded-xl border-2 border-purple-500/40 bg-purple-500/5 dark:bg-purple-950/20 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-purple-500 shrink-0" />
-                <div>
-                  <h4 className="text-xs font-bold text-purple-600 dark:text-purple-300">
-                    Transaksi Piutang Usaha (AR) Member
-                  </h4>
-                  <p className="text-[11px] text-slate-600 dark:text-gray-400">
-                    Otomatis catat tagihan AR dan terbitkan jurnal <span className="font-mono font-bold text-purple-600 dark:text-purple-300">POS-AR-[id]</span>
-                  </p>
-                </div>
-              </div>
-              <span className="text-[10px] font-black px-2 py-0.5 rounded bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30">
-                TEMPO 30 HARI
+          {promoSavingsTotal > 0 && (
+            <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 block mt-0.5">
+              Hemat Promo Terpadu: -Rp {promoSavingsTotal.toLocaleString('id-ID')}
+            </span>
+          )}
+          {isLaundryMode && laundryMetaSummary && (
+            <div className="mt-1.5 pt-1 border-t border-emerald-500/20 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-[10px] font-mono text-cyan-700 dark:text-cyan-300">
+              <span>
+                👤 {laundryMetaSummary.customerName || selectedCustomer?.name || 'Pelanggan Laundry'}
+                {laundryMetaSummary.customerPhone ? ` (${laundryMetaSummary.customerPhone})` : ''}
               </span>
+              <span>👕 {laundryMetaSummary.totalPieces || 1} Pcs</span>
+              {laundryMetaSummary.estimatedDoneStr && (
+                <span>⏱ Est. Selesai: {laundryMetaSummary.estimatedDoneStr}</span>
+              )}
             </div>
+          )}
+        </div>
 
-            {/* Customer Check & Selector */}
-            {selectedCustomer ? (
-              <div className="p-2.5 rounded-lg border border-purple-300 dark:border-purple-800/60 bg-white/70 dark:bg-[#161b22] flex items-center justify-between">
+        {/* LAUNDRY FLEXIBLE PAYMENT STATUS CARDS */}
+        {isLaundryMode && (
+          <div className="mb-3 space-y-1.5">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-slate-500 block pl-0.5">
+              Skema Pembayaran Laundry
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { id: 'LUNAS_AWAL' as LaundryPaymentStatus, title: 'Lunas di Awal', desc: 'Bayar Penuh 100%' },
+                  { id: 'DP' as LaundryPaymentStatus, title: 'DP (Uang Muka)', desc: 'Catat Sisa Tagihan' },
+                  { id: 'BAYAR_AMBIL' as LaundryPaymentStatus, title: 'Bayar Saat Ambil', desc: 'Rp 0 Saat Masuk' },
+                ]
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    handleSelectLaundryPayStatus(opt.id);
+                    if (opt.id === 'DP' && activeDpNominal === 0) {
+                      handleChangeLaundryDp(Math.round(grandTotal * 0.5));
+                    }
+                  }}
+                  className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                    activeLaundryPayStatus === opt.id
+                      ? 'border-cyan-500 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200 ring-1 ring-cyan-500/40'
+                      : isLight
+                      ? 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                      : 'border-slate-800 bg-slate-950 text-slate-300 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="text-xs font-bold leading-tight">{opt.title}</div>
+                  <div className="text-[10px] opacity-80">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1 overflow-hidden">
+          {/* SISI KIRI: METODE BAYAR */}
+          <div className="space-y-2">
+            <h3 className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 uppercase pl-0.5">
+              {isLaundryMode && activeLaundryPayStatus === 'DP'
+                ? 'Metode Bayar DP'
+                : isLaundryMode && activeLaundryPayStatus === 'BAYAR_AMBIL'
+                ? 'Status Nota'
+                : 'Metode'}
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'CASH', label: 'Tunai', icon: Banknote, color: 'text-emerald-500', key: '1' },
+                { id: 'QRIS', label: 'QRIS', icon: QrCode, color: 'text-cyan-500', key: '2' },
+                { id: 'EDC_DEBIT', label: 'Debit', icon: CreditCard, color: 'text-blue-500', key: '3' },
+                ...(!isLaundryMode
+                  ? [{ id: 'KREDIT / TEMPO (AR)', label: 'Kredit (AR)', icon: BookOpen, color: 'text-purple-500', key: '4' }]
+                  : []),
+              ].map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setPaymentMethod(m.id)}
+                  className={`h-10 rounded-xl border flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer active:scale-[0.99] ${
+                    paymentMethod === m.id
+                      ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                      : isLight
+                      ? 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                      : 'border-slate-800 bg-slate-950 text-slate-400 hover:bg-slate-800'
+                  }`}
+                >
+                  <m.icon className={`w-4 h-4 ${m.color}`} />
+                  <span className="text-xs leading-5 font-normal">{m.label}</span>
+                </button>
+              ))}
+            </div>
+            
+            {/* INFO PELANGGAN / KONTRAKTOR */}
+            <div className={`p-2 rounded-xl border space-y-1.5 ${
+              isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+            }`}>
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  <UserCheck className="w-4 h-4 text-purple-500 shrink-0" />
-                  <div className="min-w-0">
-                    <span className="font-bold text-xs block text-slate-900 dark:text-white truncate">
-                      {selectedCustomer.name}
-                    </span>
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400 block font-mono">
-                      {selectedCustomer.phone || selectedCustomer.id} • Tier: {selectedCustomer.memberTier || 'Member'}
-                    </span>
-                  </div>
+                  <UserCheck className="w-4 h-4 text-cyan-500 shrink-0" />
+                  <span className="text-xs leading-5 font-normal truncate">
+                    {selectedCustomer
+                      ? `${selectedCustomer.name}${selectedCustomer.store_name ? ` (${selectedCustomer.store_name})` : ''}`
+                      : isBuildingBulkMode
+                      ? 'Pilih Kontraktor / Proyek...'
+                      : 'Pelanggan Umum'}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {onSelectCustomer && (
-                    <button
-                      type="button"
-                      onClick={() => setIsCustomerPickerOpen(!isCustomerPickerOpen)}
-                      className="text-[11px] font-bold text-purple-600 hover:text-purple-700 underline cursor-pointer"
-                    >
-                      Ganti
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="p-3 rounded-lg border border-rose-300 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/30 space-y-2">
-                <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 text-xs font-bold">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>Metode KREDIT / TEMPO (AR) wajib memilih Member / Customer terdaftar!</span>
-                </div>
-                {onSelectCustomer && (
+                {onSelectCustomer && customers.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => setIsCustomerPickerOpen(true)}
-                    className="w-full py-1.5 px-3 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition flex items-center justify-center gap-1.5 shadow"
+                    onClick={() => setIsCustomerPickerOpen((prev) => !prev)}
+                    className="text-[10px] px-2 py-0.5 rounded bg-cyan-600/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 cursor-pointer shrink-0"
                   >
-                    <Search className="w-3.5 h-3.5" />
-                    Pilih Member / Pelanggan Sekarang
+                    {selectedCustomer ? 'Ganti' : 'Pilih'}
                   </button>
                 )}
               </div>
-            )}
-
-            {/* Quick Customer Picker Dropdown / Box */}
-            {isCustomerPickerOpen && onSelectCustomer && (
-              <div className="p-3 rounded-xl border border-slate-300 dark:border-[#30363d] bg-white dark:bg-[#0d1117] space-y-2 animate-in fade-in">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="text-slate-800 dark:text-gray-200">Cari Data Member:</span>
-                  <button
-                    type="button"
-                    onClick={() => setIsCustomerPickerOpen(false)}
-                    className="text-gray-400 hover:text-gray-600 text-[11px]"
-                  >
-                    Tutup
-                  </button>
-                </div>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-gray-400" />
+              {isCustomerPickerOpen && onSelectCustomer && (
+                <div className="pt-1 border-t border-slate-200 dark:border-slate-800 space-y-1">
                   <input
                     id="ar-customer-search-input"
                     type="text"
                     value={customerSearch}
                     onChange={(e) => setCustomerSearch(e.target.value)}
-                    placeholder="Ketik nama atau nomor telepon member..."
-                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-[#30363d] bg-slate-50 dark:bg-[#161b22] focus:outline-none focus:ring-1 focus:ring-purple-500"
-                    autoFocus
+                    placeholder="Cari nama kontraktor / member..."
+                    className={`w-full px-2 py-1 rounded border text-[11px] outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-900 border-slate-700 text-white'
+                    }`}
                   />
-                </div>
-                <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 dark:divide-gray-800">
-                  {filteredCustomers.length > 0 ? (
-                    filteredCustomers.map((cust) => (
-                      <div
-                        key={`ar-cust-${cust.id}`}
+                  <div className="max-h-24 overflow-y-auto space-y-0.5">
+                    {filteredCustomers.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
                         onClick={() => {
-                          onSelectCustomer(cust);
+                          onSelectCustomer(c);
                           setIsCustomerPickerOpen(false);
                         }}
-                        className="py-1.5 px-2 hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded flex items-center justify-between cursor-pointer transition text-xs"
+                        className={`w-full text-left px-2 py-1 rounded text-[11px] flex items-center justify-between cursor-pointer ${
+                          isLight ? 'hover:bg-cyan-50 text-slate-800' : 'hover:bg-slate-800 text-slate-200'
+                        }`}
                       >
-                        <div>
-                          <span className="font-bold text-slate-900 dark:text-white block">{cust.name}</span>
-                          <span className="text-[10px] text-gray-500 font-mono">{cust.phone || cust.id}</span>
-                        </div>
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-200 dark:bg-gray-800 text-slate-700 dark:text-gray-300">
-                          {cust.memberTier || 'Member'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="py-2 text-center text-xs text-gray-400">Tidak ada member ditemukan.</div>
-                  )}
+                        <span className="truncate">{c.name}</span>
+                        <span className="text-[10px] font-mono text-slate-400 shrink-0">{c.memberTier || 'Member'}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {/* Jurnal Akuntansi POS-AR Preview */}
-            <div className="p-2.5 rounded-lg border border-purple-200 dark:border-purple-900/40 bg-purple-100/40 dark:bg-purple-950/30 text-[11px] space-y-1">
-              <span className="font-bold text-purple-700 dark:text-purple-300 block">
-                📋 Pratinjau Jurnal Akuntansi Otomatis:
-              </span>
-              <div className="grid grid-cols-2 gap-1 text-[10px] font-mono">
-                <div className="p-1 rounded bg-white/60 dark:bg-black/30 border border-purple-200/60 dark:border-purple-900/50">
-                  <span className="text-blue-600 dark:text-blue-400 font-bold block">[DEBIT] 1-10301</span>
-                  <span className="text-gray-700 dark:text-gray-300">Piutang Usaha (AR):</span>
-                  <span className="block font-bold text-slate-900 dark:text-white">
-                    Rp {grandTotal.toLocaleString('id-ID')}
-                  </span>
-                </div>
-                <div className="p-1 rounded bg-white/60 dark:bg-black/30 border border-purple-200/60 dark:border-purple-900/50">
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold block">[KREDIT] 4-10001</span>
-                  <span className="text-gray-700 dark:text-gray-300">Pendapatan Penjualan:</span>
-                  <span className="block font-bold text-slate-900 dark:text-white">
-                    Rp {grandTotal.toLocaleString('id-ID')}
-                  </span>
-                </div>
-              </div>
-              <div className="text-[10px] text-slate-500 dark:text-gray-400 flex items-center justify-between pt-1">
-                <span>Jatuh Tempo: <strong>{dueDateStr}</strong></span>
-                <span>Tagihan Otomatis masuk ke <strong>invoicesReceivable</strong></span>
-              </div>
+              )}
             </div>
           </div>
-        )}
 
-        {/* INPUT UANG DITERIMA UNTUK TUNAI (CASH) */}
-        {paymentMethod === 'CASH' && (
-          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-[#30363d] bg-slate-50/70 dark:bg-[#0d1117] space-y-2.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-gray-300">
-              <span>Nominal Uang Diterima:</span>
-              <span className="text-[11px] text-gray-500 font-mono">
-                Kurang: {cashGiven < grandTotal ? `Rp ${(grandTotal - cashGiven).toLocaleString('id-ID')}` : 'Rp 0'}
-              </span>
-            </div>
-
-            <div className="relative">
-              <span className="absolute left-3 top-2.5 text-xs font-black text-slate-500">Rp</span>
-              <input
-                id="modal-cash-given-input"
-                type="number"
-                value={cashGiven || ''}
-                onChange={(e) => setCashGiven(Number(e.target.value))}
-                placeholder={grandTotal.toString()}
-                className="w-full pl-9 pr-3 py-2 text-base font-black font-mono rounded-xl border border-slate-300 dark:border-[#30363d] bg-white dark:bg-[#161b22] text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0052FF]"
-              />
-            </div>
-
-            {/* Quick cash denomination chips */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {quickCashPresets.map((preset, idx) => (
-                <button
-                  key={`preset-${idx}`}
-                  type="button"
-                  onClick={() => setCashGiven(preset)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
-                    cashGiven === preset
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white dark:bg-[#161b22] border-slate-300 dark:border-[#30363d] text-slate-700 dark:text-gray-300 hover:bg-slate-100'
+          {/* SISI KANAN: INPUT / QRIS / LAUNDRY DP & BAYAR AMBIL */}
+          <div className="flex flex-col justify-center min-h-0 overflow-hidden">
+            {isLaundryMode && activeLaundryPayStatus === 'DP' ? (
+              <div className={`p-3 rounded-xl border space-y-2.5 ${
+                isLight ? 'bg-amber-50/70 border-amber-300 text-slate-900' : 'bg-amber-950/20 border-amber-500/35 text-white'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1">
+                    <Shirt className="w-3.5 h-3.5" />
+                    <span>Input DP (Uang Muka)</span>
+                  </span>
+                  <div className="flex gap-1">
+                    {[0.3, 0.5, 0.7].map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => handleChangeLaundryDp(Math.round(grandTotal * pct))}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-800 dark:text-amber-200 border border-amber-500/35 cursor-pointer"
+                      >
+                        {Math.round(pct * 100)}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  max={grandTotal}
+                  value={activeDpNominal || ''}
+                  onChange={(e) => handleChangeLaundryDp(Number(e.target.value) || 0)}
+                  placeholder="Nominal DP (Rp)"
+                  className={`w-full px-3 py-2 rounded-xl border text-base font-mono font-bold outline-none ${
+                    isLight ? 'bg-white border-amber-300 text-slate-900' : 'bg-slate-950 border-amber-500/40 text-white'
                   }`}
-                >
-                  {preset === grandTotal ? 'Uang Pas' : `Rp ${preset.toLocaleString('id-ID')}`}
-                </button>
-              ))}
-            </div>
-
-            {/* Kembalian */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-gray-800 text-xs">
-              <span className="font-bold text-slate-600 dark:text-gray-400">Kembalian:</span>
-              <span className="font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
-                Rp {changeAmount.toLocaleString('id-ID')}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* RINGKASAN FINANSIAL TRANSAKSI */}
-        <div
-          className={`p-4 rounded-xl border-2 space-y-2.5 ${
-            isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
-          }`}
-        >
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700 dark:text-gray-400">
-                {isEn ? 'Bill Amount (Exact)' : 'Total Tagihan (Murni)'}:
-              </span>
-              <span className="font-bold font-mono text-slate-700 dark:text-gray-300">
-                Rp {rawGrandTotal.toLocaleString('id-ID')}
-              </span>
-            </div>
-
-            {paymentMethod === 'CASH' && cashRoundingDiff !== 0 && (
-              <div className="flex items-center justify-between text-xs text-amber-500 font-semibold">
-                <span>Cash Rounding (Ke Rp 100):</span>
-                <span className="font-mono">
-                  {cashRoundingDiff > 0 ? `+Rp ${cashRoundingDiff}` : `-Rp ${Math.abs(cashRoundingDiff)}`}
-                </span>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between pt-1.5 border-t border-slate-200 dark:border-gray-800">
-              <span className="text-xs font-black text-slate-900 dark:text-white">
-                {isCreditAr
-                  ? 'Total Piutang Usaha (AR)'
-                  : paymentMethod === 'CASH'
-                  ? 'Total Bayar Tunai'
-                  : 'Total Pembayaran'}
-                :
-              </span>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-                Rp {grandTotal.toLocaleString('id-ID')}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-300 dark:border-gray-800">
-            <span className="font-bold text-slate-700 dark:text-gray-400">Status Pembayaran:</span>
-            <span className="font-black px-2.5 py-1 rounded-lg bg-blue-500/10 text-[#0052FF] dark:text-[#58a6ff] border border-blue-500/20">
-              {isCreditAr
-                ? '📋 TEMPO (PIUTANG USAHA)'
-                : paymentMethod === 'CASH'
-                ? '💵 TUNAI / CASH'
-                : paymentMethod === 'QRIS'
-                ? '📱 QRIS DINAMIS'
-                : '💳 KARTU DEBIT EDC'}
-            </span>
-          </div>
-
-          {/* Rincian Singkat Pelanggan */}
-          <div className="pt-2 border-t border-slate-300 dark:border-gray-800 text-[11px] flex items-center justify-between">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <UserCheck className="w-4 h-4 text-[#0052FF] dark:text-[#58a6ff] shrink-0" />
-              <div className="min-w-0">
-                <span className="font-bold block truncate">
-                  {selectedCustomer ? selectedCustomer.name : 'Pelanggan Umum / Walk-in'}
-                </span>
-                <span className="text-[10px] text-gray-400 block font-mono">
-                  {selectedCustomer ? `${selectedCustomer.phone} • Tier: ${selectedCustomer.memberTier || 'Member'}` : 'Non-Member • Retail'}
-                </span>
-              </div>
-            </div>
-
-            {selectedCustomer && (
-              <div className="text-right font-mono shrink-0">
-                <span className="text-[10px] text-amber-500 block font-bold">
-                  ★ {(selectedCustomer.points ?? 0).toLocaleString('id-ID')} Pts
-                </span>
-                {grandTotal > 0 && (
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold block">
-                    Reward: +{Math.floor(grandTotal / 10000)} Pts
+                />
+                <div className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-slate-950 border-slate-800'
+                }`}>
+                  <span className="text-slate-500">Sisa Tagihan Saat Ambil:</span>
+                  <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                    Rp {activeRemainingNominal.toLocaleString('id-ID')}
                   </span>
+                </div>
+              </div>
+            ) : isLaundryMode && activeLaundryPayStatus === 'BAYAR_AMBIL' ? (
+              <div className={`p-3.5 rounded-xl border space-y-2 ${
+                isLight ? 'bg-cyan-50/70 border-cyan-300 text-slate-900' : 'bg-cyan-950/20 border-cyan-500/35 text-white'
+              }`}>
+                <div className="flex items-center gap-2 text-xs font-bold text-cyan-700 dark:text-cyan-300">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span>Nota Bayar Saat Pengambilan</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                  Order langsung dicetak dengan tag kantong cucian &amp; masuk antrean produksi. Pelanggan melunasi tagihan penuh saat mengambil pakaian.
+                </p>
+                <div className={`px-3 py-2 rounded-xl border flex items-center justify-between text-xs ${
+                  isLight ? 'bg-white border-cyan-200' : 'bg-slate-950 border-cyan-500/30'
+                }`}>
+                  <span className="text-slate-500">Sisa Tagihan Dicatat:</span>
+                  <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
+                    Rp {grandTotal.toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <>
+                {paymentMethod === 'CASH' && (
+                  <div className="space-y-2">
+                    <h3 className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 uppercase pl-0.5">Nominal Diterima</h3>
+                    <div className="relative">
+                      <input
+                        ref={cashInputRef}
+                        type="number"
+                        value={cashGiven || ''}
+                        onChange={(e) => setCashGiven(Number(e.target.value))}
+                        placeholder={grandTotal.toString()}
+                        className={`w-full pl-3 pr-4 py-2 text-base font-mono font-semibold rounded-xl border outline-none transition focus:ring-1 focus:ring-cyan-500 ${
+                          isLight
+                            ? 'bg-white border-slate-300 text-slate-900'
+                            : 'bg-slate-950 border-slate-800 text-white'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="flex gap-1 flex-wrap">
+                      {quickCashPresets.map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setCashGiven(val)}
+                          className={`px-2 py-0.5 rounded-lg border text-xs font-mono font-normal transition cursor-pointer active:scale-[0.99] ${
+                            isLight
+                              ? 'bg-slate-100 border-slate-200 text-slate-700 hover:border-cyan-500'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-cyan-500'
+                          }`}
+                        >
+                          {val === grandTotal ? 'Pas' : val.toLocaleString('id-ID')}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className={`px-3 py-1.5 rounded-xl border flex items-center justify-between ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
+                    }`}>
+                      <span className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-400">Kembalian:</span>
+                      <span className="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                        Rp {changeAmount.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {paymentMethod === 'QRIS' && (
+                  <div className="flex flex-col items-center justify-center p-3 bg-white rounded-xl border border-cyan-500/30 animate-in zoom-in-95 duration-200">
+                    <span className="text-[10px] leading-4 font-mono font-normal tracking-widest text-cyan-700 uppercase mb-1">Scan QRIS Dinamis</span>
+                    <div className="w-28 h-28 border border-slate-200 p-1 rounded-lg">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=ASPI_QRIS_DUMMY_${receiptNumber}_${grandTotal}`}
+                        alt="QRIS Code"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-[10px] font-normal text-slate-500 italic">Menunggu pembayaran...</span>
+                    </div>
+                  </div>
+                )}
+
+                {(paymentMethod === 'EDC_DEBIT' || isCreditAr) && (
+                  <div className={`h-full flex flex-col justify-center p-3 rounded-xl border border-dashed animate-in fade-in duration-300 ${
+                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+              }`}>
+                {paymentMethod === 'EDC_DEBIT' ? (
+                  <div className="flex flex-col items-center justify-center">
+                    <CreditCard className="w-8 h-8 text-cyan-500 mb-2 animate-pulse" />
+                    <h4 className="text-xs leading-5 font-medium text-center">Menunggu Mesin EDC</h4>
+                  </div>
+                ) : (
+                  <div className="space-y-2 w-full">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-purple-500 font-semibold flex items-center gap-1">
+                        <BookOpen className="w-3.5 h-3.5" />
+                        DP &amp; Tempo Kontraktor
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">Tempo: {dueDateStr}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-mono uppercase text-slate-400 block mb-1">Durasi Tempo</span>
+                      <div className="grid grid-cols-4 gap-1">
+                        {[7, 14, 30, 45].map((days) => (
+                          <button
+                            key={days}
+                            type="button"
+                            onClick={() => setTempoDays(days)}
+                            className={`py-1 rounded text-[11px] font-mono border cursor-pointer transition ${
+                              tempoDays === days
+                                ? 'bg-purple-600 text-white border-purple-500'
+                                : isLight
+                                ? 'bg-white border-slate-300 text-slate-700'
+                                : 'bg-slate-900 border-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {days} Hr
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-mono uppercase text-slate-400">DP Dibayar (Rp)</span>
+                        <div className="flex gap-1">
+                          {[0, 0.3, 0.5].map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              onClick={() => setDpAmount(Math.round(grandTotal * pct))}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-500/15 text-purple-600 dark:text-purple-300 border border-purple-500/30 cursor-pointer"
+                            >
+                              {pct === 0 ? '0%' : `${pct * 100}%`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={grandTotal}
+                        value={dpAmount || ''}
+                        onChange={(e) => setDpAmount(Math.max(0, Math.min(grandTotal, Number(e.target.value) || 0)))}
+                        placeholder="0 (Full Tempo)"
+                        className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-mono font-semibold outline-none ${
+                          isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-slate-900 border-slate-700 text-white'
+                        }`}
+                      />
+                    </div>
+
+                    <div className={`px-2.5 py-1.5 rounded-lg border flex items-center justify-between text-[11px] ${
+                      isLight ? 'bg-purple-50 border-purple-200' : 'bg-purple-950/30 border-purple-500/30'
+                    }`}>
+                      <span className="text-slate-500 dark:text-slate-300">Sisa Piutang (AR):</span>
+                      <span className="font-mono font-bold text-purple-600 dark:text-purple-300">
+                        Rp {remainingBalance.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+
+                    {isCreditAr && !selectedCustomer && (
+                      <div className="text-rose-500 text-[10px] font-normal bg-rose-500/10 p-1.5 rounded-lg border border-rose-500/20 text-center">
+                        WAJIB PILIH KONTRAKTOR / MEMBER!
+                      </div>
+                    )}
+
+                    {selectedCustomer && isOverLimit && onRequestCreditLimitIncrease && (
+                      <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[10px] flex items-center justify-between gap-2">
+                        <span className="text-amber-600 dark:text-amber-300">
+                          Plafon Rp {(contractorLimit / 1000000).toFixed(1)}jt terlewati
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRequestCreditLimitIncrease({
+                              contractorName: selectedCustomer.name,
+                              customerId: selectedCustomer.id,
+                              currentCreditLimit: contractorLimit,
+                              requestedCreditLimit: Math.ceil(projectedExposure / 5000000) * 5000000,
+                              outstandingBalance: contractorOutstanding,
+                              projectTitle: selectedCustomer.store_name || 'Order Proyek Material POS',
+                              reason: `Tagihan baru Rp ${remainingBalance.toLocaleString('id-ID')} (Tempo ${tempoDays} hari) melebihi plafon.`,
+                            })
+                          }
+                          className="px-2 py-0.5 rounded bg-amber-600 text-white font-semibold cursor-pointer shrink-0"
+                        >
+                          Ajukan Plafon
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
+              </>
+            )}
           </div>
         </div>
 
-        {/* Ringkasan Item Keranjang */}
-        <div className="p-3 rounded-xl border border-slate-200 dark:border-[#30363d] bg-slate-50/50 dark:bg-[#0d1117]/50 text-xs">
-          <div className="flex items-center justify-between text-slate-600 dark:text-gray-400 mb-1.5">
-            <span>{cart.length} SKU • {totalCartItemCount} Item Terdaftar</span>
-            <span className="font-mono text-[10px] font-bold">{paymentMethod}</span>
-          </div>
-          <div className="max-h-24 overflow-y-auto space-y-1 pr-1 font-mono text-slate-700 dark:text-gray-300 text-[11px]">
-            {cart.map((item, i) => (
-              <div
-                key={`modal-cart-item-${item.product?.id || i}`}
-                className="flex justify-between items-center"
-              >
-                <span className="truncate max-w-[260px] font-sans font-medium text-slate-900 dark:text-slate-100">
-                  {item.product?.name}
-                </span>
-                <span className="shrink-0 font-bold">
-                  {item.quantity}x @ Rp {(item.product?.sell_price || 0).toLocaleString('id-ID')}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-300 dark:border-gray-800">
-          {/* Batal */}
+        {/* Action Buttons Footer */}
+        <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
           <button
             type="button"
             onClick={onClose}
-            className="h-11 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-300 dark:border-gray-700 bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-gray-300 hover:bg-slate-200 transition cursor-pointer"
+            className={`h-10 rounded-xl font-normal text-xs leading-5 flex items-center justify-center gap-2 border transition-all duration-200 cursor-pointer active:scale-[0.99] ${
+              isLight
+                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
           >
             <X className="w-4 h-4" />
             <span>Batal [Esc]</span>
           </button>
 
-          {/* Tunda Pesanan */}
-          {onHoldOrder && (
-            <button
-              type="button"
-              onClick={onHoldOrder}
-              className="h-11 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition cursor-pointer"
-            >
-              <PauseCircle className="w-4 h-4" />
-              <span>Tunda (Hold)</span>
-            </button>
-          )}
-
-          {/* Tombol Utama Konfirmasi & Cetak Struk */}
           <button
             type="button"
-            disabled={isCreditAr && !selectedCustomer}
-            onClick={() => onConfirmPayment(paymentMethod)}
-            className={`h-11 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-lg active:scale-95 ${
-              isCreditAr && !selectedCustomer
-                ? 'opacity-50 cursor-not-allowed bg-gray-600 text-white'
-                : isCreditAr
-                ? 'bg-purple-600 hover:bg-purple-700 text-white border-2 border-purple-500 sm:col-span-1 col-span-2'
-                : 'bg-[#0052FF] hover:bg-[#0043d1] text-white border-2 border-blue-600 sm:col-span-1 col-span-2'
+            disabled={isSubmitDisabled}
+            onClick={() => {
+              if (isLaundryMode) {
+                onConfirmPayment(
+                  undefined,
+                  isLaundryDeferredPay
+                    ? {
+                        dpAmount: activeDpNominal,
+                        tempoDays: 7,
+                        dueDate: dueDateStr,
+                        remainingBalance: activeRemainingNominal,
+                      }
+                    : undefined
+                );
+                return;
+              }
+              onConfirmPayment(
+                isCreditAr ? 'KREDIT / TEMPO (AR)' : undefined,
+                isCreditAr
+                  ? { dpAmount: effectiveDp, tempoDays, dueDate: dueDateStr, remainingBalance }
+                  : undefined
+              );
+            }}
+            className={`h-10 rounded-xl font-medium text-xs leading-5 flex items-center justify-center gap-2 transition-all duration-200 cursor-pointer active:scale-[0.99] shadow-md ${
+              isSubmitDisabled
+                ? 'opacity-30 cursor-not-allowed bg-slate-400 dark:bg-slate-700 text-white'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-emerald-600/20'
             }`}
           >
-            <Printer className="w-4 h-4 shrink-0" />
+            <CheckCircle2 className="w-4 h-4" />
             <span>
-              {isCreditAr
-                ? !selectedCustomer
-                  ? 'Pilih Member Dulu'
-                  : 'Proses AR & Cetak [F10]'
-                : 'Bayar & Struk [F10]'}
+              {isLaundryMode && activeLaundryPayStatus === 'BAYAR_AMBIL'
+                ? 'Catat Order & Cetak Tag [Enter]'
+                : isLaundryMode && activeLaundryPayStatus === 'DP'
+                ? 'Catat DP & Cetak Tag [Enter]'
+                : 'Selesaikan Bayar [Enter]'}
             </span>
           </button>
         </div>

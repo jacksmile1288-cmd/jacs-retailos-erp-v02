@@ -49,17 +49,24 @@ export const SupplierPaymentModal: React.FC<SupplierPaymentModalProps> = ({
   const [paymentRef, setPaymentRef] = useState(
     po.payment_ref || `TRF-SUPP-${Date.now().toString().slice(-6)}`
   );
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onConfirmPayment(po.po_number, paymentStatus, {
-      paid_date: paidDate,
-      payment_method: paymentMethod,
-      payment_source: paymentSource,
-      payment_ref: paymentRef.trim(),
-      amount: paymentAmount,
-    });
-    onClose();
+    if (isProcessingPayment) return;
+    setIsProcessingPayment(true);
+    try {
+      onConfirmPayment(po.po_number, paymentStatus, {
+        paid_date: paidDate,
+        payment_method: paymentMethod,
+        payment_source: paymentSource,
+        payment_ref: paymentRef.trim(),
+        amount: paymentAmount,
+      });
+      onClose();
+    } catch {
+      setIsProcessingPayment(false);
+    }
   };
 
   const fundSources = [
@@ -92,15 +99,15 @@ export const SupplierPaymentModal: React.FC<SupplierPaymentModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-lg rounded-2xl p-6 shadow-2xl relative border my-8 max-h-[92vh] flex flex-col ${
+        className={`w-full max-w-lg rounded-2xl p-6 relative border my-8 max-h-[92vh] flex flex-col ${
           isLight
-            ? 'bg-white border-slate-300 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-gray-200'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition p-1"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-all p-1 active:scale-[0.99] cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -112,14 +119,14 @@ export const SupplierPaymentModal: React.FC<SupplierPaymentModalProps> = ({
           </div>
           <div>
             <h3
-              className={`font-bold text-base leading-tight ${
+              className={`font-medium text-base leading-6 ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
-              Pelunasan Tagihan Vendor & Mutasi Kas Finance
+              Pelunasan Tagihan Vendor &amp; Mutasi Kas Finance
             </h3>
-            <p className="text-[11px] text-gray-400 mt-0.5">
-              Integrasi langsung modul Purchasing $\rightarrow$ Finance & Accounting
+            <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400 mt-0.5">
+              Integrasi langsung modul Purchasing ➔ Finance &amp; Accounting
             </p>
           </div>
         </div>
@@ -351,16 +358,21 @@ export const SupplierPaymentModal: React.FC<SupplierPaymentModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition font-medium cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-[#21262d] text-gray-300 hover:bg-[#30363d] transition-all font-medium text-xs cursor-pointer active:scale-[0.99]"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold transition shadow-[0_0_15px_rgba(16,185,129,0.35)] flex items-center gap-1.5 cursor-pointer active:scale-95"
+              disabled={isProcessingPayment}
+              className={`px-5 py-2 rounded-xl font-medium text-xs transition-all flex items-center gap-1.5 ${
+                isProcessingPayment
+                  ? 'bg-slate-700/60 text-slate-400 border border-slate-600 cursor-not-allowed shadow-none'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.35)] cursor-pointer active:scale-[0.99]'
+              }`}
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>Konfirmasi Pelunasan & Catat Kas</span>
+              <span>{isProcessingPayment ? 'Memproses Pelunasan...' : 'Konfirmasi Pelunasan & Catat Kas'}</span>
             </button>
           </div>
         </form>

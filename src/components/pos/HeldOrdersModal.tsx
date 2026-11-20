@@ -10,6 +10,20 @@ export interface HeldOrder {
   total: number;
   customer?: CustomerMaster | null;
   priceTier?: PriceTier;
+  discountType?: 'IDR' | 'PERCENT';
+  discountVal?: number;
+  isFittingRoomHold?: boolean;
+  fittingRoomLabel?: string;
+  fashionAdvisorId?: string;
+  fashionAdvisorName?: string;
+  stationCode?: string;
+  isFnbHold?: boolean;
+  fnbTableNo?: string;
+  fnbOrderMode?: 'Dine-In' | 'Takeaway' | 'Delivery';
+  kotSent?: boolean;
+  kotSentAt?: number | null;
+  kotVoidedItems?: string[];
+  kotRevisedItems?: string[];
 }
 
 interface HeldOrdersModalProps {
@@ -44,6 +58,8 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
     return (
       o.name.toLowerCase().includes(q) ||
       (o.customer?.name || '').toLowerCase().includes(q) ||
+      (o.fnbTableNo || '').toLowerCase().includes(q) ||
+      (o.fnbOrderMode || '').toLowerCase().includes(q) ||
       o.items.some((i) => i.product.name.toLowerCase().includes(q))
     );
   });
@@ -56,16 +72,16 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
       <div
         className={`w-full max-w-xl rounded-2xl border shadow-2xl p-5 sm:p-6 relative overflow-hidden transition-all ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-900 shadow-slate-300/60'
-            : 'bg-[#161b22] border-[#30363d] text-white shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         }`}
       >
         <button
           onClick={onClose}
-          className={`absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer ${
+          className={`absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer ${
             isLight
               ? 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-gray-400 hover:text-white hover:bg-[#21262d]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
           }`}
           title={isEn ? 'Close' : 'Tutup'}
         >
@@ -75,20 +91,20 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between mb-4 pr-8">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-500 border border-amber-500/40 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 border border-amber-500/30 flex items-center justify-center shrink-0">
               <RotateCcw className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>{isEn ? 'Held Orders Queue (Recall)' : 'Daftar Antrean Tertahan (Hold / Recall)'}</span>
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40">
-                  {heldOrders.length} {isEn ? 'Held' : 'Tertahan'}
+              <h3 className="text-base leading-6 font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                <span>{isEn ? 'Held Orders Queue (Recall)' : 'Daftar Antrean Tertunda (Recall Cart)'}</span>
+                <span className="text-[11px] font-mono font-normal px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                  {heldOrders.length} {isEn ? 'Held' : 'Antrean'}
                 </span>
               </h3>
-              <p className="text-xs text-slate-600 dark:text-gray-400">
+              <p className="text-xs leading-5 font-normal text-slate-500 dark:text-slate-400">
                 {isEn
                   ? 'Resume customer cart orders that were paused in queue'
-                  : 'Panggil kembali transaksi pelanggan yang sedang antre'}
+                  : 'Panggil kembali keranjang belanja pelanggan yang sedang antre'}
               </p>
             </div>
           </div>
@@ -99,7 +115,7 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
           <div className="relative flex-1">
             <Search
               className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${
-                isLight ? 'text-slate-400' : 'text-gray-400'
+                isLight ? 'text-slate-400' : 'text-slate-500'
               }`}
             />
             <input
@@ -107,10 +123,10 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={isEn ? 'Search held queue by name / customer...' : 'Cari nama antrean / pelanggan...'}
-              className={`w-full pl-9 pr-3 py-2 rounded-xl text-xs font-semibold border transition outline-none ${
+              className={`w-full pl-9 pr-3 py-2 rounded-xl text-sm leading-5 font-normal placeholder:italic border transition outline-none ${
                 isLight
                   ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-amber-500'
-                  : 'bg-[#0d1117] border-[#30363d] text-white placeholder-slate-500 focus:border-amber-400'
+                  : 'bg-slate-950 border-slate-700 text-white placeholder-slate-500 focus:border-amber-400'
               }`}
             />
           </div>
@@ -122,7 +138,7 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
                 onClose();
                 onOpenHoldModal();
               }}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-sm"
+              className="px-3 py-2 rounded-xl text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 transition cursor-pointer shrink-0 shadow-xs active:scale-[0.99]"
               title="Tahan keranjang yang sedang aktif"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -161,73 +177,98 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
               return (
                 <div
                   key={`held-order-${order.id}-${orderIdx}`}
-                  className={`p-3.5 rounded-xl border transition flex items-center justify-between gap-3 ${
+                  className={`p-3 rounded-xl border transition flex items-center justify-between gap-3 ${
                     isLight
-                      ? 'bg-slate-50 hover:bg-white border-slate-200 hover:border-amber-400 hover:shadow-sm'
-                      : 'bg-[#0d1117] border-[#30363d] hover:border-amber-500/60'
+                      ? 'bg-slate-50 hover:bg-white border-slate-200 hover:border-amber-400/70 hover:shadow-xs'
+                      : 'bg-slate-800/40 border-slate-700/60 hover:border-amber-500/50'
                   }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                      <span className="font-normal text-sm leading-5 text-slate-900 dark:text-white truncate">
                         {order.name}
                       </span>
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold ${
+                        className={`text-[11px] px-2 py-0.5 rounded font-mono font-normal ${
                           isLight
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : 'bg-[#21262d] text-amber-400'
+                            ? 'bg-amber-100/70 text-amber-900 border border-amber-300'
+                            : 'bg-slate-800 text-amber-400 border border-slate-700'
                         }`}
                       >
                         <Clock className="w-2.5 h-2.5 inline mr-1" />
                         {order.timestamp}
                       </span>
                       {order.customer && (
-                        <span className="text-[10px] bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded font-bold truncate max-w-[140px]">
+                        <span className="text-[11px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 px-1.5 py-0.5 rounded font-mono font-normal truncate max-w-[140px]">
                           {order.customer.name}
                         </span>
                       )}
+                      {order.isFittingRoomHold && (
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/35 font-semibold">
+                          👗 {order.fittingRoomLabel || 'FITTING ROOM'}
+                        </span>
+                      )}
+                      {order.fashionAdvisorName && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                          Advisor: {order.fashionAdvisorName}
+                        </span>
+                      )}
+                      {order.isFnbHold && (
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35 font-semibold">
+                          {order.fnbOrderMode === 'Dine-In'
+                            ? `${order.fnbTableNo || 'Meja 01'} • Dine-In`
+                            : order.fnbOrderMode === 'Delivery'
+                            ? 'Delivery • Tanpa Meja (Kurir)'
+                            : 'Takeaway • Tanpa Meja (Bungkus)'}
+                        </span>
+                      )}
+                      {order.kotSent && (
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-semibold">
+                          KOT Terkirim
+                        </span>
+                      )}
                       {order.priceTier && order.priceTier !== 'RETAIL' && (
-                        <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 font-black">
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/30 font-normal">
                           {order.priceTier}
                         </span>
                       )}
                     </div>
 
-                    <div className="text-xs text-slate-600 dark:text-gray-400 mt-1 flex items-center gap-2">
-                      <span className="font-semibold">{totalItems} item ({order.items.length} SKU)</span>
+                    <div className="text-xs leading-5 text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2">
+                      <span className="font-normal">{totalItems} item ({order.items.length} SKU)</span>
                       <span>•</span>
-                      <span className="text-emerald-700 dark:text-[#00f2fe] font-mono font-bold">
+                      <span className="text-emerald-600 dark:text-emerald-400 font-mono font-semibold">
                         Rp {order.total.toLocaleString('id-ID')}
                       </span>
                     </div>
 
-                    <div className="text-[11px] text-slate-500 dark:text-gray-400 truncate max-w-sm mt-0.5">
+                    <div className="text-[11px] leading-4 text-slate-500 dark:text-slate-400 truncate max-w-sm mt-0.5">
                       {order.items.map((i) => `${i.product.name} (${i.quantity})`).join(', ')}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => onDelete(order.id)}
-                      className={`p-2 rounded-xl border transition cursor-pointer ${
+                      className={`px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 text-xs font-normal active:scale-[0.99] ${
                         isLight
                           ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'
                           : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30'
                       }`}
                       title={isEn ? 'Delete Held Queue' : 'Hapus Antrean'}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isEn ? 'Delete' : 'Hapus'}</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => onRecall(order)}
-                      className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-amber-500/20 active:scale-95"
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-[0.99]"
                     >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>{isEn ? 'Recall Cart' : 'Panggil (Recall)'}</span>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{isEn ? 'Restore Cart' : 'Pulihkan'}</span>
                     </button>
                   </div>
                 </div>
@@ -239,10 +280,10 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
         {/* Footer */}
         <div
           className={`mt-4 pt-3 border-t flex items-center justify-between text-xs ${
-            isLight ? 'border-slate-200 text-slate-600' : 'border-[#30363d] text-gray-400'
+            isLight ? 'border-slate-200 text-slate-600' : 'border-slate-800 text-slate-400'
           }`}
         >
-          <span className="text-[11px]">
+          <span className="text-[11px] font-normal">
             {isEn
               ? 'Tip: Recalling an order restores items and customer details to the cashier.'
               : 'Tip: Panggil (Recall) untuk memuat item & data pelanggan kembali ke kasir.'}
@@ -250,10 +291,10 @@ export const HeldOrdersModal: React.FC<HeldOrdersModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className={`px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+            className={`px-4 py-1.5 rounded-xl text-xs font-normal border transition cursor-pointer active:scale-[0.99] ${
               isLight
                 ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                : 'bg-[#21262d] border-[#30363d] text-gray-300 hover:bg-[#30363d]'
+                : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-700'
             }`}
           >
             {isEn ? 'Close' : 'Tutup'}

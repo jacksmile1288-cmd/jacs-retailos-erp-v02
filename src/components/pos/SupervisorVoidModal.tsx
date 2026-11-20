@@ -16,10 +16,13 @@ interface SupervisorVoidModalProps {
   onClose: () => void;
   item: CartItem | null;
   itemIndex: number | null;
-  onApprove: (item: CartItem, index: number, supervisorName: string, reason: string) => void;
+  onApprove: (item: CartItem | null, index: number | null, supervisorName: string, reason: string) => void;
   isLight?: boolean;
   language?: 'ID' | 'EN';
   users?: User[];
+  customTitle?: string;
+  customSubtitle?: string;
+  customBadge?: string;
 }
 
 const VOID_REASONS = [
@@ -40,6 +43,9 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
   isLight = false,
   language = 'ID',
   users = [],
+  customTitle,
+  customSubtitle,
+  customBadge,
 }) => {
   const [pinInput, setPinInput] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -76,7 +82,7 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, pinInput]);
 
-  if (!isOpen || !item || itemIndex === null) return null;
+  if (!isOpen) return null;
 
   const handleKeyPress = (num: string) => {
     if (pinInput.length < 4) {
@@ -145,7 +151,8 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
     }
   };
 
-  const lineSubtotal = item.subtotal || item.product.sell_price * item.quantity;
+  const isFullCartVoid = item === null;
+  const lineSubtotal = item ? (item.subtotal || item.product.sell_price * item.quantity) : 0;
 
   return (
     <div
@@ -155,17 +162,17 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
       <div
         className={`w-full max-w-md rounded-2xl border shadow-2xl p-5 sm:p-6 relative overflow-hidden transition-all ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-900 shadow-slate-300/60'
-            : 'bg-[#161b22] border-[#30363d] text-white shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         }`}
       >
         {/* Close Button */}
         <button
           onClick={onClose}
-          className={`absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer ${
+          className={`absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer ${
             isLight
               ? 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'
-              : 'text-gray-400 hover:text-white hover:bg-[#21262d]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800'
           }`}
           title={isEn ? 'Close' : 'Tutup'}
         >
@@ -174,55 +181,69 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
 
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-11 h-11 rounded-xl bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center justify-center shrink-0">
-            <ShieldAlert className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center justify-center shrink-0">
+            <ShieldAlert className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-base leading-tight text-slate-900 dark:text-white flex items-center gap-2">
-              <span>{isEn ? 'Supervisor Void Approval' : 'Otorisasi Void Supervisor'}</span>
-              <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400 border border-rose-300 dark:border-rose-500/40">
-                Otoritas Khusus
+            <h3 className="font-medium text-base leading-6 text-slate-900 dark:text-white flex items-center gap-2">
+              <span>{customTitle || (isEn ? 'Supervisor Void Approval' : 'Otorisasi Void Supervisor')}</span>
+              <span className="text-[11px] font-mono font-normal px-2 py-0.5 rounded bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30">
+                {customBadge || 'Otoritas Khusus'}
               </span>
             </h3>
-            <p className="text-xs text-slate-600 dark:text-gray-400 mt-0.5">
-              {isEn
-                ? 'Item line cancellation requires supervisor PIN authorization'
-                : 'Pembatalan item keranjang yang sudah di-scan memerlukan PIN Supervisor'}
+            <p className="text-xs leading-5 font-normal text-slate-500 dark:text-slate-400 mt-0.5">
+              {customSubtitle ||
+                (isEn
+                  ? isFullCartVoid ? 'Full transaction voiding requires supervisor PIN' : 'Item line cancellation requires supervisor PIN authorization'
+                  : isFullCartVoid ? 'Pembatalan seluruh transaksi (Void) memerlukan PIN Supervisor' : 'Pembatalan item keranjang yang sudah di-scan memerlukan PIN Supervisor')}
             </p>
           </div>
         </div>
 
-        {/* Item Details Card */}
-        <div
-          className={`p-3.5 rounded-xl border mb-4 space-y-1.5 ${
-            isLight
-              ? 'bg-rose-50/60 border-rose-200 text-slate-900'
-              : 'bg-rose-950/20 border-rose-500/30 text-white'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[10px] text-slate-500 dark:text-gray-400 font-bold">
-              BARCODE / SKU: {item.product.barcode || item.product.plu || item.product.id}
-            </span>
-            <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 font-mono">
-              Item #{itemIndex + 1}
-            </span>
-          </div>
+        {/* Item Details Card (Conditional) */}
+        {!isFullCartVoid && item && itemIndex !== null ? (
+          <div
+            className={`p-3.5 rounded-xl border mb-4 space-y-1.5 ${
+              isLight
+                ? 'bg-rose-50/40 border-rose-200 text-slate-900'
+                : 'bg-rose-950/20 border-rose-500/30 text-white'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 font-normal">
+                BARCODE / SKU: {item.product.barcode || item.product.plu || item.product.id}
+              </span>
+              <span className="text-[11px] font-mono font-normal text-rose-600 dark:text-rose-400">
+                Item #{itemIndex + 1}
+              </span>
+            </div>
 
-          <div className="font-bold text-sm text-slate-900 dark:text-white leading-snug">
-            {item.product.name}
-          </div>
+            <div className="font-normal text-sm leading-5 text-slate-900 dark:text-white">
+              {item.product.name}
+            </div>
 
-          <div className="flex items-center justify-between text-xs pt-1 border-t border-rose-200/60 dark:border-rose-500/20 font-semibold">
-            <span className="text-slate-600 dark:text-gray-300">
-              {item.quantity} {item.product.unit || 'pcs'} × Rp{' '}
-              {item.product.sell_price.toLocaleString('id-ID')}
-            </span>
-            <span className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
-              Nilai Void: Rp {lineSubtotal.toLocaleString('id-ID')}
-            </span>
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-rose-200/60 dark:border-rose-500/20">
+              <span className="text-slate-500 dark:text-slate-400 font-normal">
+                {item.quantity} {item.product.unit || 'pcs'} × Rp{' '}
+                {item.product.sell_price.toLocaleString('id-ID')}
+              </span>
+              <span className="font-mono font-semibold text-rose-600 dark:text-rose-400 text-sm">
+                Nilai Void: Rp {lineSubtotal.toLocaleString('id-ID')}
+              </span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/5 mb-4 text-center">
+            <div className="text-xs font-mono font-normal text-rose-500 uppercase tracking-widest mb-1">
+              {isEn ? 'VOID ALL ITEMS' : 'BATALKAN SELURUH TRANSAKSI'}
+            </div>
+            <p className="text-xs leading-5 font-normal text-rose-400">
+              {isEn 
+                ? 'Authorized supervisor must provide PIN to confirm full cart cancellation.' 
+                : 'Supervisor wajib memberikan PIN otorisasi untuk mengosongkan seluruh keranjang belanja.'}
+            </p>
+          </div>
+        )}
 
         {/* Reason Selection */}
         <div className="mb-4 space-y-1.5">
@@ -286,10 +307,10 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
               key={num}
               type="button"
               onClick={() => handleKeyPress(num)}
-              className={`h-11 rounded-xl font-bold text-lg border transition cursor-pointer active:scale-95 ${
+              className={`h-11 rounded-xl font-mono font-normal text-lg border transition cursor-pointer active:scale-[0.99] ${
                 isLight
                   ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 border-slate-300'
-                  : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d]'
+                  : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700'
               }`}
             >
               {num}
@@ -298,10 +319,10 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
           <button
             type="button"
             onClick={handleClear}
-            className={`h-11 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center ${
+            className={`h-11 rounded-xl text-xs font-normal border transition cursor-pointer flex items-center justify-center active:scale-[0.99] ${
               isLight
                 ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
-                : 'bg-[#21262d]/60 hover:bg-[#21262d] text-gray-400 border-[#30363d]'
+                : 'bg-slate-800/60 hover:bg-slate-800 text-slate-400 border-slate-700'
             }`}
           >
             CLEAR
@@ -309,10 +330,10 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
           <button
             type="button"
             onClick={() => handleKeyPress('0')}
-            className={`h-11 rounded-xl font-bold text-lg border transition cursor-pointer active:scale-95 ${
+            className={`h-11 rounded-xl font-mono font-normal text-lg border transition cursor-pointer active:scale-[0.99] ${
               isLight
                 ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 border-slate-300'
-                : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d]'
+                : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700'
             }`}
           >
             0
@@ -320,10 +341,10 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
           <button
             type="button"
             onClick={handleDelete}
-            className={`h-11 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center justify-center ${
+            className={`h-11 rounded-xl text-xs font-normal border transition cursor-pointer flex items-center justify-center active:scale-[0.99] ${
               isLight
                 ? 'bg-slate-100 hover:bg-rose-100 text-rose-600 border-slate-300'
-                : 'bg-[#21262d]/60 hover:bg-[#21262d] text-rose-400 border-[#30363d]'
+                : 'bg-slate-800/60 hover:bg-slate-800 text-rose-400 border-slate-700'
             }`}
           >
             <Delete className="w-5 h-5" />
@@ -333,14 +354,14 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
         {/* Quick Testing Dummy PIN Chips */}
         <div
           className={`pt-3 border-t text-[11px] ${
-            isLight ? 'border-slate-200 text-slate-600' : 'border-[#30363d] text-gray-400'
+            isLight ? 'border-slate-200 text-slate-600' : 'border-slate-800 text-slate-400'
           }`}
         >
           <div className="flex items-center justify-between mb-1.5">
-            <span className="font-bold text-slate-800 dark:text-gray-300">
+            <span className="font-normal text-slate-700 dark:text-slate-300">
               {isEn ? 'Quick Supervisor Authorization:' : 'Otorisasi Cepat Supervisor (Demo):'}
             </span>
-            <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+            <span className="text-[11px] font-mono font-normal text-cyan-600 dark:text-cyan-400">
               PIN: 1234 / 8888
             </span>
           </div>
@@ -348,34 +369,34 @@ export const SupervisorVoidModal: React.FC<SupervisorVoidModalProps> = ({
             <button
               type="button"
               onClick={() => verifySupervisorPin('1234')}
-              className={`p-2 rounded-xl border text-left cursor-pointer transition flex items-center justify-between ${
+              className={`p-2 rounded-xl border text-left cursor-pointer transition flex items-center justify-between active:scale-[0.99] ${
                 isLight
                   ? 'bg-slate-50 hover:bg-slate-100 border-slate-300 text-slate-900'
-                  : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-white'
+                  : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-white'
               }`}
             >
               <div>
-                <div className="font-bold text-[11px] text-slate-900 dark:text-white">
+                <div className="font-normal text-xs text-slate-900 dark:text-white">
                   Spv. Hendra
                 </div>
-                <div className="text-[10px] text-rose-600 dark:text-rose-400 font-mono">PIN: 1234</div>
+                <div className="text-[11px] text-rose-600 dark:text-rose-400 font-mono font-normal">PIN: 1234</div>
               </div>
               <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
             </button>
             <button
               type="button"
               onClick={() => verifySupervisorPin('8888')}
-              className={`p-2 rounded-xl border text-left cursor-pointer transition flex items-center justify-between ${
+              className={`p-2 rounded-xl border text-left cursor-pointer transition flex items-center justify-between active:scale-[0.99] ${
                 isLight
                   ? 'bg-slate-50 hover:bg-slate-100 border-slate-300 text-slate-900'
-                  : 'bg-[#0d1117] hover:bg-[#21262d] border-[#30363d] text-white'
+                  : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-white'
               }`}
             >
               <div>
-                <div className="font-bold text-[11px] text-slate-900 dark:text-white">
+                <div className="font-normal text-xs text-slate-900 dark:text-white">
                   Spv. Bambang
                 </div>
-                <div className="text-[10px] text-rose-600 dark:text-rose-400 font-mono">PIN: 8888</div>
+                <div className="text-[11px] text-rose-600 dark:text-rose-400 font-mono font-normal">PIN: 8888</div>
               </div>
               <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
             </button>

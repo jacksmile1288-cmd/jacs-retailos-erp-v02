@@ -1,7 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Product, RecipeItem, FBMenuCosting } from '../../types';
-import { INITIAL_RAW_INGREDIENTS } from '../../data/rawIngredientsData';
+import {
+  INITIAL_RAW_INGREDIENTS,
+  getDefaultRecipeForFnbMenu,
+  normalizeFnbRawMaterialId,
+} from '../../data/rawIngredientsData';
 import { FNB_PRODUCTS } from '../../data/fnbData';
 import {
   UtensilsCrossed,
@@ -22,7 +26,9 @@ import {
   Coffee,
   Check,
   Percent,
+  ChevronLeft,
 } from 'lucide-react';
+import { PromoCampaignCenterTab } from '../executive/PromoCampaignCenterTab';
 
 interface FBMasterModuleProps {
   onBackToOverview?: () => void;
@@ -39,6 +45,7 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     theme,
     language,
     showToast,
+    isMasterCatalogWiped,
   } = useApp();
 
   const isLight = theme === 'light';
@@ -49,6 +56,9 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [selectedMenu, setSelectedMenu] = useState<Product | null>(null);
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [showPromoCenter, setShowPromoCenter] = useState(false);
+
+
 
   // Form Input Menu F&B Modal State
   const [isMenuFormOpen, setIsMenuFormOpen] = useState(false);
@@ -56,7 +66,9 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
   const [formCode, setFormCode] = useState('');
   const [formName, setFormName] = useState('');
   const [formMenuType, setFormMenuType] = useState<'Makanan' | 'Minuman'>('Makanan');
-  const [formCategory, setFormCategory] = useState('Main Course');
+  const [formCategory, setFormCategory] = useState('Makanan Utama');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
   const [formCostPrice, setFormCostPrice] = useState<number | ''>('');
   const [formSellPrice, setFormSellPrice] = useState<number | ''>('');
   const [formImage, setFormImage] = useState('');
@@ -67,6 +79,71 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
   const [formSpicyEnabled, setFormSpicyEnabled] = useState(true);
   const [formTempSugarEnabled, setFormTempSugarEnabled] = useState(false);
   const [formStock, setFormStock] = useState<number | ''>(100);
+
+  // PPN State (Toggle & Rate)
+  const [ppnEnabled, setPpnEnabled] = useState(false);
+  const [ppnRate, setPpnRate] = useState<number | ''>(11);
+
+  // Mini BOM Manual State (3-4 rows)
+  const [miniBomRows, setMiniBomRows] = useState<Array<{ id: string; name: string; cost: number | '' }>>([
+    { id: 'bom-1', name: 'Biji Kopi / Bahan Utama', cost: 2500 },
+    { id: 'bom-2', name: 'Susu / Krimer / Pendamping', cost: 3500 },
+    { id: 'bom-3', name: 'Cup + Tutup / Kemasan', cost: 1000 },
+    { id: 'bom-4', name: 'Gula Aren / Sirup Spesial', cost: 1500 },
+  ]);
+
+  // OPEX Allocation % State (Default 20%)
+  const [opexPercent, setOpexPercent] = useState<number | ''>(20);
+
+  const totalFoodCostComputed = useMemo(() => {
+    return miniBomRows.reduce((acc, r) => acc + (Number(r.cost) || 0), 0);
+  }, [miniBomRows]);
+
+  // formData state for robust reactivity
+  const [formData, setFormData] = useState({
+    hargaJual: 25000,
+    totalFoodCost: 8500,
+    alokasiOpex: 20,
+  });
+
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      hargaJual: Number(formSellPrice) || prev.hargaJual || 25000,
+      totalFoodCost: Number(formCostPrice) > 0 ? Number(formCostPrice) : (totalFoodCostComputed > 0 ? totalFoodCostComputed : prev.totalFoodCost || 8500),
+      alokasiOpex: Number(opexPercent) || prev.alokasiOpex || 20,
+    }));
+  }, [formSellPrice, formCostPrice, totalFoodCostComputed, opexPercent]);
+
+  // Computed Values Wajib Reaktif
+  const sellingPrice = Number(formData.hargaJual) || 0;
+  const foodCost = Number(formData.totalFoodCost) || 0;
+  const opexPercentVal = Number(formData.alokasiOpex) || 0;
+
+  const nominalOpex = Math.round((sellingPrice * opexPercentVal) / 100);
+  const hppRiil = foodCost + nominalOpex;
+  const grossMargin = sellingPrice > 0 ? Math.round(((sellingPrice - foodCost) / sellingPrice) * 100) : 0;
+  const netProfitEst = sellingPrice > 0 ? Math.round(((sellingPrice - hppRiil) / sellingPrice) * 100) : 0;
+
+  const ppnAmount = useMemo(() => {
+    if (!ppnEnabled || sellingPrice <= 0) return 0;
+    const rate = Number(ppnRate) || 11;
+    return Math.round((sellingPrice * rate) / 100);
+  }, [ppnEnabled, sellingPrice, ppnRate]);
+
+  const finalPriceWithPpn = useMemo(() => {
+    return sellingPrice + ppnAmount;
+  }, [sellingPrice, ppnAmount]);
+
+  const namePresets = useMemo(() => {
+    if (formMenuType === 'Makanan') {
+      return ['Nasi Goreng Spesial', 'Ayam Bakar Madu', 'French Fries', 'Dimsum Ayam'];
+    }
+    if (formCategory === 'Kopi Panas') {
+      return ['Espresso Shot', 'Hot Cafe Latte', 'Hot Cappuccino', 'Hot Americano'];
+    }
+    return ['Es Kopi Susu Aren', 'Iced Caramel Macchiato', 'Cold Brew Latte', 'Iced Americano'];
+  }, [formMenuType, formCategory]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -84,7 +161,9 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     setFormCode(`FNB-${Date.now().toString().slice(-4)}`);
     setFormName('');
     setFormMenuType('Makanan');
-    setFormCategory('Main Course');
+    setFormCategory('Makanan Utama');
+    setIsCustomCategory(false);
+    setCustomCategoryInput('');
     setFormCostPrice('');
     setFormSellPrice('');
     setFormImage('');
@@ -93,6 +172,51 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     setFormSpicyEnabled(true);
     setFormTempSugarEnabled(false);
     setFormStock(100);
+    setMiniBomRows([
+      { id: 'bom-1', name: 'Biji Kopi / Bahan Utama', cost: 2500 },
+      { id: 'bom-2', name: 'Susu / Krimer / Pendamping', cost: 3500 },
+      { id: 'bom-3', name: 'Cup + Tutup / Kemasan', cost: 1000 },
+      { id: 'bom-4', name: 'Gula Aren / Sirup Spesial', cost: 1500 },
+    ]);
+    setOpexPercent(20);
+    setPpnEnabled(false);
+    setPpnRate(11);
+  };
+
+  const handleAutoCalculateHPP = () => {
+    let calculatedHpp = 0;
+
+    // Check if editing an existing menu with recipe or costing
+    if (editingMenuId) {
+      const existing = fnbMenus.find((m) => m.id === editingMenuId);
+      if (existing) {
+        if (existing.costing?.totalCost && existing.costing.totalCost > 0) {
+          calculatedHpp = existing.costing.totalCost;
+        } else if (existing.recipe && existing.recipe.length > 0) {
+          const recipeSum = existing.recipe.reduce((acc: number, item: any) => {
+            const qty = item.portionQty ?? item.qty ?? 1;
+            const cost = item.costPerUnit ?? 0;
+            return acc + (item.subtotalCost ?? (qty * cost));
+          }, 0);
+          calculatedHpp = recipeSum + (existing.costing?.operationalCost ?? 2000);
+        }
+      }
+    }
+
+    // Fallback: if selling price exists, estimate 45% standard F&B HPP
+    if (calculatedHpp <= 0 && formSellPrice && Number(formSellPrice) > 0) {
+      calculatedHpp = Number(formSellPrice) * 0.45;
+    }
+
+    if (calculatedHpp <= 0) {
+      showToast('Isi "Harga Jual (POS)" atau susun resep BOM terlebih dahulu untuk auto-hitung HPP!');
+      return;
+    }
+
+    // Round to nearest 100 rupiah
+    const roundedHpp = Math.round(calculatedHpp / 100) * 100;
+    setFormCostPrice(roundedHpp);
+    showToast(`HPP berhasil dihitung otomatis: Rp ${roundedHpp.toLocaleString('id-ID')} (Dibulatkan)`);
   };
 
   const handleOpenAddMenuModal = () => {
@@ -104,16 +228,50 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     setEditingMenuId(menu.id);
     setFormCode(menu.id);
     setFormName(menu.name);
-    setFormMenuType((menu.menuType as any) === 'Minuman' ? 'Minuman' : 'Makanan');
-    setFormCategory(menu.category || 'Main Course');
-    setFormCostPrice(menu.cost_price || menu.costPrice || 0);
-    setFormSellPrice(menu.sell_price || menu.sellingPrice || 0);
+
+    const mType = (menu.menuType as any) === 'Minuman' || ['Es Kopi / Kopi Dingin', 'Kopi Panas', 'Minuman Segar & Non-Kopi', 'Teh & Minuman Segar', 'Minuman Kemasan', 'Coffee', 'Non-Coffee', 'Beverage', 'Minuman Kopi', 'Minuman Segar', 'Minuman'].includes(menu.category || '') ? 'Minuman' : 'Makanan';
+    setFormMenuType(mType);
+
+    const makananCats = ['Makanan Utama', 'Snack & Camilan', 'Pastry & Bakery', 'Dessert & Manisan', 'Paket Hemat / Combo', 'Snack'];
+    const minumanCats = ['Es Kopi / Kopi Dingin', 'Kopi Panas', 'Minuman Segar & Non-Kopi', 'Teh & Minuman Segar', 'Minuman Kemasan', 'Minuman Kopi', 'Minuman Segar', 'Minuman'];
+
+    const cat = menu.category || (mType === 'Minuman' ? 'Es Kopi / Kopi Dingin' : 'Makanan Utama');
+    const isStandard = mType === 'Makanan' ? makananCats.includes(cat) : minumanCats.includes(cat);
+
+    if (isStandard) {
+      setIsCustomCategory(false);
+      setFormCategory(cat);
+      setCustomCategoryInput('');
+    } else {
+      setIsCustomCategory(true);
+      setFormCategory('CUSTOM');
+      setCustomCategoryInput(cat);
+    }
+
+    setFormCostPrice(menu.cost_price || menu.costPrice || menu.costing?.rawMaterialHPP || '');
+    setFormSellPrice(menu.sell_price || menu.sellingPrice || menu.costing?.calculatedSellingPrice || 25000);
     setFormImage(menu.image || '');
-    setFormToppingEnabled(menu.toppingEnabled || false);
+    setFormToppingEnabled(menu.toppingEnabled || (menu.toppings && menu.toppings.length > 0) || false);
     setFormToppings(menu.toppings && menu.toppings.length > 0 ? menu.toppings : [{ id: 'top-1', name: 'Extra Topping', price: 4000 }]);
     setFormSpicyEnabled(menu.spicyEnabled ?? true);
     setFormTempSugarEnabled(menu.temperatureSugarEnabled ?? false);
     setFormStock(menu.stock ?? 100);
+
+    // PPN state
+    setPpnEnabled(menu.ppnEnabled ?? false);
+    setPpnRate(menu.ppnRate ?? 11);
+
+    // If recipe exists, populate mini BOM rows
+    if (menu.recipe && menu.recipe.length > 0) {
+      setMiniBomRows(
+        menu.recipe.map((r: any, idx: number) => ({
+          id: `bom-edit-${idx}`,
+          name: r.ingredientName || r.name || 'Bahan',
+          cost: r.subtotalCost ?? (r.portionQty || r.qty || 1) * (r.costPerUnit || 1000),
+        }))
+      );
+    }
+
     setIsMenuFormOpen(true);
   };
 
@@ -134,11 +292,15 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
       return;
     }
 
+    const finalCategory = isCustomCategory
+      ? (customCategoryInput.trim() || 'Kategori Kustom')
+      : formCategory;
+
     const menuData = {
       id: finalCode,
       barcode: finalCode,
       name: formName.trim(),
-      category: formCategory,
+      category: finalCategory,
       itemType: 'MENU_FB' as const,
       businessModel: 'fnb',
       cost_price: cost,
@@ -153,12 +315,15 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
       toppings: formToppingEnabled ? formToppings : [],
       spicyEnabled: formMenuType === 'Makanan' ? formSpicyEnabled : false,
       temperatureSugarEnabled: formMenuType === 'Minuman' ? formTempSugarEnabled : false,
+      ppnEnabled: ppnEnabled,
+      ppnRate: Number(ppnRate) || 11,
+      finalPriceWithPpn: finalPriceWithPpn,
       costing: {
         rawMaterialHPP: cost,
-        operationalCost: 2000,
-        totalCost: cost + 2000,
-        targetMarginPercent: sell > 0 ? Math.round(((sell - (cost + 2000)) / sell) * 100) : 50,
-        calculatedSellingPrice: sell,
+        operationalCost: nominalOpex,
+        totalCost: hppRiil,
+        targetMarginPercent: netProfitEst,
+        calculatedSellingPrice: finalPriceWithPpn,
       },
     };
 
@@ -204,21 +369,23 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
         (p.id || '').startsWith('FNB-')
     );
 
-    // Fallback merge with FNB_PRODUCTS if some are missing
+    // Fallback merge with FNB_PRODUCTS if some are missing (unless catalog was explicitly wiped via Level 2/4 Reset)
     const seenIds = new Set(fromState.map((p) => p.id));
     const merged = [...fromState];
-    FNB_PRODUCTS.forEach((fp) => {
-      if (!seenIds.has(fp.id)) {
-        merged.push(fp);
-      }
-    });
+    if (!isMasterCatalogWiped) {
+      FNB_PRODUCTS.forEach((fp) => {
+        if (!seenIds.has(fp.id)) {
+          merged.push(fp);
+        }
+      });
+    }
 
     return merged
       .filter((p) => {
         // Exclude raw materials strictly
         if (p.itemType === 'RAW_MATERIAL') return false;
         const idLower = (p.id || '').toLowerCase();
-        if (idLower.startsWith('ing-') || idLower.startsWith('raw-')) return false;
+        if (idLower.startsWith('ing-') || idLower.startsWith('raw-') || idLower.startsWith('rm-fnb-')) return false;
         const catLower = (p.category || '').toLowerCase();
         if (catLower.includes('bahan baku') || catLower.includes('bahan mentah')) return false;
 
@@ -233,53 +400,44 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
         return matchSearch && matchCat;
       })
       .map((menu): Product => {
-        // Koreksi Data Default Resep FNB-001 (Nasi Goreng Wagyu)
-        // Perbaiki jika baris pertama keliru (Telur 150 pcs Rp 300.000 -> Beras Putih Pandan Wangi 150 gr Rp 2.250)
-        if (menu.id === 'FNB-001' || menu.name.toLowerCase().includes('nasi goreng wagyu')) {
-          const currentRecipe = menu.costing?.recipe || (menu.recipe as any[]) || [];
-          const hasWrongTelur = currentRecipe.some(
-            (r: any) =>
-              (r.ingredientId === 'ING-004' || (r.name || r.ingredientName || '').toLowerCase().includes('telur')) &&
-              (r.portionQty === 150 || r.qty === 150)
-          );
+        const defaultDef = getDefaultRecipeForFnbMenu(menu);
+        const currentRecipe = menu.costing?.recipe || (menu.recipe as any[]) || [];
+        const isRiceDish =
+          menu.name.toLowerCase().includes('nasi') ||
+          menu.name.toLowerCase().includes('paket');
+        const hasAccidentalGenericRice =
+          !isRiceDish &&
+          currentRecipe.length === 3 &&
+          currentRecipe[0] &&
+          ((currentRecipe[0].ingredientId || '').includes('001') ||
+            (currentRecipe[0].name || currentRecipe[0].ingredientName || '').toLowerCase().includes('beras'));
 
-          if (hasWrongTelur || !menu.costing || (menu.costing?.rawMaterialHPP ?? 0) > 100000) {
-            const correctedRecipe: RecipeItem[] = [
-              { ingredientId: 'ING-001', ingredientName: 'Beras Putih Pandan Wangi', portionQty: 150, unit: 'gr', costPerUnit: 15, subtotalCost: 2250 },
-              { ingredientId: 'ING-002', ingredientName: 'Daging Sapi Wagyu Slice', portionQty: 80, unit: 'gr', costPerUnit: 180, subtotalCost: 14400 },
-              { ingredientId: 'ING-004', ingredientName: 'Telur Ayam Negeri', portionQty: 1, unit: 'pcs', costPerUnit: 2000, subtotalCost: 2000 },
-              { ingredientId: 'ING-005', ingredientName: 'Bumbu Racik Rempah Spesial', portionQty: 1, unit: 'porsi', costPerUnit: 3500, subtotalCost: 3500 },
-              { ingredientId: 'ING-006', ingredientName: 'Minyak Goreng Sawit', portionQty: 25, unit: 'ml', costPerUnit: 18, subtotalCost: 450 },
-            ];
-            const opCost = menu.costing?.operationalCost ?? menu.packagingCost ?? 1500;
-            const targetMargin = menu.costing?.targetMarginPercent ?? 45;
-            const waste = menu.costing?.wastePercentage ?? menu.wastePercent ?? 5;
-            const calculatedCosting = calculateFBMenuHPP(correctedRecipe, opCost, targetMargin, waste);
-            const recipeForProduct = correctedRecipe.map((r) => ({
-              ingredientId: r.ingredientId,
-              name: r.ingredientName,
-              ingredientName: r.ingredientName,
-              qty: r.portionQty,
-              portionQty: r.portionQty,
-              unit: r.unit,
-              costPerUnit: r.costPerUnit,
-              subtotalCost: r.subtotalCost,
-            }));
-
-            return {
-              ...menu,
-              recipe: recipeForProduct,
-              costing: calculatedCosting,
-              cost_price: calculatedCosting.totalCost ?? 25230,
-            };
-          }
+        if (currentRecipe.length === 0 || hasAccidentalGenericRice) {
+          return {
+            ...menu,
+            recipe: defaultDef.recipe,
+            cost_price: menu.cost_price && menu.cost_price > 0 ? menu.cost_price : defaultDef.rawMaterialCost,
+            costing: {
+              ...(menu.costing || {}),
+              recipe: defaultDef.recipe,
+              rawMaterialCost: defaultDef.rawMaterialCost,
+              rawMaterialHPP: defaultDef.rawMaterialCost,
+              operationalCost: defaultDef.operationalCost,
+              wastePercentage: defaultDef.wastePercent,
+              targetMarginPercent: defaultDef.targetMarginPercent,
+              totalCost: menu.cost_price && menu.cost_price > 0 ? menu.cost_price : defaultDef.rawMaterialCost,
+              recommendedPrice: menu.sell_price,
+              actualPrice: menu.sell_price,
+            },
+          };
         }
+
         return {
           ...menu,
-          cost_price: menu.cost_price ?? 0,
+          cost_price: menu.cost_price ?? defaultDef.rawMaterialCost,
         };
       });
-  }, [products, searchQuery, categoryFilter, calculateFBMenuHPP]);
+  }, [products, searchQuery, categoryFilter, calculateFBMenuHPP, isMasterCatalogWiped]);
 
   // Categories present in F&B menus
   const fnbCategories = useMemo(() => {
@@ -296,13 +454,14 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
       .filter(
         (p) =>
           p.itemType === 'RAW_MATERIAL' ||
+          (p.id || '').toLowerCase().startsWith('rm-fnb-') ||
           (p.id || '').toLowerCase().startsWith('ing-') ||
           (p.id || '').toLowerCase().startsWith('raw-') ||
           (p.category || '').toLowerCase().includes('bahan baku') ||
           (p.category || '').toLowerCase().includes('bahan mentah')
       )
       .map((p) => ({
-        id: p.id,
+        id: normalizeFnbRawMaterialId(p.id),
         name: p.name,
         unit: p.unit || 'gr',
         costPerUnit: p.cost_price || p.sell_price || 10,
@@ -318,8 +477,15 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     }));
 
     const combinedMap = new Map<string, { id: string; name: string; unit: string; costPerUnit: number; stock: number }>();
-    rawFromInitial.forEach((r) => combinedMap.set(r.id, r));
     rawFromProducts.forEach((r) => combinedMap.set(r.id, r));
+    // Prioritaskan data kanonik INITIAL_RAW_INGREDIENTS untuk 20 SKU RM-FNB-001..020
+    rawFromInitial.forEach((r) => {
+      const existing = combinedMap.get(r.id);
+      combinedMap.set(r.id, {
+        ...r,
+        stock: existing?.stock ?? r.stock,
+      });
+    });
     customRawMaterials.forEach((r) => combinedMap.set(r.id, r));
 
     return Array.from(combinedMap.values());
@@ -335,12 +501,21 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
   const handleOpenCalculator = (menu: Product) => {
     setSelectedMenu(menu);
 
+    const defaultDef = getDefaultRecipeForFnbMenu(menu);
+
     // Initialize recipe from menu's existing recipe or costing
     let existingRecipe: RecipeItem[] = (menu.costing?.recipe && menu.costing.recipe.length > 0)
-      ? menu.costing.recipe
+      ? menu.costing.recipe.map((r: any) => ({
+          ingredientId: normalizeFnbRawMaterialId(r.ingredientId),
+          ingredientName: r.ingredientName || r.name || 'Bahan',
+          portionQty: r.portionQty ?? r.qty ?? 100,
+          unit: r.unit || 'gr',
+          costPerUnit: r.costPerUnit || 15,
+          subtotalCost: r.subtotalCost ?? ((r.portionQty ?? r.qty ?? 100) * (r.costPerUnit || 15)),
+        }))
       : (menu.recipe && menu.recipe.length > 0)
       ? menu.recipe.map((r: any) => ({
-          ingredientId: r.ingredientId,
+          ingredientId: normalizeFnbRawMaterialId(r.ingredientId),
           ingredientName: r.ingredientName || r.name || 'Bahan',
           portionQty: r.portionQty ?? r.qty ?? 100,
           unit: r.unit || 'gr',
@@ -349,57 +524,42 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
         }))
       : [];
 
-    // Koreksi Data Default Resep FNB-001 (Nasi Goreng Wagyu)
-    // Perbaiki baris pertama yang salah input: ganti "Telur Ayam Negeri 150 pcs (Rp 300.000)" menjadi "Beras Putih Pandan Wangi 150 gr (Rp 15/gr = Rp 2.250)"
-    if (menu.id === 'FNB-001' || menu.name.toLowerCase().includes('nasi goreng wagyu')) {
-      const hasWrongTelur = existingRecipe.some(
-        (r) =>
-          (r.ingredientId === 'ING-004' || r.ingredientName.toLowerCase().includes('telur')) &&
-          r.portionQty === 150
+    const isRiceDish =
+      menu.name.toLowerCase().includes('nasi') ||
+      menu.name.toLowerCase().includes('paket');
+    const hasAccidentalGenericRice =
+      !isRiceDish &&
+      existingRecipe.length === 3 &&
+      existingRecipe[0] &&
+      ((existingRecipe[0].ingredientId || '').includes('001') ||
+        (existingRecipe[0].ingredientName || '').toLowerCase().includes('beras'));
+
+    // Untuk Kopi Susu Gula Aren Signature atau menu yang belum punya resep kustom, muat resep spesifik menu
+    if (
+      existingRecipe.length === 0 ||
+      hasAccidentalGenericRice ||
+      menu.id === 'FNB-KOP-AREN'
+    ) {
+      setModalRecipe(
+        defaultDef.recipe.map((r) => ({
+          ingredientId: r.ingredientId,
+          ingredientName: r.ingredientName,
+          portionQty: r.portionQty,
+          unit: r.unit,
+          costPerUnit: r.costPerUnit,
+          subtotalCost: r.subtotalCost,
+        }))
       );
-      if (hasWrongTelur || existingRecipe.length === 0) {
-        existingRecipe = [
-          { ingredientId: 'ING-001', ingredientName: 'Beras Putih Pandan Wangi', portionQty: 150, unit: 'gr', costPerUnit: 15, subtotalCost: 2250 },
-          { ingredientId: 'ING-002', ingredientName: 'Daging Sapi Wagyu Slice', portionQty: 80, unit: 'gr', costPerUnit: 180, subtotalCost: 14400 },
-          { ingredientId: 'ING-004', ingredientName: 'Telur Ayam Negeri', portionQty: 1, unit: 'pcs', costPerUnit: 2000, subtotalCost: 2000 },
-          { ingredientId: 'ING-005', ingredientName: 'Bumbu Racik Rempah Spesial', portionQty: 1, unit: 'porsi', costPerUnit: 3500, subtotalCost: 3500 },
-          { ingredientId: 'ING-006', ingredientName: 'Minyak Goreng Sawit', portionQty: 25, unit: 'ml', costPerUnit: 18, subtotalCost: 450 },
-        ];
-      } else {
-        existingRecipe = existingRecipe.map((item) => {
-          if ((item.ingredientId === 'ING-004' || item.ingredientName.toLowerCase().includes('telur')) && item.portionQty === 150) {
-            return {
-              ingredientId: 'ING-001',
-              ingredientName: 'Beras Putih Pandan Wangi',
-              portionQty: 150,
-              unit: 'gr',
-              costPerUnit: 15,
-              subtotalCost: 2250,
-            };
-          }
-          return item;
-        });
-      }
-    }
-
-    if (existingRecipe.length > 0) {
-      setModalRecipe(existingRecipe);
+      setModalOperationalCost(defaultDef.operationalCost);
+      setModalTargetMargin(defaultDef.targetMarginPercent);
+      setModalWastePercentage(defaultDef.wastePercent);
     } else {
-      // Default sample starter ingredients for convenience
-      const defaultRaw = availableRawMaterials.slice(0, 3).map((raw) => ({
-        ingredientId: raw.id,
-        ingredientName: raw.name,
-        portionQty: raw.unit === 'pcs' ? 1 : 100,
-        unit: raw.unit,
-        costPerUnit: raw.costPerUnit,
-        subtotalCost: (raw.unit === 'pcs' ? 1 : 100) * raw.costPerUnit,
-      }));
-      setModalRecipe(defaultRaw);
+      setModalRecipe(existingRecipe);
+      setModalOperationalCost(menu.costing?.operationalCost ?? menu.packagingCost ?? defaultDef.operationalCost);
+      setModalTargetMargin(menu.costing?.targetMarginPercent ?? defaultDef.targetMarginPercent);
+      setModalWastePercentage(menu.costing?.wastePercentage ?? menu.wastePercent ?? defaultDef.wastePercent);
     }
 
-    setModalOperationalCost(menu.costing?.operationalCost ?? menu.packagingCost ?? 3500);
-    setModalTargetMargin(menu.costing?.targetMarginPercent ?? 60);
-    setModalWastePercentage(menu.costing?.wastePercentage ?? menu.wastePercent ?? 5);
     setIsCalculatorOpen(true);
   };
 
@@ -468,7 +628,7 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
     }
     const stockVal = Number(newIngStock) || 0;
     const minStockVal = Number(newIngMinStock) || 0;
-    const newId = `ING-${Date.now().toString().slice(-4)}`;
+    const newId = `RM-FNB-${Date.now().toString().slice(-3)}`;
 
     const newRawItem = {
       id: newId,
@@ -582,12 +742,32 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
           </div>
           <div>
             <h2 className={`text-xl font-bold tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              Food & Beverage (F&B)
+              {showPromoCenter ? 'Pusat Promo, Broadcast WA & Studio Poster F&B' : 'Food & Beverage (F&B)'}
             </h2>
           </div>
         </div>
 
-        <div>
+        <div className="flex items-center gap-2">
+          {showPromoCenter ? (
+            <button
+              type="button"
+              onClick={() => setShowPromoCenter(false)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-white flex items-center gap-1.5 cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Kembali ke Katalog Menu</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowPromoCenter(true)}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white shadow-md flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Pusat Promo, WA &amp; Poster</span>
+            </button>
+          )}
+
           <button
             type="button"
             id="btn-tambah-menu-fnb"
@@ -599,6 +779,11 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
           </button>
         </div>
       </div>
+
+      {showPromoCenter ? (
+        <PromoCampaignCenterTab isDark={!isLight} />
+      ) : (
+        <>
 
       {/* Summary KPI Badges (Border 3D Neon Solid in Dark, Clean Thin Border in Light) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
@@ -739,20 +924,18 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
             }`}>
               <tr>
                 <th className="py-3.5 px-3 text-center w-12">No</th>
-                <th className="py-3.5 px-3 text-center w-16">Foto Menu</th>
-                <th className="py-3.5 px-3">Kategori</th>
-                <th className="py-3.5 px-4">ID / Nama Menu</th>
-                <th className="py-3.5 px-3 text-right">HPP</th>
+                <th className="py-3.5 px-3">Category</th>
+                <th className="py-3.5 px-4">Barcode / ID / Nama Product</th>
+                <th className="py-3.5 px-3 text-right">Harga HPP</th>
                 <th className="py-3.5 px-3 text-right">Harga Jual</th>
-                <th className="py-3.5 px-3 text-center">Topping (Ya/Tidak)</th>
-                <th className="py-3.5 px-3 text-center">Status Stok</th>
+                <th className="py-3.5 px-3 text-center">Stock Status</th>
                 <th className="py-3.5 px-4 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-[#30363d]/60">
               {fnbMenus.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-gray-400">
+                  <td colSpan={7} className="py-12 text-center text-gray-400">
                     <UtensilsCrossed className="w-10 h-10 mx-auto opacity-30 mb-2" />
                     <p className="font-semibold text-sm">Tidak ada menu F&B yang ditemukan</p>
                     <p className="text-xs text-gray-500 mt-0.5">Silakan ganti kata kunci pencarian atau filter kategori</p>
@@ -762,6 +945,7 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
                 fnbMenus.map((menu, idx) => {
                   const costing = menu.costing;
                   const rawHpp = costing?.totalCost ?? costing?.rawMaterialHPP ?? menu.cost_price ?? 0;
+                  const roundedHpp = Math.round((rawHpp || 0) / 100) * 100;
                   const sellPrice = menu.sell_price || 0;
 
                   return (
@@ -771,108 +955,106 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
                         isLight ? 'hover:bg-slate-50' : 'hover:bg-[#1f242c]'
                       }`}
                     >
-                      {/* No */}
+                      {/* 1. No */}
                       <td className="py-3 px-3 text-center font-mono font-bold text-gray-400">
                         {idx + 1}
                       </td>
 
-                      {/* Foto Menu */}
-                      <td className="py-3 px-3 text-center">
-                        <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-200 dark:bg-black/40 border border-slate-300 dark:border-gray-700 mx-auto flex items-center justify-center">
-                          {menu.image ? (
-                            <img
-                              src={menu.image}
-                              alt={menu.name}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <UtensilsCrossed className="w-5 h-5 text-emerald-400" />
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Kategori */}
+                      {/* 2. Category */}
                       <td className="py-3 px-3">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-200/80 dark:bg-black/30 border border-slate-300 dark:border-gray-700 text-slate-700 dark:text-gray-300">
+                        <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-200/80 dark:bg-black/40 border border-slate-300 dark:border-gray-700 text-slate-700 dark:text-gray-300">
                           {menu.category || 'F&B'}
                         </span>
                       </td>
 
-                      {/* ID / Nama Menu */}
+                      {/* 3. Barcode / ID / Nama Product (Foto thumbnail & badge topping) */}
                       <td className="py-3 px-4">
-                        <span className="font-bold text-xs block text-slate-900 dark:text-white line-clamp-1">
-                          {menu.name}
-                        </span>
-                        <span className="text-[10px] text-slate-500 dark:text-gray-400 font-mono">
-                          ID: {menu.id} {menu.menuType ? `• ${menu.menuType}` : ''}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-200 dark:bg-black/40 border border-slate-300 dark:border-gray-700 shrink-0 flex items-center justify-center">
+                            {menu.image ? (
+                              <img
+                                src={menu.image}
+                                alt={menu.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <UtensilsCrossed className="w-5 h-5 text-emerald-400" />
+                            )}
+                          </div>
+                          <div>
+                            <span className="font-bold text-xs block text-slate-900 dark:text-white line-clamp-1">
+                              {menu.name}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              <span className="text-[10px] text-slate-500 dark:text-gray-400 font-mono">
+                                ID: {menu.id} {menu.barcode ? `• ${menu.barcode}` : ''}
+                              </span>
+                              {menu.toppingEnabled && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  Topping (+{menu.toppings?.length || 0})
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </td>
 
-                      {/* HPP */}
+                      {/* 4. Harga HPP (Dibulatkan ke 100 rupiah terdekat) */}
                       <td className="py-3 px-3 text-right font-mono font-bold text-slate-800 dark:text-gray-200">
-                        Rp {rawHpp.toLocaleString('id-ID')}
+                        Rp {roundedHpp.toLocaleString('id-ID')}
                       </td>
 
-                      {/* Harga Jual */}
+                      {/* 5. Harga Jual */}
                       <td className="py-3 px-3 text-right font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm">
                         Rp {sellPrice.toLocaleString('id-ID')}
                       </td>
 
-                      {/* Topping (Ya/Tidak) */}
-                      <td className="py-3 px-3 text-center">
-                        {menu.toppingEnabled ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            Ya ({menu.toppings?.length || 0})
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-500/10 text-slate-500 dark:text-gray-400 border border-gray-600/30">
-                            Tidak
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Status Stok */}
+                      {/* 6. Stock Status */}
                       <td className="py-3 px-3 text-center">
                         {(menu.stock ?? 100) > 0 ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
                             Active ({menu.stock ?? 100})
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">
                             Out of Stock
                           </span>
                         )}
                       </td>
 
-                      {/* Aksi */}
+                      {/* 7. Aksi (3 tombol lengkap: [Resep] [Edit] [Delete]) */}
                       <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditMenuModal(menu)}
-                            className="p-1.5 rounded-lg text-blue-400 hover:text-white hover:bg-blue-600/20 transition cursor-pointer"
-                            title="Edit Menu F&B"
-                          >
-                            <Layers className="w-3.5 h-3.5" />
-                          </button>
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           <button
                             type="button"
                             id={`btn-atur-resep-${menu.id.toLowerCase()}`}
                             onClick={() => handleOpenCalculator(menu)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-xs transition cursor-pointer inline-flex items-center gap-1"
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-xs transition cursor-pointer inline-flex items-center gap-1"
                             title="Atur Resep BOM & HPP"
                           >
-                            <Calculator className="w-3 h-3" />
+                            <Calculator className="w-3.5 h-3.5" />
                             <span>Resep</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditMenuModal(menu)}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition cursor-pointer inline-flex items-center gap-1"
+                            title="Edit Menu F&B"
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleDeleteMenu(menu.id, menu.name)}
-                            className="p-1.5 rounded-lg text-rose-400 hover:text-white hover:bg-rose-600/20 transition cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/40 shadow-xs transition cursor-pointer inline-flex items-center gap-1"
                             title="Hapus Menu"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
                           </button>
                         </div>
                       </td>
@@ -1450,12 +1632,12 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
       {isMenuFormOpen && (
         <div
           id="modal-menu-fnb-form"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto animate-in fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 overflow-y-auto animate-in fade-in"
           onClick={() => setIsMenuFormOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl border shadow-2xl overflow-hidden ${
+            className={`w-full max-w-5xl max-h-[90vh] flex flex-col rounded-2xl border shadow-2xl overflow-y-auto ${
               isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
             }`}
           >
@@ -1470,7 +1652,7 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
                   <h3 className="font-black text-sm sm:text-base">
                     {editingMenuId ? 'Edit Menu F&B' : 'Tambah Menu F&B Baru'}
                   </h3>
-                  <p className="text-[11px] text-gray-400">Konfigurasi menu, harga, foto, dan varian F&B POS</p>
+                  <p className="text-[11px] text-gray-400">Layout 2 Kolom Lebar: Identitas, Cascading Kategori, HPP & Varian POS</p>
                 </div>
               </div>
               <button
@@ -1482,377 +1664,666 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
               </button>
             </div>
 
-            <form onSubmit={handleSaveMenuForm} className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
-              {/* Barcode Scanner Full-Width Paling Atas (Posisi 1) */}
-              <div className={`p-3.5 rounded-xl border space-y-1.5 ${
-                isLight ? 'bg-emerald-50/90 border-emerald-300 shadow-sm' : 'bg-emerald-500/10 border-emerald-500/40'
-              }`}>
-                <label className="block text-[11px] font-extrabold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>1. Barcode / SKU Scanner Menu (Auto-Fill Atas) *</span>
-                </label>
-                <input
-                  type="text"
-                  value={formCode}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormCode(val);
-                    const found = products.find(p => p.id === val || p.barcode === val);
-                    if (found) {
-                      setFormName(found.name);
-                      setFormMenuType((found.menuType as any) === 'Minuman' ? 'Minuman' : 'Makanan');
-                      setFormCategory(found.category || 'Main Course');
-                      setFormCostPrice(found.cost_price || found.costPrice || 0);
-                      setFormSellPrice(found.sell_price || found.sellingPrice || 0);
-                      setFormStock(found.stock ?? 100);
-                      showToast(`Auto-fill menu: ${found.name}`);
-                    }
-                  }}
-                  placeholder="Scan barcode fisik atau ketik kode menu untuk auto-fill..."
-                  className={`w-full py-2.5 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
-                    isLight ? 'bg-white border-emerald-400 text-slate-900' : 'bg-slate-950 border-emerald-500 text-emerald-200'
-                  }`}
-                />
-              </div>
+            <form onSubmit={handleSaveMenuForm} className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1 text-xs">
+              {/* Layout 2 Kolom Lebar max-w-5xl */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              {/* Upload Foto Menu */}
-              <div className={`p-4 rounded-xl border space-y-3 ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}>
-                <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                  Upload Foto Menu (Thumbnail Preview)
-                </label>
-                <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-200 dark:bg-black/40 border border-slate-300 dark:border-gray-700 shrink-0 flex items-center justify-center relative">
-                    {formImage ? (
-                      <img
-                        src={formImage}
-                        alt="Preview"
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <UtensilsCrossed className="w-8 h-8 text-emerald-400 opacity-60" />
-                    )}
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className={`w-full py-2 px-3 rounded-xl border text-xs outline-none cursor-pointer ${
-                        isLight ? 'bg-white border-slate-300 text-slate-700' : 'bg-[#161b22] border-[#30363d] text-gray-300'
-                      }`}
-                    />
-                    <p className="text-[10px] text-gray-400">
-                      Pilih file gambar (JPG, PNG, WebP) atau masukkan URL gambar langsung di bawah.
-                    </p>
+                {/* ========================================================================= */}
+                {/* KOLOM KIRI: Identitas Produk & Harga Jual                                 */}
+                {/* ========================================================================= */}
+                <div className="space-y-4">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider text-emerald-500 border-b pb-2 border-slate-200 dark:border-slate-800 flex items-center gap-2">
+                    <Package className="w-4 h-4 text-emerald-500" />
+                    <span>Identitas Produk & Harga Jual</span>
+                  </h4>
+
+                  {/* Barcode Scanner & Auto-Fill */}
+                  <div className={`p-3.5 rounded-xl border space-y-1.5 ${
+                    isLight ? 'bg-emerald-50/90 border-emerald-300 shadow-sm' : 'bg-emerald-500/10 border-emerald-500/40'
+                  }`}>
+                    <label className="block text-[11px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>Barcode / SKU Scanner (Auto-Fill) *</span>
+                    </label>
                     <input
                       type="text"
-                      value={formImage}
-                      onChange={(e) => setFormImage(e.target.value)}
-                      placeholder="Atau masukkan URL gambar (https://...)"
-                      className={`w-full py-1.5 px-2.5 rounded-lg border text-xs font-mono outline-none ${
-                        isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                      value={formCode}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormCode(val);
+                        const found = products.find(p => p.id === val || p.barcode === val);
+                        if (found) {
+                          setFormName(found.name);
+                          setFormMenuType((found.menuType as any) === 'Minuman' ? 'Minuman' : 'Makanan');
+                          setFormCategory(found.category || 'Makanan Utama');
+                          setFormCostPrice(found.cost_price || found.costPrice || 0);
+                          setFormSellPrice(found.sell_price || found.sellingPrice || 0);
+                          setFormStock(found.stock ?? 100);
+                          showToast(`Auto-fill menu: ${found.name}`);
+                        }
+                      }}
+                      placeholder="Scan barcode fisik atau ketik kode menu..."
+                      className={`w-full py-2.5 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
+                        isLight ? 'bg-white border-emerald-400 text-slate-900' : 'bg-slate-950 border-emerald-500 text-emerald-200'
                       }`}
                     />
                   </div>
-                </div>
-              </div>
 
-              {/* Info Dasar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                      Kode / ID Menu <span className="text-rose-500">*</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const genId = `FNB-${Math.floor(100000 + Math.random() * 900000)}`;
-                        setFormCode(genId);
-                        showToast(`Generated ID: ${genId}`);
-                      }}
-                      className="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] flex items-center gap-1 shadow-sm transition cursor-pointer"
-                      title="Generate Unique Code ID"
-                    >
-                      <span>⚡ Gen ID</span>
-                    </button>
+                  {/* Kode ID Menu */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                        Kode / ID Menu <span className="text-rose-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const genId = `FNB-${Math.floor(100000 + Math.random() * 900000)}`;
+                          setFormCode(genId);
+                          showToast(`Generated ID: ${genId}`);
+                        }}
+                        className="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] flex items-center gap-1 shadow-sm transition cursor-pointer"
+                        title="Generate Unique Code ID"
+                      >
+                        <span>⚡ Gen ID</span>
+                      </button>
+                    </div>
+                    {(() => {
+                      const trimmed = (formCode || '').trim();
+                      const duplicate = products.find((p) => (p.barcode?.trim() === trimmed || p.id === trimmed) && p.id !== editingMenuId);
+                      return (
+                        <>
+                          <input
+                            type="text"
+                            required
+                            value={formCode}
+                            onChange={(e) => setFormCode(e.target.value)}
+                            onBlur={(e) => setFormCode(e.target.value.trim())}
+                            placeholder="FNB-009"
+                            className={`w-full py-2 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
+                              isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
+                            } ${duplicate ? 'border-red-500 ring-2 ring-red-500/30 text-red-300' : ''}`}
+                          />
+                          {duplicate && (
+                            <p className="text-[10px] text-red-500 font-bold mt-1">
+                              ⚠️ Barcode/ID sudah terdaftar oleh: {duplicate.name} ({duplicate.id})
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
-                  {(() => {
-                    const trimmed = (formCode || '').trim();
-                    const duplicate = products.find((p) => (p.barcode?.trim() === trimmed || p.id === trimmed) && p.id !== editingMenuId);
-                    return (
-                      <>
+
+                  {/* Tipe Menu: Toggle / Radio Button [Makanan] dan [Minuman] */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                      Tipe Menu <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormMenuType('Makanan');
+                          setFormCategory('Makanan Utama');
+                          setIsCustomCategory(false);
+                        }}
+                        className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+                          formMenuType === 'Makanan'
+                            ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <UtensilsCrossed className="w-4 h-4" />
+                        <span>Makanan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormMenuType('Minuman');
+                          setFormCategory('Es Kopi / Kopi Dingin');
+                          setIsCustomCategory(false);
+                        }}
+                        className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer ${
+                          formMenuType === 'Minuman'
+                            ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <Coffee className="w-4 h-4" />
+                        <span>Minuman</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dropdown Kategori Cascading */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                      Kategori <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={isCustomCategory ? 'CUSTOM' : formCategory}
+                      onChange={(e) => {
+                        if (e.target.value === 'CUSTOM') {
+                          setIsCustomCategory(true);
+                        } else {
+                          setIsCustomCategory(false);
+                          setFormCategory(e.target.value);
+                        }
+                      }}
+                      className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
+                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
+                      }`}
+                    >
+                      {formMenuType === 'Makanan' ? (
+                        <>
+                          <option value="Makanan Utama">Makanan Utama</option>
+                          <option value="Snack & Camilan">Snack & Camilan</option>
+                          <option value="Pastry & Bakery">Pastry & Bakery</option>
+                          <option value="Dessert & Manisan">Dessert & Manisan</option>
+                          <option value="Paket Hemat / Combo">Paket Hemat / Combo</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="Es Kopi / Kopi Dingin">Es Kopi / Kopi Dingin</option>
+                          <option value="Kopi Panas">Kopi Panas</option>
+                          <option value="Minuman Segar & Non-Kopi">Minuman Segar & Non-Kopi</option>
+                          <option value="Teh & Minuman Segar">Teh & Minuman Segar</option>
+                          <option value="Minuman Kemasan">Minuman Kemasan</option>
+                        </>
+                      )}
+                      <option value="CUSTOM">+ Kategori Kustom...</option>
+                    </select>
+
+                    {isCustomCategory && (
+                      <div className="mt-2">
                         <input
                           type="text"
                           required
-                          value={formCode}
-                          onChange={(e) => setFormCode(e.target.value)}
-                          onBlur={(e) => setFormCode(e.target.value.trim())}
-                          placeholder="FNB-009"
-                          className={`w-full py-2 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
+                          value={customCategoryInput}
+                          onChange={(e) => setCustomCategoryInput(e.target.value)}
+                          placeholder="Ketik nama kategori kustom baru..."
+                          className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none ${
                             isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                          } ${duplicate ? 'border-red-500 ring-2 ring-red-500/30 text-red-300' : ''}`}
+                          }`}
                         />
-                        {duplicate && (
-                          <p className="text-[10px] text-red-500 font-bold mt-1">
-                            ⚠️ Barcode/ID sudah terdaftar oleh: {duplicate.name} ({duplicate.id})
-                          </p>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Nama Menu <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="Contoh: Es Kopi Susu Gula Aren"
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Tipe Menu <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={formMenuType}
-                    onChange={(e) => {
-                      const val = e.target.value as 'Makanan' | 'Minuman';
-                      setFormMenuType(val);
-                      if (val === 'Makanan') setFormCategory('Main Course');
-                      else setFormCategory('Coffee');
-                    }}
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  >
-                    <option value="Makanan">Makanan</option>
-                    <option value="Minuman">Minuman</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Kategori <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  >
-                    {formMenuType === 'Makanan' ? (
-                      <>
-                        <option value="Main Course">Main Course (Makanan Utama)</option>
-                        <option value="Snack">Snack (Cemilan / Appetizer)</option>
-                        <option value="Dessert">Dessert (Makanan Penutup)</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="Coffee">Coffee (Kopi)</option>
-                        <option value="Non-Coffee">Non-Coffee (Teh, Susu, Jus)</option>
-                        <option value="Beverage">Beverage (Minuman Segar)</option>
-                      </>
+                      </div>
                     )}
-                  </select>
-                </div>
-              </div>
+                  </div>
 
-              {/* Harga: HPP & Harga Jual */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-2">
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    HPP (Modal Bahan) <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono text-gray-400 font-bold">Rp</span>
+                  {/* Nama Menu & Shortcut Preset Nama Menu Populer */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                      Nama Menu <span className="text-rose-500">*</span>
+                    </label>
                     <input
-                      type="number"
+                      type="text"
                       required
-                      min="0"
-                      value={formCostPrice === '' ? '' : formCostPrice}
-                      onChange={(e) => setFormCostPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="10000"
-                      className={`w-full py-2 pl-9 pr-3 rounded-xl border text-xs font-mono font-bold outline-none ${
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      placeholder="Contoh: Es Kopi Susu Gula Aren"
+                      className={`w-full py-2 px-3 rounded-xl border text-xs font-bold outline-none ${
                         isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                       }`}
                     />
-                  </div>
-                </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Harga Jual (POS) <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono text-gray-400 font-bold">Rp</span>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      value={formSellPrice === '' ? '' : formSellPrice}
-                      onChange={(e) => setFormSellPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                      placeholder="25000"
-                      className={`w-full py-2 pl-9 pr-3 rounded-xl border text-xs font-mono font-black text-emerald-500 outline-none ${
-                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-emerald-400'
-                      }`}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Stok Awal
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formStock === '' ? '' : formStock}
-                    onChange={(e) => setFormStock(e.target.value === '' ? '' : Number(e.target.value))}
-                    placeholder="100"
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Konfigurasi Varian */}
-              <div className={`p-4 rounded-xl border space-y-4 ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}>
-                <h4 className="font-black text-xs uppercase tracking-wider text-emerald-500">
-                  Konfigurasi Varian & Tambahan (Topping, Pedas, Suhu & Gula)
-                </h4>
-
-                {/* Toggle Pakai Topping? */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="font-bold block text-slate-900 dark:text-white">Pakai Topping?</span>
-                      <span className="text-[10px] text-gray-400">Aktifkan jika menu ini memiliki opsi tambahan topping berbayar</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setFormToppingEnabled(!formToppingEnabled)}
-                      className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
-                        formToppingEnabled ? 'bg-emerald-500' : 'bg-gray-600'
-                      }`}
-                    >
-                      <div className={`w-4 h-4 rounded-full bg-white transition transform ${formToppingEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-
-                  {formToppingEnabled && (
-                    <div className="p-3 rounded-xl bg-black/20 border border-emerald-500/30 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[11px] text-gray-300">Daftar Topping & Harga Tambahan:</span>
-                        <button
-                          type="button"
-                          onClick={() => setFormToppings([...formToppings, { id: `top-${Date.now()}`, name: '', price: 3000 }])}
-                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500 text-black hover:bg-emerald-400 cursor-pointer"
-                        >
-                          + Tambah Topping
-                        </button>
+                    {/* Pill Shortcut Preset Populer */}
+                    <div className="pt-1 space-y-1">
+                      <span className="text-[10px] font-semibold text-gray-400">Preset Nama Populer:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {namePresets.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setFormName(preset)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer active:scale-95 ${
+                              formName === preset
+                                ? 'bg-amber-500/20 border-amber-500 text-amber-500'
+                                : isLight
+                                ? 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                                : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            + {preset}
+                          </button>
+                        ))}
                       </div>
+                    </div>
+                  </div>
 
-                      {formToppings.map((top, tIdx) => (
-                        <div key={top.id || tIdx} className="flex items-center gap-2">
+                  {/* Upload Foto Menu */}
+                  <div className={`p-3.5 rounded-xl border space-y-2.5 ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+                  }`}>
+                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                      Upload Foto Menu (Thumbnail Preview)
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-200 dark:bg-black/40 border border-slate-300 dark:border-gray-700 shrink-0 flex items-center justify-center relative">
+                        {formImage ? (
+                          <img
+                            src={formImage}
+                            alt="Preview"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <UtensilsCrossed className="w-6 h-6 text-emerald-400 opacity-60" />
+                        )}
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          className={`w-full py-1.5 px-2 rounded-lg border text-[11px] outline-none cursor-pointer ${
+                            isLight ? 'bg-white border-slate-300 text-slate-700' : 'bg-[#161b22] border-[#30363d] text-gray-300'
+                          }`}
+                        />
+                        <input
+                          type="text"
+                          value={formImage}
+                          onChange={(e) => setFormImage(e.target.value)}
+                          placeholder="Atau URL gambar (https://...)"
+                          className={`w-full py-1 px-2 rounded-lg border text-[10px] font-mono outline-none ${
+                            isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Harga Jual (POS) & Stok Awal */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Harga Jual (POS) <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono text-gray-400 font-bold">Rp</span>
+                        <input
+                          type="number"
+                          required
+                          min="0"
+                          value={formData.hargaJual === 0 ? '' : formData.hargaJual}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : Number(e.target.value);
+                            setFormData(prev => ({ ...prev, hargaJual: val }));
+                            setFormSellPrice(e.target.value === '' ? '' : val);
+                          }}
+                          placeholder="25000"
+                          className={`w-full py-2 pl-9 pr-3 rounded-xl border text-xs font-mono font-black text-emerald-500 outline-none ${
+                            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-emerald-400'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Stok Awal
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={formStock === '' ? '' : formStock}
+                        onChange={(e) => setFormStock(e.target.value === '' ? '' : Number(e.target.value))}
+                        placeholder="100"
+                        className={`w-full py-2 px-3 rounded-xl border text-xs font-mono font-bold outline-none ${
+                          isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Toggle PPN (Mode ON/OFF) dekat Harga Jual */}
+                  <div className={`p-3 rounded-xl border space-y-2.5 ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold block text-slate-900 dark:text-white text-xs">PPN (Pajak Pertambahan Nilai)</span>
+                        <span className="text-[10px] text-gray-400">Aktifkan untuk kalkulasi pajak konsumen di POS</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPpnEnabled(!ppnEnabled)}
+                        className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
+                          ppnEnabled ? 'bg-emerald-500' : 'bg-gray-600'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-white transition transform ${ppnEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    {ppnEnabled && (
+                      <div className="space-y-2 pt-1 border-t border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-gray-400">Tarif PPN (%):</span>
                           <input
-                            type="text"
-                            value={top.name}
-                            onChange={(e) => {
-                              const next = [...formToppings];
-                              next[tIdx].name = e.target.value;
-                              setFormToppings(next);
-                            }}
-                            placeholder="Nama Topping (cth: Extra Cheese, Boba)"
-                            className={`flex-1 py-1.5 px-2.5 rounded-lg border text-xs outline-none ${
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={ppnRate === '' ? '' : ppnRate}
+                            onChange={(e) => setPpnRate(e.target.value === '' ? '' : Number(e.target.value))}
+                            placeholder="11"
+                            className={`w-20 py-1 px-2 rounded-lg border text-xs font-mono font-bold outline-none ${
                               isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
                             }`}
                           />
-                          <div className="relative w-32">
+                        </div>
+                        <div className="text-[11px] font-mono text-emerald-500 font-bold">
+                          Preview Harga Konsumen (+PPN {ppnRate || 11}%): Rp {finalPriceWithPpn.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ========================================================================= */}
+                {/* KOLOM KANAN: Tempat Kalkulasi Biaya & Varian                              */}
+                {/* ========================================================================= */}
+                <div className="space-y-4">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider text-amber-500 border-b pb-2 border-slate-200 dark:border-slate-800 flex items-center gap-2">
+                    <Calculator className="w-4 h-4 text-amber-500" />
+                    <span>Tempat Kalkulasi Biaya, OPEX & Margin</span>
+                  </h4>
+
+                  {/* 1. Rincian Bahan Baku Sederhana (Mini BOM Manual) */}
+                  <div className={`p-3.5 rounded-xl border space-y-3 ${
+                    isLight ? 'bg-amber-50/50 border-amber-200' : 'bg-amber-500/5 border-amber-500/30'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                        1. Rincian Bahan Baku Sederhana (Mini BOM)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setMiniBomRows([...miniBomRows, { id: `bom-${Date.now()}`, name: '', cost: 1000 }])}
+                        className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500 text-black hover:bg-amber-400 cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>+ Tambah Baris</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {miniBomRows.map((row, rIdx) => (
+                        <div key={row.id || rIdx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={row.name}
+                            onChange={(e) => {
+                              const next = [...miniBomRows];
+                              next[rIdx].name = e.target.value;
+                              setMiniBomRows(next);
+                            }}
+                            placeholder="Nama Bahan / Kemasan (cth: Biji Kopi)"
+                            className={`flex-1 py-1 px-2.5 rounded-lg border text-xs outline-none ${
+                              isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                            }`}
+                          />
+                          <div className="relative w-28">
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-gray-400">Rp</span>
                             <input
                               type="number"
                               min="0"
-                              value={top.price === 0 ? '' : top.price}
+                              value={row.cost === '' ? '' : row.cost}
                               onChange={(e) => {
-                                const next = [...formToppings];
-                                next[tIdx].price = Number(e.target.value) || 0;
-                                setFormToppings(next);
+                                const next = [...miniBomRows];
+                                next[rIdx].cost = e.target.value === '' ? '' : Number(e.target.value);
+                                setMiniBomRows(next);
                               }}
-                              placeholder="Harga"
-                              className={`w-full py-1.5 pl-7 pr-2 rounded-lg border text-xs font-mono font-bold outline-none ${
+                              placeholder="Biaya"
+                              className={`w-full py-1 pl-7 pr-2 rounded-lg border text-xs font-mono font-bold outline-none ${
                                 isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
                               }`}
                             />
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setFormToppings(formToppings.filter((_, idx) => idx !== tIdx))}
-                            className="p-1 rounded text-rose-400 hover:text-rose-300 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {miniBomRows.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setMiniBomRows(miniBomRows.filter((_, idx) => idx !== rIdx))}
+                              className="p-1 rounded text-rose-400 hover:text-rose-300 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
 
-                {/* Toggle Level Pedas? (Hanya aktif jika tipe Makanan) */}
-                <div className={`flex items-center justify-between pt-2 border-t border-slate-200 dark:border-gray-800 ${
-                  formMenuType !== 'Makanan' ? 'opacity-50 pointer-events-none' : ''
-                }`}>
-                  <div>
-                    <span className="font-bold block text-slate-900 dark:text-white">Level Pedas?</span>
-                    <span className="text-[10px] text-gray-400">
-                      {formMenuType === 'Makanan' ? 'Aktifkan opsi pilihan tingkat kepedasan (Level 0 - 5)' : 'Hanya aktif untuk kategori Makanan'}
-                    </span>
+                    <div className="flex items-center justify-between pt-1 border-t border-amber-500/20 text-[11px]">
+                      <span className="font-semibold text-gray-500 dark:text-gray-400">Subtotal Mini BOM:</span>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                        Rp {totalFoodCostComputed.toLocaleString('id-ID')}
+                      </span>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => formMenuType === 'Makanan' && setFormSpicyEnabled(!formSpicyEnabled)}
-                    className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
-                      formSpicyEnabled && formMenuType === 'Makanan' ? 'bg-emerald-500' : 'bg-gray-600'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${formSpicyEnabled && formMenuType === 'Makanan' ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </button>
-                </div>
 
-                {/* Toggle Suhu & Gula? (Hanya aktif jika tipe Minuman) */}
-                <div className={`flex items-center justify-between pt-2 border-t border-slate-200 dark:border-gray-800 ${
-                  formMenuType !== 'Minuman' ? 'opacity-50 pointer-events-none' : ''
-                }`}>
-                  <div>
-                    <span className="font-bold block text-slate-900 dark:text-white">Suhu & Gula?</span>
-                    <span className="text-[10px] text-gray-400">
-                      {formMenuType === 'Minuman' ? 'Aktifkan opsi pilihan Hot/Ice dan Normal/Less Sugar' : 'Hanya aktif untuk kategori Minuman'}
-                    </span>
+                  {/* Field TOTAL FOOD COST & OPEX */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className={`p-3 rounded-xl border ${
+                      isLight ? 'bg-white border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
+                    }`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                          Total Food Cost (Modal Bahan)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setFormCostPrice(totalFoodCostComputed)}
+                          className="text-[10px] font-bold text-emerald-500 hover:text-emerald-400 cursor-pointer"
+                          title="Gunakan subtotal mini BOM"
+                        >
+                          [Sync BOM]
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono text-gray-400 font-bold">Rp</span>
+                        <input
+                          type="number"
+                          required
+                          min="0"
+                          value={formData.totalFoodCost === 0 ? '' : formData.totalFoodCost}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : Number(e.target.value);
+                            setFormData(prev => ({ ...prev, totalFoodCost: val }));
+                            setFormCostPrice(e.target.value === '' ? '' : val);
+                          }}
+                          placeholder={String(totalFoodCostComputed)}
+                          className={`w-full py-1.5 pl-9 pr-3 rounded-lg border text-xs font-mono font-bold outline-none ${
+                            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${
+                      isLight ? 'bg-white border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
+                    }`}>
+                      <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                        Alokasi Beban OPEX / Staf (%)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={formData.alokasiOpex === 0 ? '' : formData.alokasiOpex}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : Number(e.target.value);
+                            setFormData(prev => ({ ...prev, alokasiOpex: val }));
+                            setOpexPercent(e.target.value === '' ? '' : val);
+                          }}
+                          placeholder="20"
+                          className={`w-full py-1.5 pl-3 pr-8 rounded-lg border text-xs font-mono font-bold outline-none ${
+                            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                          }`}
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-gray-400 font-bold">%</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1 font-mono">
+                        Nominal OPEX: Rp {nominalOpex.toLocaleString('id-ID')}
+                      </p>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => formMenuType === 'Minuman' && setFormTempSugarEnabled(!formTempSugarEnabled)}
-                    className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
-                      formTempSugarEnabled && formMenuType === 'Minuman' ? 'bg-emerald-500' : 'bg-gray-600'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white transition transform ${formTempSugarEnabled && formMenuType === 'Minuman' ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </button>
+
+                  {/* Summary HPP Riil & Kartu Indikator Margin Komparasi */}
+                  <div className={`p-3.5 rounded-xl border space-y-2.5 ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+                  }`}>
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-slate-700 dark:text-slate-300">TOTAL HPP RIIL (Food Cost + OPEX):</span>
+                      <span className="font-mono text-amber-500 font-extrabold text-sm">
+                        Rp {hppRiil.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+
+                    {/* Kartu Indikator Margin Komparasi */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
+                      <div className="p-2 rounded-lg bg-black/10 border border-slate-300/40">
+                        <span className="block text-[10px] font-bold text-gray-400 uppercase">Gross Margin</span>
+                        <span className="font-mono text-xs font-black text-emerald-400">
+                          {grossMargin}%
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/40 text-emerald-400">
+                        <span className="block text-[10px] font-bold uppercase opacity-80">
+                          Net Profit Est.
+                        </span>
+                        <span className="font-mono text-xs font-black">
+                          {netProfitEst}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Konfigurasi Varian */}
+                  <div className={`p-4 rounded-xl border space-y-4 ${
+                    isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+                  }`}>
+                    <h5 className="font-black text-xs uppercase tracking-wider text-emerald-500">
+                      Konfigurasi Varian & Tambahan (Topping, Pedas, Suhu & Gula)
+                    </h5>
+
+                    {/* Toggle Pakai Topping? */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-bold block text-slate-900 dark:text-white">Pakai Topping?</span>
+                          <span className="text-[10px] text-gray-400">Aktifkan opsi tambahan topping berbayar</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFormToppingEnabled(!formToppingEnabled)}
+                          className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
+                            formToppingEnabled ? 'bg-emerald-500' : 'bg-gray-600'
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded-full bg-white transition transform ${formToppingEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                        </button>
+                      </div>
+
+                      {formToppingEnabled && (
+                        <div className="p-3 rounded-xl bg-black/20 border border-emerald-500/30 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-[11px] text-gray-300">Daftar Topping & Harga Tambahan:</span>
+                            <button
+                              type="button"
+                              onClick={() => setFormToppings([...formToppings, { id: `top-${Date.now()}`, name: '', price: 3000 }])}
+                              className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500 text-black hover:bg-emerald-400 cursor-pointer"
+                            >
+                              + Tambah Topping
+                            </button>
+                          </div>
+
+                          {formToppings.map((top, tIdx) => (
+                            <div key={top.id || tIdx} className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={top.name}
+                                onChange={(e) => {
+                                  const next = [...formToppings];
+                                  next[tIdx].name = e.target.value;
+                                  setFormToppings(next);
+                                }}
+                                placeholder="Nama Topping (cth: Extra Cheese, Boba)"
+                                className={`flex-1 py-1.5 px-2.5 rounded-lg border text-xs outline-none ${
+                                  isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                                }`}
+                              />
+                              <div className="relative w-28">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-gray-400">Rp</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={top.price === 0 ? '' : top.price}
+                                  onChange={(e) => {
+                                    const next = [...formToppings];
+                                    next[tIdx].price = Number(e.target.value) || 0;
+                                    setFormToppings(next);
+                                  }}
+                                  placeholder="Harga"
+                                  className={`w-full py-1.5 pl-7 pr-2 rounded-lg border text-xs font-mono font-bold outline-none ${
+                                    isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+                                  }`}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFormToppings(formToppings.filter((_, idx) => idx !== tIdx))}
+                                className="p-1 rounded text-rose-400 hover:text-rose-300 cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Toggle Level Pedas? (Hanya aktif jika tipe Makanan) */}
+                    <div className={`flex items-center justify-between pt-2 border-t border-slate-200 dark:border-gray-800 ${
+                      formMenuType !== 'Makanan' ? 'opacity-50 pointer-events-none' : ''
+                    }`}>
+                      <div>
+                        <span className="font-bold block text-slate-900 dark:text-white">Level Pedas?</span>
+                        <span className="text-[10px] text-gray-400">
+                          {formMenuType === 'Makanan' ? 'Aktifkan opsi pilihan tingkat kepedasan (Level 0 - 5)' : 'Hanya aktif untuk kategori Makanan'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => formMenuType === 'Makanan' && setFormSpicyEnabled(!formSpicyEnabled)}
+                        className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
+                          formSpicyEnabled && formMenuType === 'Makanan' ? 'bg-emerald-500' : 'bg-gray-600'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-white transition transform ${formSpicyEnabled && formMenuType === 'Makanan' ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
+                    {/* Toggle Suhu & Gula? (Hanya aktif jika tipe Minuman) */}
+                    <div className={`flex items-center justify-between pt-2 border-t border-slate-200 dark:border-gray-800 ${
+                      formMenuType !== 'Minuman' ? 'opacity-50 pointer-events-none' : ''
+                    }`}>
+                      <div>
+                        <span className="font-bold block text-slate-900 dark:text-white">Suhu & Gula?</span>
+                        <span className="text-[10px] text-gray-400">
+                          {formMenuType === 'Minuman' ? 'Aktifkan opsi pilihan Hot/Ice dan Normal/Less Sugar' : 'Hanya aktif untuk kategori Minuman'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => formMenuType === 'Minuman' && setFormTempSugarEnabled(!formTempSugarEnabled)}
+                        className={`w-12 h-6 rounded-full transition relative p-1 cursor-pointer ${
+                          formTempSugarEnabled && formMenuType === 'Minuman' ? 'bg-emerald-500' : 'bg-gray-600'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-white transition transform ${formTempSugarEnabled && formMenuType === 'Minuman' ? 'translate-x-6' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1876,6 +2347,8 @@ export const FBMasterModule: React.FC<FBMasterModuleProps> = ({ onBackToOverview
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

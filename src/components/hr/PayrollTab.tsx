@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { useApp, isCashierEmployee } from '../../context/AppContext';
 import { Employee } from '../../types';
 import { CashierCommissionSlipItem } from './PayrollModule';
-import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
 import { hasValidProfileValue } from '../../utils/businessProfileUtils';
+import { calculateLaundryStaffIncentives } from '../../utils/laundryCommission';
+import { calculateFashionAdvisorCommissions } from '../../utils/fashionAnalytics';
 import {
   DollarSign,
   ShieldCheck,
@@ -85,18 +86,18 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
     isPayrollSynced,
     lastPayrollSyncTime,
     syncPayrollToFinance,
+    recordPayrollExpense,
     processPayrollPayment,
     showToast,
     calculateCashierCommission,
     businessProfile,
+    laundryOrders,
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDeptFilter, setSelectedDeptFilter] = useState('ALL');
   const [selectedPeriod, setSelectedPeriod] = useState<string>('ALL');
   const [selectedSlipEmployee, setSelectedSlipEmployee] = useState<Employee | null>(null);
-  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
   const [selectedPaymentSource, setSelectedPaymentSource] = useState<'Bank Operasional' | 'Kas Utama'>(
     'Bank Operasional'
   );
@@ -113,7 +114,19 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
     tkEmployee: 0.03, // 3% Karyawan
   };
 
-  // Komputasi metrik gaji lengkap per karyawan (sinkronisasi realtime omzet kasir COMPLETED)
+  // Insentif Produksi Staf Laundry (per kg / per item / per pasang-karpet)
+  const laundryIncentives = useMemo(
+    () => calculateLaundryStaffIncentives(employees, laundryOrders || [], selectedPeriod),
+    [employees, laundryOrders, selectedPeriod]
+  );
+
+  // Insentif Penjualan Bersih Fashion Advisor / Pramuniaga Butik
+  const fashionAdvisorIncentives = useMemo(
+    () => calculateFashionAdvisorCommissions(employees, salesHistory || [], selectedPeriod),
+    [employees, salesHistory, selectedPeriod]
+  );
+
+  // Komputasi metrik gaji lengkap per karyawan (sinkronisasi realtime omzet kasir COMPLETED & produksi Laundry)
   const payrollItems = useMemo(() => {
     return employees.map((emp) => {
       const baseSalary = emp.baseSalary ?? 5000000;
@@ -148,6 +161,18 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
 
       const cashierCommission = commissionData.commission;
 
+      // 3b. Komisi Produksi Laundry (per kg / satuan / teknisi)
+      const laundrySummary = laundryIncentives.byEmployeeId[emp.id];
+      const laundryCommission = laundrySummary?.totalIncentive || 0;
+      const hasLaundryCommission =
+        laundryCommission > 0 || (laundrySummary?.ordersHandledCount || 0) > 0;
+
+      // 3c. Komisi Penjualan Bersih Fashion Advisor / Pramuniaga
+      const fashionSummary = fashionAdvisorIncentives.byEmployeeId[emp.id];
+      const fashionAdvisorCommission = fashionSummary?.totalCommission || 0;
+      const hasFashionCommission =
+        fashionAdvisorCommission > 0 || (fashionSummary?.trxCount || 0) > 0;
+
       // 4. Iuran BPJS (Kesehatan & Ketenagakerjaan)
       const kesCompany = isBpjsActive ? Math.round(baseSalary * RATES.kesCompany) : 0;
       const kesEmployee = isBpjsActive ? Math.round(baseSalary * RATES.kesEmployee) : 0;
@@ -159,7 +184,8 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
       const totalEmployeeDeduction = totalBpjsEmployeeDeduction + absenceDeduction;
 
       // 5. Total Penerimaan Kotor & Take-Home Pay
-      const grossEarnings = baseSalary + dailyAllowance + cashierCommission;
+      const grossEarnings =
+        baseSalary + dailyAllowance + cashierCommission + laundryCommission + fashionAdvisorCommission;
       const takeHomePay = grossEarnings - totalEmployeeDeduction;
       const totalRemittance = totalCompanyBpjs + totalBpjsEmployeeDeduction;
 
@@ -182,6 +208,18 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
         totalEmployeeDeduction,
         isCashier,
         cashierCommission,
+        laundryCommission,
+        hasLaundryCommission,
+        laundryOrdersCount: laundrySummary?.ordersHandledCount || 0,
+        laundryKgProcessed: laundrySummary?.kiloanKgProcessed || 0,
+        laundrySatuanPcs: laundrySummary?.satuanPcsProcessed || 0,
+        laundrySpecialistUnits:
+          (laundrySummary?.pasangProcessed || 0) + (laundrySummary?.areaM2Processed || 0),
+        fashionAdvisorCommission,
+        hasFashionCommission,
+        fashionNetSalesTotal: fashionSummary?.netSalesTotal || 0,
+        fashionTrxCount: fashionSummary?.trxCount || 0,
+        fashionCommissionRate: fashionSummary?.commissionRatePercent ?? (emp.fashionCommissionRate ?? 2),
         commissionSalesTotal: commissionData.salesTotal,
         commissionTrxCount: commissionData.transactionCount,
         commissionRatePercent: commissionData.ratePercent,
@@ -191,7 +229,7 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
         totalRemittance,
       };
     });
-  }, [employees, attendanceLogs, salesHistory, activeUser, selectedPeriod, calculateCashierCommission]);
+  }, [employees, attendanceLogs, salesHistory, activeUser, selectedPeriod, calculateCashierCommission, laundryIncentives, fashionAdvisorIncentives]);
 
   // Ringkasan Agregat Payroll
   const summary = useMemo(() => {
@@ -201,6 +239,10 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
     const totalBaseSalary = payrollItems.reduce((acc, i) => acc + i.baseSalary, 0);
     const totalDailyAllowances = payrollItems.reduce((acc, i) => acc + i.dailyAllowance, 0);
     const totalCashierCommissions = payrollItems.reduce((acc, i) => acc + i.cashierCommission, 0);
+    const totalLaundryCommissions = payrollItems.reduce((acc, i) => acc + i.laundryCommission, 0);
+    const totalFashionCommissions = payrollItems.reduce((acc, i) => acc + i.fashionAdvisorCommission, 0);
+    const totalCommissionsCombined =
+      totalCashierCommissions + totalLaundryCommissions + totalFashionCommissions;
     const totalAbsenceDeductions = payrollItems.reduce((acc, i) => acc + i.absenceDeduction, 0);
     const totalCompanyContribution = payrollItems.reduce((acc, i) => acc + i.totalCompanyBpjs, 0);
     const totalEmployeeDeductions = payrollItems.reduce((acc, i) => acc + i.totalEmployeeDeduction, 0);
@@ -213,6 +255,9 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
       totalBaseSalary,
       totalDailyAllowances,
       totalCashierCommissions,
+      totalLaundryCommissions,
+      totalFashionCommissions,
+      totalCommissionsCombined,
       totalAbsenceDeductions,
       totalCompanyContribution,
       totalEmployeeDeductions,
@@ -238,6 +283,7 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
 
   const handleSyncFinance = () => {
     syncPayrollToFinance(summary);
+    recordPayrollExpense(summary);
   };
 
   const handleOpenPayModal = (target: Employee | 'ALL') => {
@@ -255,9 +301,12 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
     setIsProcessingPayment(true);
     try {
       if (targetPayEmployee === 'ALL') {
-        processPayrollPayment('ALL', selectedPaymentSource, payNotes);
+        const totalAmountToPay = filteredPayrollItems.reduce((acc, item) => acc + item.takeHomePay, 0);
+        processPayrollPayment('ALL', selectedPaymentSource, payNotes, totalAmountToPay);
       } else {
-        processPayrollPayment(targetPayEmployee.id, selectedPaymentSource, payNotes);
+        const found = payrollItems.find(item => item.employee.id === targetPayEmployee.id);
+        const totalAmountToPay = found ? found.takeHomePay : 0;
+        processPayrollPayment(targetPayEmployee.id, selectedPaymentSource, payNotes, totalAmountToPay);
       }
       setIsPayModalOpen(false);
     } finally {
@@ -265,21 +314,498 @@ export const PayrollTab: React.FC<PayrollTabProps> = ({ isLight, isEn }) => {
     }
   };
 
-  const handlePrintSlip = () => {
-    showToast(isEn ? 'Opening pay slip print preview...' : 'Membuka pratinjau cetak slip gaji...');
+  const generateSlipPrintHtml = (item: (typeof payrollItems)[0]) => {
+    const companyName = 'COBA MART';
+    const companyAddress = 'Jl. Veteran Selatan No. 128, Mamajang, Kota Makassar, Sulawesi Selatan 90132';
+    const companyContact = 'Telp: (0411) 876-5432 • Email: finance@cobamart.co.id';
+    const slipNumber = `SLIP/2026/09/${item.employee.nip.split('-').pop() || item.employee.nip}`;
+
+    return `
+      <div class="slip-doc">
+        <!-- Kop Surat Resmi COBA MART Makassar -->
+        <div class="kop-header">
+          <div class="kop-brand">
+            <div class="brand-title">${companyName}</div>
+            <div class="brand-sub">MINIMARKET & GROSIR MODERN</div>
+            <div class="brand-info">${companyAddress}</div>
+            <div class="brand-info">${companyContact}</div>
+          </div>
+          <div class="kop-badge">
+            <div class="confidential-tag">CONFIDENTIAL</div>
+            <div class="slip-no">${slipNumber}</div>
+            <div class="slip-date">Makassar, 30 September 2026</div>
+          </div>
+        </div>
+
+        <div class="kop-divider"></div>
+
+        <!-- Judul Voucher Slip Gaji -->
+        <div class="slip-title-bar">
+          <div class="slip-title">SLIP GAJI KARYAWAN (PAYROLL VOUCHER)</div>
+          <div class="slip-period">PERIODE: SEPTEMBER 2026</div>
+        </div>
+
+        <!-- Info Pegawai -->
+        <table class="meta-table">
+          <tr>
+            <td class="meta-lbl">Nama Karyawan</td>
+            <td class="meta-val">: <span style="font-weight:600">${item.employee.name}</span></td>
+            <td class="meta-lbl">Jabatan / Role</td>
+            <td class="meta-val">: ${item.employee.role}</td>
+          </tr>
+          <tr>
+            <td class="meta-lbl">NIP</td>
+            <td class="meta-val">: ${item.employee.nip}</td>
+            <td class="meta-lbl">Departemen</td>
+            <td class="meta-val">: ${item.employee.department}</td>
+          </tr>
+          <tr>
+            <td class="meta-lbl">Status Kerja</td>
+            <td class="meta-val">: ${item.employee.contractStatus || 'Karyawan Tetap'}</td>
+            <td class="meta-lbl">Kehadiran Kerja</td>
+            <td class="meta-val">: <span style="font-weight:600">${item.attendedDays} Hari</span> (Bulan Ini)</td>
+          </tr>
+        </table>
+
+        <!-- Layout 2 Kolom Bersanding: Penerimaan vs Potongan -->
+        <div class="columns-grid">
+          <!-- Kolom Kiri: Penerimaan -->
+          <div class="col-panel">
+            <div class="col-head col-head-green">A. PENERIMAAN (EARNINGS)</div>
+            <table class="item-table">
+              <tr>
+                <td>
+                  <div class="item-title">Gaji Pokok</div>
+                  <div class="item-desc">Gaji dasar bulanan terstandar</div>
+                </td>
+                <td class="item-amount">Rp ${item.baseSalary.toLocaleString('id-ID')}</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="item-title">Tunjangan Harian</div>
+                  <div class="item-desc">${item.attendedDays} hari hadir &times; Rp ${item.dailyRate.toLocaleString('id-ID')} (makan & transport)</div>
+                </td>
+                <td class="item-amount">Rp ${item.dailyAllowance.toLocaleString('id-ID')}</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="item-title">Komisi Penjualan POS (1%)</div>
+                  <div class="item-desc">
+                    ${
+                      item.isCashier
+                        ? `1% dari omzet kasir Rp ${item.commissionSalesTotal.toLocaleString('id-ID')} (${item.commissionTrxCount} transaksi)`
+                        : 'Non-Kasir (Bukan Operator Kasir POS)'
+                    }
+                  </div>
+                </td>
+                <td class="item-amount">${item.isCashier ? `Rp ${item.cashierCommission.toLocaleString('id-ID')}` : 'Rp 0'}</td>
+              </tr>
+              ${
+                item.hasLaundryCommission
+                  ? `<tr>
+                <td>
+                  <div class="item-title">Komisi Produksi Laundry (Per Kg / Item)</div>
+                  <div class="item-desc">${item.laundryOrdersCount} order (${item.laundryKgProcessed} kg &bull; ${item.laundrySatuanPcs} pcs &bull; ${item.laundrySpecialistUnits} unit khusus)</div>
+                </td>
+                <td class="item-amount">Rp ${item.laundryCommission.toLocaleString('id-ID')}</td>
+              </tr>`
+                  : ''
+              }
+              ${
+                item.hasFashionCommission
+                  ? `<tr>
+                <td>
+                  <div class="item-title">Komisi Fashion Advisor (${item.fashionCommissionRate}%)</div>
+                  <div class="item-desc">${item.fashionTrxCount} nota &bull; Penjualan Bersih Rp ${item.fashionNetSalesTotal.toLocaleString('id-ID')}</div>
+                </td>
+                <td class="item-amount">Rp ${item.fashionAdvisorCommission.toLocaleString('id-ID')}</td>
+              </tr>`
+                  : ''
+              }
+              <tr class="item-subtotal">
+                <td><span style="font-weight:600">SUBTOTAL PENERIMAAN KOTOR</span></td>
+                <td class="item-amount"><span style="font-weight:600">Rp ${item.grossEarnings.toLocaleString('id-ID')}</span></td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Kolom Kanan: Potongan -->
+          <div class="col-panel">
+            <div class="col-head col-head-red">B. POTONGAN (DEDUCTIONS)</div>
+            <table class="item-table">
+              <tr>
+                <td>
+                  <div class="item-title">Denda Keterlambatan</div>
+                  <div class="item-desc">
+                    ${
+                      item.lateCount > 0
+                        ? `${item.lateCount}x terlambat presensi @ Rp ${item.latePenaltyRate.toLocaleString('id-ID')}`
+                        : 'Disiplin hadir tepat waktu (Tanpa Denda)'
+                    }
+                  </div>
+                </td>
+                <td class="item-amount">${item.absenceDeduction > 0 ? `Rp ${item.absenceDeduction.toLocaleString('id-ID')}` : 'Rp 0'}</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="item-title">BPJS Kesehatan (1%)</div>
+                  <div class="item-desc">Iuran wajib pekerja 1% dari Gaji Pokok</div>
+                </td>
+                <td class="item-amount">${item.isBpjsActive ? `Rp ${item.kesEmployee.toLocaleString('id-ID')}` : 'Rp 0'}</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="item-title">BPJS Ketenagakerjaan (3%)</div>
+                  <div class="item-desc">Jaminan Hari Tua (2%) + Jaminan Pensiun (1%)</div>
+                </td>
+                <td class="item-amount">${item.isBpjsActive ? `Rp ${item.tkEmployee.toLocaleString('id-ID')}` : 'Rp 0'}</td>
+              </tr>
+              <tr class="item-subtotal">
+                <td><span style="font-weight:600">SUBTOTAL POTONGAN</span></td>
+                <td class="item-amount text-danger"><span style="font-weight:600">Rp ${item.totalEmployeeDeduction.toLocaleString('id-ID')}</span></td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Banner Take Home Pay (THP) Bersih & Terbilang -->
+        <div class="thp-container">
+          <div class="thp-row">
+            <div class="thp-title">TOTAL PENERIMAAN BERSIH (TAKE HOME PAY)</div>
+            <div class="thp-val">Rp ${item.takeHomePay.toLocaleString('id-ID')}</div>
+          </div>
+          <div class="thp-spelling">
+            Terbilang: <span style="font-weight:600"># ${formatTerbilang(item.takeHomePay)} #</span>
+          </div>
+        </div>
+
+        <!-- Kolom Tanda Tangan 2 Kolom -->
+        <div class="signature-section">
+          <div class="sig-box">
+            <div class="sig-title">Diterima Oleh (Karyawan),</div>
+            <div class="sig-line-space"></div>
+            <div class="sig-author">( ${item.employee.name} )</div>
+            <div class="sig-nip">NIP. ${item.employee.nip}</div>
+          </div>
+          <div class="sig-box">
+            <div class="sig-date">Makassar, 30 September 2026</div>
+            <div class="sig-title">Disetujui Oleh (Finance / HRD),</div>
+            <div class="sig-line-space"></div>
+            <div class="sig-author">( Siti Rahma, S.E. )</div>
+            <div class="sig-nip">Manager Finance & HRD</div>
+          </div>
+        </div>
+
+        <!-- Footnote Dokumen Resmi -->
+        <div class="doc-footnote">
+          * Slip gaji ini merupakan dokumen rahasia dan bukti pembayaran resmi dari COBA MART Makassar. Dibuat dan dicetak melalui JacS RetailOS.
+        </div>
+      </div>
+    `;
+  };
+
+  const handlePrintSlip = (item?: (typeof payrollItems)[0]) => {
+    const targetItem = item || (selectedSlipEmployee ? payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id) : null);
+    showToast(isEn ? 'Opening pay slip print preview...' : 'Membuka dokumen cetak slip gaji A5...');
+
+    if (targetItem) {
+      try {
+        const printWindow = window.open('', '_blank', 'width=1000,height=680');
+        if (printWindow) {
+          printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8" />
+              <title>Slip Gaji - ${targetItem.employee.name} (${targetItem.employee.nip})</title>
+              <style>
+                @page {
+                  size: A5 landscape;
+                  margin: 8mm;
+                }
+                * {
+                  box-sizing: border-box;
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                  margin: 0;
+                  padding: 0;
+                  background: #ffffff;
+                  color: #0f172a;
+                  font-size: 10.5px;
+                  line-height: 1.35;
+                }
+                .slip-doc {
+                  width: 100%;
+                  max-width: 196mm;
+                  margin: 0 auto;
+                  padding: 2mm;
+                  background: #ffffff;
+                }
+                .kop-header {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: flex-start;
+                }
+                .brand-title {
+                  font-size: 18px;
+                  font-weight: 900;
+                  letter-spacing: -0.3px;
+                  color: #0f172a;
+                }
+                .brand-sub {
+                  font-size: 10px;
+                  font-weight: 700;
+                  color: #0369a1;
+                  letter-spacing: 0.8px;
+                  margin-top: 1px;
+                }
+                .brand-info {
+                  font-size: 9.5px;
+                  color: #475569;
+                  margin-top: 1px;
+                }
+                .kop-badge {
+                  text-align: right;
+                }
+                .confidential-tag {
+                  display: inline-block;
+                  padding: 2px 7px;
+                  border: 1.5px solid #dc2626;
+                  color: #dc2626;
+                  background: #fef2f2;
+                  font-weight: 900;
+                  font-size: 9.5px;
+                  letter-spacing: 0.8px;
+                  border-radius: 3px;
+                }
+                .slip-no {
+                  font-family: monospace;
+                  font-size: 9.5px;
+                  font-weight: 700;
+                  color: #334155;
+                  margin-top: 4px;
+                }
+                .slip-date {
+                  font-size: 9px;
+                  color: #64748b;
+                  margin-top: 1px;
+                }
+                .kop-divider {
+                  border-top: 2px solid #0f172a;
+                  border-bottom: 1px solid #64748b;
+                  height: 3px;
+                  margin: 5px 0 7px 0;
+                }
+                .slip-title-bar {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  background: #f1f5f9;
+                  border: 1px solid #cbd5e1;
+                  padding: 4px 8px;
+                  margin-bottom: 7px;
+                  border-radius: 3px;
+                }
+                .slip-title {
+                  font-weight: 900;
+                  font-size: 11px;
+                  letter-spacing: 0.5px;
+                  color: #0f172a;
+                }
+                .slip-period {
+                  font-weight: 700;
+                  font-size: 10px;
+                  color: #334155;
+                }
+                .meta-table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 8px;
+                  font-size: 9.5px;
+                }
+                .meta-table td {
+                  padding: 2px 4px;
+                }
+                .meta-lbl {
+                  width: 15%;
+                  color: #475569;
+                  font-weight: 600;
+                }
+                .meta-val {
+                  width: 35%;
+                  color: #0f172a;
+                }
+                .columns-grid {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 10px;
+                  margin-bottom: 8px;
+                }
+                .col-panel {
+                  border: 1px solid #cbd5e1;
+                  border-radius: 4px;
+                  overflow: hidden;
+                }
+                .col-head {
+                  padding: 4px 8px;
+                  font-weight: 800;
+                  font-size: 10px;
+                  letter-spacing: 0.3px;
+                  border-bottom: 1px solid #cbd5e1;
+                }
+                .col-head-green {
+                  background: #f0fdf4;
+                  color: #166534;
+                }
+                .col-head-red {
+                  background: #fef2f2;
+                  color: #991b1b;
+                }
+                .item-table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  font-size: 9.5px;
+                }
+                .item-table td {
+                  padding: 3.5px 7px;
+                  border-bottom: 1px dashed #e2e8f0;
+                  vertical-align: top;
+                }
+                .item-title {
+                  font-weight: 600;
+                  color: #1e293b;
+                }
+                .item-desc {
+                  font-size: 8px;
+                  color: #64748b;
+                  margin-top: 1px;
+                }
+                .item-amount {
+                  text-align: right;
+                  font-family: monospace;
+                  font-weight: 700;
+                  white-space: nowrap;
+                  color: #0f172a;
+                }
+                .item-subtotal {
+                  background: #f8fafc;
+                }
+                .item-subtotal td {
+                  border-top: 1.5px solid #cbd5e1;
+                  border-bottom: none;
+                  padding: 5px 7px;
+                }
+                .text-danger {
+                  color: #b91c1c;
+                }
+                .thp-container {
+                  background: #f8fafc;
+                  border: 1.5px solid #0f172a;
+                  border-radius: 4px;
+                  padding: 5px 10px;
+                  margin-bottom: 8px;
+                }
+                .thp-row {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                }
+                .thp-title {
+                  font-weight: 900;
+                  font-size: 10.5px;
+                  letter-spacing: 0.5px;
+                  color: #0f172a;
+                }
+                .thp-val {
+                  font-family: monospace;
+                  font-size: 15px;
+                  font-weight: 900;
+                  color: #0f172a;
+                }
+                .thp-spelling {
+                  font-size: 9px;
+                  color: #334155;
+                  margin-top: 2px;
+                }
+                .signature-section {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 16px;
+                  margin-top: 8px;
+                  font-size: 9.5px;
+                }
+                .sig-box {
+                  text-align: center;
+                }
+                .sig-date {
+                  margin-bottom: 2px;
+                  color: #475569;
+                }
+                .sig-title {
+                  font-weight: 600;
+                  color: #1e293b;
+                }
+                .sig-line-space {
+                  height: 42px;
+                }
+                .sig-author {
+                  font-weight: 800;
+                  text-decoration: underline;
+                  color: #0f172a;
+                }
+                .sig-nip {
+                  font-size: 8.5px;
+                  color: #64748b;
+                  margin-top: 1px;
+                }
+                .doc-footnote {
+                  text-align: center;
+                  font-size: 7.5px;
+                  color: #94a3b8;
+                  font-style: italic;
+                  margin-top: 8px;
+                }
+              </style>
+            </head>
+            <body>
+              ${generateSlipPrintHtml(targetItem)}
+              <script>
+                window.onload = function() {
+                  setTimeout(function() {
+                    window.focus();
+                    window.print();
+                  }, 250);
+                };
+              </script>
+            </body>
+            </html>
+          `);
+          printWindow.document.close();
+          return;
+        }
+      } catch (err) {
+        console.warn('Popup print blocked or failed, falling back to direct print:', err);
+      }
+    }
+
     setTimeout(() => {
       window.print();
-    }, 300);
+    }, 250);
   };
 
   const handleCopySlipText = (item: (typeof payrollItems)[0]) => {
     const text = `=== SLIP GAJI RESMI KARYAWAN ===
-Perusahaan : ${businessProfile?.name || 'JacS RetailOS ERP'}
-No. Slip   : SLIP/2026/09/${item.employee.nip}
+Perusahaan : COBA MART Makassar
+Alamat     : Jl. Veteran Selatan No. 128, Mamajang, Kota Makassar, Sulawesi Selatan
+No. Slip   : SLIP/2026/09/${item.employee.nip.split('-').pop() || item.employee.nip}
 Periode    : September 2026
 Staf       : ${item.employee.name} (${item.employee.nip})
 Jabatan    : ${item.employee.role} [${item.employee.department}]
-Status     : ${item.employee.payrollStatus || 'PENDING'}
+Status     : ${item.employee.contractStatus || 'Karyawan Tetap'} - ${item.employee.payrollStatus || 'PAID'}
+Kehadiran  : ${item.attendedDays} Hari Kerja Hadir
 
 [A. PENERIMAAN]
 - Gaji Pokok               : Rp ${item.baseSalary.toLocaleString('id-ID')}
@@ -290,20 +816,35 @@ ${
         'id-ID'
       )} (Omzet: Rp ${item.commissionSalesTotal.toLocaleString('id-ID')} | ${item.commissionTrxCount} trx)\n`
     : ''
+}${
+  item.hasLaundryCommission
+    ? `- Insentif Produksi Laundry: Rp ${item.laundryCommission.toLocaleString(
+        'id-ID'
+      )} (${item.laundryOrdersCount} order | ${item.laundryKgProcessed} kg)\n`
+    : ''
+}${
+  item.hasFashionCommission
+    ? `- Komisi Fashion Advisor (${item.fashionCommissionRate}%): Rp ${item.fashionAdvisorCommission.toLocaleString(
+        'id-ID'
+      )} (Net Sales: Rp ${item.fashionNetSalesTotal.toLocaleString('id-ID')} | ${item.fashionTrxCount} nota)\n`
+    : ''
 }- Total Penerimaan Kotor  : Rp ${item.grossEarnings.toLocaleString('id-ID')}
 
 [B. POTONGAN]
-- Potongan Absensi         : -Rp ${item.absenceDeduction.toLocaleString('id-ID')}${
+- Denda Keterlambatan      : -Rp ${item.absenceDeduction.toLocaleString('id-ID')}${
       item.lateCount > 0 ? ` (${item.lateCount}x terlambat)` : ''
     }
-- BPJS Kesehatan Karyawan  : -Rp ${item.kesEmployee.toLocaleString('id-ID')}
-- BPJS Ketenagakerjaan     : -Rp ${item.tkEmployee.toLocaleString('id-ID')}
+- BPJS Kesehatan (1%)      : -Rp ${item.kesEmployee.toLocaleString('id-ID')}
+- BPJS Ketenagakerjaan (3%): -Rp ${item.tkEmployee.toLocaleString('id-ID')}
 - Total Potongan           : -Rp ${item.totalEmployeeDeduction.toLocaleString('id-ID')}
 
 [C. TAKE-HOME PAY BERSIH]
 TOTAL GAJI BERSIH (THP)    : Rp ${item.takeHomePay.toLocaleString('id-ID')}
-Terbilang: ${formatTerbilang(item.takeHomePay)}
-================================`;
+Terbilang: # ${formatTerbilang(item.takeHomePay)} #
+================================
+Makassar, 30 September 2026
+Diterima Oleh: ${item.employee.name}
+Disetujui Oleh: Siti Rahma, S.E. (Manager Finance & HRD)`;
     navigator.clipboard.writeText(text);
     showToast(isEn ? 'Pay slip text copied to clipboard!' : 'Rincian slip gaji disalin ke clipboard!');
   };
@@ -316,9 +857,19 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
 
   return (
     <div id="payroll-commission-tab" className="space-y-6">
-      {/* Inline Print Stylesheet for Pure Slip Printing */}
+      {/* Inline Print Stylesheet for Pure Slip Printing in A5 Landscape */}
       <style>{`
+        @page {
+          size: A5 landscape;
+          margin: 8mm;
+        }
         @media print {
+          html, body {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
           body * {
             visibility: hidden !important;
           }
@@ -326,16 +877,19 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
             visibility: visible !important;
           }
           #printable-pay-slip {
-            position: absolute !important;
+            position: fixed !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            max-width: 100% !important;
             margin: 0 !important;
-            padding: 24px !important;
+            padding: 6mm !important;
             background: #ffffff !important;
             color: #0f172a !important;
-            border: 1px solid #cbd5e1 !important;
+            border: none !important;
             box-shadow: none !important;
+            border-radius: 0 !important;
+            z-index: 999999 !important;
           }
           .no-print {
             display: none !important;
@@ -347,30 +901,36 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
       {/* 1. TOP BAR: TITLE, ACTIONS & FINANCE JOURNAL SYNC */}
       {/* ========================================================================= */}
       <div
-        className={`p-5 rounded-2xl border transition duration-200 ${
+        className={`p-5 rounded-2xl border transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-900 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d] text-white'
+            ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)]'
         }`}
       >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-[#0052FF] dark:text-[#58a6ff] text-[11px] font-bold mb-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#0052FF] dark:text-[#58a6ff]" />
+            <div
+              className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[11px] font-mono font-normal tracking-widest uppercase mb-2 ${
+                isLight
+                  ? 'bg-cyan-50 border-cyan-300 text-cyan-700'
+                  : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
               <span>
                 {isEn
                   ? 'Payroll & Cashier Sales Commission Hub'
-                  : 'Sistem Penggajian & Komisi Penjualan Kasir Terintegrasi'}
+                  : 'Sistem Penggajian & Komisi Penjualan Kasir'}
               </span>
             </div>
             <h3
-              className={`text-xl font-black tracking-tight ${
+              className={`text-base font-medium tracking-tight ${
                 isLight ? 'text-slate-900' : 'text-white'
               }`}
             >
               {isEn ? 'Staff Payroll & Commission Management' : 'Rekapitulasi Gaji, Tunjangan & Komisi Kasir'}
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-3xl leading-relaxed">
+            <p className="text-sm font-normal text-slate-600 dark:text-slate-400 mt-1 max-w-3xl leading-relaxed">
               {isEn
                 ? 'Comprehensive staff salary computation with daily allowance, attendance late penalties, automated 1% cashier POS sales turnover commission, and BPJS social security sync to Finance Journal.'
                 : 'Perhitungan gaji komprehensif mencakup Gaji Pokok, Tunjangan Harian, Potongan Absensi/Keterlambatan, Estimasi Komisi Penjualan Kasir (1% dari omzet POS), serta Iuran BPJS siap cetak slip gaji.'}
@@ -381,17 +941,17 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
           <div className="flex flex-wrap items-center gap-3">
             {isPayrollSynced ? (
               <div
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-mono font-normal tracking-wider ${
                   isLight
-                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                    : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                    : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.16)]'
                 }`}
               >
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                 <div className="flex flex-col text-left">
                   <span>{isEn ? 'Synced to Finance' : 'Tersinkronisasi ke Keuangan'}</span>
                   {lastPayrollSyncTime && (
-                    <span className="text-[10px] opacity-80 font-normal">
+                    <span className="text-[11px] opacity-80 font-mono font-normal">
                       {lastPayrollSyncTime}
                     </span>
                   )}
@@ -399,13 +959,13 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               </div>
             ) : (
               <div
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-mono font-normal tracking-wider ${
                   isLight
-                    ? 'bg-amber-50 border-amber-300 text-amber-800'
-                    : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    ? 'bg-amber-50 border-amber-400 text-amber-700 shadow-[0_0_12px_rgba(245,158,11,0.18)]'
+                    : 'bg-amber-500/10 border-amber-500/40 text-amber-300 shadow-[0_0_14px_rgba(245,158,11,0.15)]'
                 }`}
               >
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
                 <span>{isEn ? 'Unsynced Draft' : 'Draft Belum Disinkronkan'}</span>
               </div>
             )}
@@ -414,10 +974,10 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               id="btn-pay-all-salaries"
               type="button"
               onClick={() => handleOpenPayModal('ALL')}
-              className={`flex items-center gap-1.5 text-white text-xs font-black px-4 py-2.5 rounded-xl transition-all duration-150 cursor-pointer active:scale-95 ${
+              className={`flex items-center gap-1.5 text-white text-sm font-medium px-4 py-2 rounded-xl transition-all duration-150 cursor-pointer active:scale-[0.99] ${
                 isLight
-                  ? 'bg-emerald-600 hover:bg-emerald-700 border border-emerald-600 shadow-sm'
-                  : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 shadow-[0_0_18px_rgba(16,185,129,0.35)]'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 border border-emerald-600 shadow-[0_0_16px_rgba(16,185,129,0.22)]'
+                  : 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 shadow-[0_0_18px_rgba(16,185,129,0.3)]'
               }`}
             >
               <DollarSign className="w-4 h-4" />
@@ -428,10 +988,10 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               id="btn-sync-payroll-finance"
               type="button"
               onClick={handleSyncFinance}
-              className={`flex items-center gap-2 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all duration-150 cursor-pointer active:scale-95 ${
+              className={`flex items-center gap-2 text-white text-sm font-medium px-4 py-2 rounded-xl transition-all duration-150 cursor-pointer active:scale-[0.99] ${
                 isLight
-                  ? 'bg-blue-600 hover:bg-blue-700 border border-blue-600 shadow-sm'
-                  : 'bg-gradient-to-r from-[#0052FF] to-[#0043d1] hover:from-[#0043d1] hover:to-[#0038b3] shadow-[0_0_18px_rgba(0,82,255,0.4)]'
+                  ? 'bg-cyan-600 hover:bg-cyan-700 border border-cyan-600 shadow-[0_0_16px_rgba(6,182,212,0.22)]'
+                  : 'bg-cyan-600 hover:bg-cyan-500 border border-cyan-400/50 shadow-[0_0_18px_rgba(6,182,212,0.28)]'
               }`}
             >
               <Send className="w-4 h-4" />
@@ -455,73 +1015,74 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         {/* Card 1: Gaji Pokok & Tunjangan */}
         <div
-          onMouseEnter={() => setHoveredCardId('metric-base')}
-          onMouseLeave={() => setHoveredCardId(null)}
-          style={getReactiveNeonGlowStyle(
-            '#0052FF',
-            false,
-            hoveredCardId === 'metric-base',
+          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 ${
             isLight
-          )}
-          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-150 ${
-            isLight
-              ? 'bg-white border-slate-200 text-slate-900 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] text-white'
+              ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)]'
+              : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.24)]'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-blue-600 dark:text-[#58a6ff]">
-              {isEn ? 'Base & Daily Allowance' : 'Gaji Pokok & Tunjangan'}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono font-normal uppercase tracking-widest text-cyan-700 dark:text-cyan-400">
+              {isEn ? 'Base & Allowance' : 'Gaji Pokok & Tunjangan'}
             </span>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-600 dark:text-[#58a6ff] border border-blue-500/20">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                isLight
+                  ? 'bg-cyan-50 text-cyan-600 border-cyan-200'
+                  : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+              }`}
+            >
               <Building className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="mt-2.5">
-            <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
+            <div className="text-lg font-mono font-medium text-slate-900 dark:text-white">
               Rp {(summary.totalBaseSalary + summary.totalDailyAllowances).toLocaleString('id-ID')}
             </div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-between">
+            <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between gap-1">
               <span>Pokok: Rp {summary.totalBaseSalary.toLocaleString('id-ID')}</span>
-              <span className="text-sky-600 dark:text-sky-400 font-semibold">
-                +Tunjangan: Rp {summary.totalDailyAllowances.toLocaleString('id-ID')}
+              <span className="text-sky-600 dark:text-sky-400">
+                +{summary.totalDailyAllowances.toLocaleString('id-ID')}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Card 2: Estimasi Komisi Penjualan Kasir */}
+        {/* Card 2: Estimasi Komisi Penjualan Kasir & Produksi Laundry */}
         <div
-          onMouseEnter={() => setHoveredCardId('metric-comm')}
-          onMouseLeave={() => setHoveredCardId(null)}
-          style={getReactiveNeonGlowStyle(
-            '#10b981',
-            false,
-            hoveredCardId === 'metric-comm',
+          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 ${
             isLight
-          )}
-          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-150 ${
-            isLight
-              ? 'bg-white border-slate-200 text-slate-900 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] text-white'
+              ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)]'
+              : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.24)]'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-              {isEn ? 'Cashier Commission (1%)' : 'Estimasi Komisi Kasir'}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono font-normal uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+              {isEn ? 'POS, Laundry & Fashion Comm.' : 'Komisi POS, Laundry & Butik'}
             </span>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                isLight
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              }`}
+            >
               <Sparkles className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="mt-2.5">
-            <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
-              + Rp {summary.totalCashierCommissions.toLocaleString('id-ID')}
+            <div className="text-lg font-mono font-medium text-emerald-600 dark:text-emerald-400">
+              + Rp {summary.totalCommissionsCombined.toLocaleString('id-ID')}
             </div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-between">
-              <span>1% dari omzet kasir</span>
-              <span className="font-bold text-emerald-600 dark:text-emerald-300">
-                {payrollItems.filter((p) => p.isCashier).length} Kasir POS
+            <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between gap-1 flex-wrap">
+              <span>Kasir: {(summary.totalCashierCommissions / 1000).toFixed(0)}rb</span>
+              {summary.totalLaundryCommissions > 0 && (
+                <span className="text-cyan-600 dark:text-cyan-300">
+                  Lnd: {(summary.totalLaundryCommissions / 1000).toFixed(0)}rb
+                </span>
+              )}
+              <span className="text-fuchsia-600 dark:text-fuchsia-300">
+                Butik: +Rp {summary.totalFashionCommissions.toLocaleString('id-ID')}
               </span>
             </div>
           </div>
@@ -529,107 +1090,116 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
 
         {/* Card 3: Potongan Absensi & Keterlambatan */}
         <div
-          onMouseEnter={() => setHoveredCardId('metric-deduct')}
-          onMouseLeave={() => setHoveredCardId(null)}
-          style={getReactiveNeonGlowStyle(
-            '#ef4444',
-            false,
-            hoveredCardId === 'metric-deduct',
-            isLight
-          )}
-          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-150 ${
-            isLight
-              ? 'bg-white border-slate-200 text-slate-900 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] text-white'
+          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 ${
+            summary.totalAbsenceDeductions > 0
+              ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)] hover:shadow-[0_0_24px_rgba(245,158,11,0.32)]'
+              : isLight
+              ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)]'
+              : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.24)]'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={`text-[11px] font-mono font-normal uppercase tracking-widest ${
+                summary.totalAbsenceDeductions > 0
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              }`}
+            >
               {isEn ? 'Attendance Penalty' : 'Potongan Absensi'}
             </span>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                isLight
+                  ? 'bg-rose-50 text-rose-600 border-rose-200'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+              }`}
+            >
               <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="mt-2.5">
-            <div className="text-lg font-black font-mono text-rose-600 dark:text-rose-400">
+            <div className="text-lg font-mono font-medium text-rose-600 dark:text-rose-400">
               - Rp {summary.totalAbsenceDeductions.toLocaleString('id-ID')}
             </div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-between">
-              <span>Denda terlambat shift</span>
-              <span className="text-gray-400">Rp 50.000 / insiden</span>
+            <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
+              <span>Denda terlambat</span>
+              <span>Rp 50rb / insiden</span>
             </div>
           </div>
         </div>
 
         {/* Card 4: Beban BPJS Perusahaan */}
         <div
-          onMouseEnter={() => setHoveredCardId('metric-company')}
-          onMouseLeave={() => setHoveredCardId(null)}
-          style={getReactiveNeonGlowStyle(
-            '#8b5cf6',
-            false,
-            hoveredCardId === 'metric-company',
+          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 ${
             isLight
-          )}
-          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-150 ${
-            isLight
-              ? 'bg-white border-slate-200 text-slate-900 shadow-xs'
-              : 'bg-[#161b22] border-[#30363d] text-white'
+              ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)] hover:shadow-[0_0_24px_rgba(6,182,212,0.28)]'
+              : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:shadow-[0_0_24px_rgba(6,182,212,0.24)]'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
-              {isEn ? 'Employer BPJS Cost' : 'Beban BPJS Perusahaan'}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono font-normal uppercase tracking-widest text-purple-600 dark:text-purple-400">
+              {isEn ? 'Employer BPJS Cost' : 'Beban BPJS Co.'}
             </span>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                isLight
+                  ? 'bg-purple-50 text-purple-600 border-purple-200'
+                  : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+              }`}
+            >
               <ShieldCheck className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="mt-2.5">
-            <div className="text-lg font-black font-mono text-purple-600 dark:text-purple-400">
+            <div className="text-lg font-mono font-medium text-purple-600 dark:text-purple-400">
               Rp {summary.totalCompanyContribution.toLocaleString('id-ID')}
             </div>
-            <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 flex items-center justify-between">
-              <span>Beban 10.24% Co.</span>
-              <span className="text-purple-500 font-bold">Tidak potong THP</span>
+            <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
+              <span>Beban 10.24%</span>
+              <span className="text-purple-600 dark:text-purple-400">Non-potong THP</span>
             </div>
           </div>
         </div>
 
         {/* Card 5: Total Take-Home Pay (Siap Dicairkan) */}
         <div
-          onMouseEnter={() => setHoveredCardId('metric-thp')}
-          onMouseLeave={() => setHoveredCardId(null)}
-          style={getReactiveNeonGlowStyle(
-            '#059669',
-            true,
-            hoveredCardId === 'metric-thp',
+          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 border-emerald-500/80 shadow-[0_0_18px_rgba(16,185,129,0.22)] hover:shadow-[0_0_24px_rgba(16,185,129,0.34)] ${
             isLight
-          )}
-          className={`p-4 rounded-2xl border flex flex-col justify-between transition-all duration-150 ${
-            isLight
-              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950 shadow-xs'
-              : 'bg-emerald-950/20 border-emerald-500/40 text-white'
+              ? 'bg-emerald-50/70 text-emerald-950'
+              : 'bg-emerald-500/5 text-white'
           }`}
         >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
-              {isEn ? 'Total Take-Home Pay' : 'Total Gaji Bersih (THP)'}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-mono font-normal uppercase tracking-widest text-emerald-700 dark:text-emerald-300">
+              {isEn ? 'Total Take-Home Pay' : 'Total Gaji Bersih'}
             </span>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                isLight
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+              }`}
+            >
               <TrendingUp className="w-3.5 h-3.5" />
             </div>
           </div>
           <div className="mt-2.5">
-            <div className="text-xl font-black font-mono text-emerald-700 dark:text-emerald-400">
+            <div className="text-lg font-mono font-medium text-emerald-700 dark:text-emerald-400">
               Rp {summary.totalTakeHomePay.toLocaleString('id-ID')}
             </div>
-            <div className="text-[10px] text-gray-600 dark:text-gray-300 mt-1 flex items-center justify-between">
-              <span className="font-bold">
-                {summary.totalStaffCount} {isEn ? 'Staff Active' : 'Staf Aktif'}
+            <div className="text-[11px] font-mono font-normal text-slate-600 dark:text-slate-300 mt-1 flex items-center justify-between">
+              <span>
+                {summary.totalStaffCount} {isEn ? 'Staff' : 'Staf Aktif'}
               </span>
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30">
+              <span
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-normal border ${
+                  isLight
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Siap Cair
               </span>
             </div>
@@ -641,31 +1211,31 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
       {/* 3. TOOLBAR: SEARCH, ACCOUNT SOURCE & DIVISION FILTER */}
       {/* ========================================================================= */}
       <div
-        className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${
+        className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-900 shadow-xs'
-            : 'bg-[#161b22] border-[#30363d] text-white'
+            ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)]'
         }`}
       >
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto flex-wrap">
           <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder={isEn ? 'Search staff name, NIP, role...' : 'Cari nama staf, NIP, jabatan...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full pl-9 pr-4 py-2 rounded-xl text-xs border outline-none transition ${
+              className={`w-full pl-9 pr-4 py-2 rounded-xl text-sm font-normal border outline-none transition ${
                 isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-blue-600'
-                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-[#0052FF]'
+                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500'
+                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-cyan-500'
               }`}
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {isEn ? 'Disbursement Account:' : 'Rekening Pencairan:'}
+            <label className="text-[11px] font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              {isEn ? 'Account:' : 'Rekening:'}
             </label>
             <select
               value={selectedPaymentSource}
@@ -673,10 +1243,10 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                 setSelectedPaymentSource(e.target.value as 'Bank Operasional' | 'Kas Utama')
               }
               aria-label="Pilih Sumber Kas/Bank"
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border outline-none cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-sm font-normal border outline-none cursor-pointer ${
                 isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-[#0d1117] border-[#30363d] text-white'
+                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500'
+                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-cyan-500'
               }`}
             >
               <option value="Bank Operasional">Bank Operasional (1-10002)</option>
@@ -685,17 +1255,17 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              {isEn ? 'Commission Period:' : 'Periode Komisi Kasir:'}
+            <label className="text-[11px] font-mono font-normal uppercase tracking-widest text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              {isEn ? 'Period:' : 'Periode:'}
             </label>
             <select
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value)}
               aria-label="Pilih Periode Komisi Kasir"
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold border outline-none cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-sm font-normal border outline-none cursor-pointer ${
                 isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-[#0d1117] border-[#30363d] text-white'
+                  ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500'
+                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-cyan-500'
               }`}
             >
               <option value="ALL">
@@ -709,27 +1279,29 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
 
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           <button
+            type="button"
             onClick={() => setSelectedDeptFilter('ALL')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 active:scale-[0.99] whitespace-nowrap cursor-pointer ${
               selectedDeptFilter === 'ALL'
-                ? 'bg-[#0052FF] text-white shadow-sm'
+                ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.28)]'
                 : isLight
-                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                : 'bg-[#0d1117] text-gray-300 border border-[#30363d] hover:border-gray-500'
+                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                : 'bg-[#0d1117] text-slate-300 border border-[#30363d] hover:border-cyan-500/40'
             }`}
           >
             {isEn ? 'All Divisions' : 'Semua Divisi'} ({employees.length})
           </button>
           {departmentsList.map((dept) => (
             <button
+              type="button"
               key={dept}
               onClick={() => setSelectedDeptFilter(dept)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+              className={`px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 active:scale-[0.99] whitespace-nowrap cursor-pointer ${
                 selectedDeptFilter === dept
-                  ? 'bg-[#0052FF] text-white shadow-sm'
+                  ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.28)]'
                   : isLight
-                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                : 'bg-[#0d1117] text-gray-300 border border-[#30363d] hover:border-gray-500'
+                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  : 'bg-[#0d1117] text-slate-300 border border-[#30363d] hover:border-cyan-500/40'
               }`}
             >
               {dept}
@@ -742,58 +1314,51 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
       {/* 4. TABEL RINGKASAN GAJI PER STAF */}
       {/* ========================================================================= */}
       <div
-        className={`rounded-2xl border overflow-hidden shadow-sm transition ${
-          isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+        className={`rounded-2xl border overflow-hidden transition-all duration-200 ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
         }`}
       >
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1150px]">
             <thead>
               <tr
-                className={`text-[11px] uppercase tracking-wider border-b ${
+                className={`text-[11px] font-mono font-normal uppercase tracking-widest border-b ${
                   isLight
-                    ? 'bg-slate-100 text-slate-700 font-bold border-slate-300'
-                    : 'bg-[#0d1117] text-[#8b949e] font-bold border-[#30363d]'
+                    ? 'bg-slate-50 text-slate-600 border-slate-200'
+                    : 'bg-[#0d1117] text-slate-400 border-[#30363d]'
                 }`}
               >
-                <th className="py-3 px-4 font-bold">{isEn ? 'Staff & NIP' : 'Nama & NIP'}</th>
-                <th className="py-3 px-3 font-bold">{isEn ? 'Department & Role' : 'Jabatan & Divisi'}</th>
-                <th className="py-3 px-3 font-bold text-right">{isEn ? 'Base Salary' : 'Gaji Pokok'}</th>
-                <th className="py-3 px-3 font-bold text-right text-sky-600 dark:text-sky-400">
+                <th className="py-3 px-4 font-normal">{isEn ? 'Staff & NIP' : 'Nama & NIP'}</th>
+                <th className="py-3 px-3 font-normal">{isEn ? 'Department & Role' : 'Jabatan & Divisi'}</th>
+                <th className="py-3 px-3 font-normal text-right">{isEn ? 'Base Salary' : 'Gaji Pokok'}</th>
+                <th className="py-3 px-3 font-normal text-right text-sky-600 dark:text-sky-400">
                   {isEn ? 'Daily Allowance' : 'Tunjangan Harian'}
                 </th>
-                <th className="py-3 px-3 font-bold text-right text-rose-600 dark:text-rose-400">
+                <th className="py-3 px-3 font-normal text-right text-rose-600 dark:text-rose-400">
                   {isEn ? 'Attendance Penalty' : 'Potongan Absensi'}
                 </th>
-                <th className="py-3 px-3 font-bold text-right text-emerald-600 dark:text-emerald-400">
-                  {isEn ? 'Cashier Commission (1%)' : 'Estimasi Komisi Kasir (1%)'}
+                <th className="py-3 px-3 font-normal text-right text-emerald-600 dark:text-emerald-400">
+                  {isEn ? 'POS / Laundry / Advisor Comm.' : 'Komisi POS / Laundry / Butik'}
                 </th>
-                <th className="py-3 px-3 font-bold text-center">{isEn ? 'BPJS Toggle' : 'Status BPJS'}</th>
-                <th className="py-3 px-3 font-bold text-right text-emerald-700 dark:text-emerald-400">
+                <th className="py-3 px-3 font-normal text-center">{isEn ? 'BPJS Toggle' : 'Status BPJS'}</th>
+                <th className="py-3 px-3 font-normal text-right text-emerald-700 dark:text-emerald-400">
                   {isEn ? 'Take Home Pay' : 'Gaji Bersih (THP)'}
                 </th>
-                <th className="py-3 px-3 font-bold text-center">{isEn ? 'Status' : 'Status Gaji'}</th>
-                <th className="py-3 px-4 font-bold text-center">{isEn ? 'Action' : 'Aksi'}</th>
+                <th className="py-3 px-3 font-normal text-center">{isEn ? 'Status' : 'Status Gaji'}</th>
+                <th className="py-3 px-4 font-normal text-center">{isEn ? 'Action' : 'Aksi'}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]/40 text-xs">
+            <tbody className="divide-y divide-slate-200 dark:divide-[#30363d]/40 text-sm font-normal">
               {filteredPayrollItems.map((item) => {
                 const emp = item.employee;
-                const isHovered = hoveredRowId === emp.id;
 
                 return (
                   <tr
                     key={emp.id}
-                    onMouseEnter={() => setHoveredRowId(emp.id)}
-                    onMouseLeave={() => setHoveredRowId(null)}
-                    className={`transition-colors duration-100 ${
-                      isHovered
-                        ? isLight
-                          ? 'bg-blue-50/50'
-                          : 'bg-[#1c2128]'
-                        : isLight
-                        ? 'hover:bg-slate-50'
-                        : 'hover:bg-[#13171f]'
+                    className={`transition-colors duration-150 ${
+                      isLight ? 'hover:bg-cyan-50/40' : 'hover:bg-[#1c2128]'
                     }`}
                   >
                     {/* 1. Staf & NIP */}
@@ -803,24 +1368,26 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                           <img
                             src={emp.avatarUrl || emp.avatar || ''}
                             alt={emp.name}
-                            className="w-9 h-9 rounded-full object-cover border border-[#0052FF]/30 shrink-0"
+                            className="w-9 h-9 rounded-full object-cover border border-cyan-500/40 shrink-0"
                           />
                         ) : (
-                          <div className={`w-9 h-9 rounded-full flex items-center justify-center border border-[#0052FF]/30 shrink-0 ${
-                            isLight ? 'bg-slate-200 text-slate-500' : 'bg-slate-800 text-slate-400'
-                          }`}>
+                          <div
+                            className={`w-9 h-9 rounded-full flex items-center justify-center border border-cyan-500/40 shrink-0 ${
+                              isLight ? 'bg-slate-100 text-slate-500' : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
                             <Users className="w-4 h-4" />
                           </div>
                         )}
                         <div className="min-w-0">
                           <div
-                            className={`font-bold truncate ${
+                            className={`text-sm font-normal truncate ${
                               isLight ? 'text-slate-900' : 'text-white'
                             }`}
                           >
                             {emp.name}
                           </div>
-                          <div className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
+                          <div className="font-mono text-[11px] font-normal text-slate-500 dark:text-slate-400">
                             {emp.nip}
                           </div>
                         </div>
@@ -829,67 +1396,88 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
 
                     {/* 2. Department & Role */}
                     <td className="py-3.5 px-3">
-                      <div className={`font-semibold ${isLight ? 'text-slate-800' : 'text-gray-200'}`}>
+                      <div className={`text-sm font-normal ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
                         {emp.role}
                       </div>
-                      <div className="text-[10px] text-gray-500 dark:text-[#8b949e]">
-                        {emp.department} • <span className="opacity-90">{emp.contractStatus}</span>
+                      <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400">
+                        {emp.department} &bull; {emp.contractStatus}
                       </div>
                     </td>
 
                     {/* 3. Gaji Pokok */}
-                    <td className="py-3.5 px-3 text-right font-mono font-bold">
+                    <td className="py-3.5 px-3 text-right font-mono text-sm font-normal">
                       <span className={isLight ? 'text-slate-900' : 'text-white'}>
                         Rp {item.baseSalary.toLocaleString('id-ID')}
                       </span>
                     </td>
 
                     {/* 4. Tunjangan Harian */}
-                    <td className="py-3.5 px-3 text-right font-mono">
-                      <div className="font-bold text-sky-700 dark:text-sky-400">
+                    <td className="py-3.5 px-3 text-right font-mono font-normal">
+                      <div className="text-sm font-normal text-sky-700 dark:text-sky-400">
                         + Rp {item.dailyAllowance.toLocaleString('id-ID')}
                       </div>
-                      <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                      <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400">
                         {item.attendedDays} hari @ Rp {item.dailyRate.toLocaleString('id-ID')}
                       </div>
                     </td>
 
                     {/* 5. Potongan Absensi */}
-                    <td className="py-3.5 px-3 text-right font-mono">
+                    <td className="py-3.5 px-3 text-right font-mono font-normal">
                       {item.absenceDeduction > 0 ? (
                         <div>
-                          <div className="font-bold text-rose-600 dark:text-rose-400">
+                          <div className="text-sm font-normal text-rose-600 dark:text-rose-400">
                             - Rp {item.absenceDeduction.toLocaleString('id-ID')}
                           </div>
-                          <div className="text-[10px] text-rose-500 font-semibold">
+                          <div className="text-[11px] font-mono font-normal text-rose-500">
                             {item.lateCount}x terlambat
                           </div>
                         </div>
                       ) : (
-                        <div className="text-gray-400 dark:text-gray-500 text-[11px] font-medium">
-                          Rp 0 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block">Nihil</span>
+                        <div className="text-slate-400 dark:text-slate-500 text-[11px] font-mono font-normal">
+                          Rp 0 <span className="text-[11px] text-emerald-600 dark:text-emerald-400 block">Nihil</span>
                         </div>
                       )}
                     </td>
 
-                    {/* 6. Estimasi Komisi Penjualan Kasir (1%) */}
-                    <td className="py-3.5 px-3 text-right font-mono">
-                      {item.isCashier ? (
-                        <div>
-                          <div className="font-black text-emerald-600 dark:text-emerald-400 flex items-center justify-end gap-1">
-                            <Sparkles className="w-3 h-3 text-emerald-500" />
-                            <span>+ Rp {item.cashierCommission.toLocaleString('id-ID')}</span>
-                          </div>
-                          <div className="text-[10px] text-gray-500 dark:text-gray-400">
-                            1% &times; Rp {item.commissionSalesTotal.toLocaleString('id-ID')}
-                          </div>
-                          <div className="text-[9px] text-emerald-600 dark:text-emerald-400/90">
-                            ({item.commissionTrxCount} transaksi POS)
-                          </div>
+                    {/* 6. Estimasi Komisi Penjualan Kasir (1%), Produksi Laundry & Fashion Advisor */}
+                    <td className="py-3.5 px-3 text-right font-mono font-normal">
+                      {item.isCashier || item.hasLaundryCommission || item.hasFashionCommission ? (
+                        <div className="space-y-1">
+                          {item.isCashier && (
+                            <div>
+                              <div className="text-sm font-medium text-emerald-600 dark:text-emerald-400 flex items-center justify-end gap-1">
+                                <Sparkles className="w-3 h-3 text-emerald-500" />
+                                <span>+ Rp {item.cashierCommission.toLocaleString('id-ID')}</span>
+                              </div>
+                              <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400">
+                                1% &times; Rp {item.commissionSalesTotal.toLocaleString('id-ID')} ({item.commissionTrxCount} trx)
+                              </div>
+                            </div>
+                          )}
+                          {item.hasLaundryCommission && (
+                            <div>
+                              <div className="text-xs font-semibold text-cyan-600 dark:text-cyan-400 flex items-center justify-end gap-1">
+                                <span>+ Rp {item.laundryCommission.toLocaleString('id-ID')}</span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                Laundry: {item.laundryOrdersCount} ord ({item.laundryKgProcessed}kg / {item.laundrySatuanPcs + item.laundrySpecialistUnits} item)
+                              </div>
+                            </div>
+                          )}
+                          {item.hasFashionCommission && (
+                            <div>
+                              <div className="text-xs font-semibold text-fuchsia-600 dark:text-fuchsia-400 flex items-center justify-end gap-1">
+                                <span>+ Rp {item.fashionAdvisorCommission.toLocaleString('id-ID')}</span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                Advisor {item.fashionCommissionRate}% &times; Rp {item.fashionNetSalesTotal.toLocaleString('id-ID')} ({item.fashionTrxCount} nota)
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        <div className="text-gray-400 dark:text-gray-500 text-[11px]">
-                          - <span className="text-[10px] block opacity-80">Non-Kasir</span>
+                        <div className="text-slate-400 dark:text-slate-500 text-[11px] font-mono font-normal">
+                          - <span className="text-[11px] block opacity-80">Non-Komisi</span>
                         </div>
                       )}
                     </td>
@@ -904,7 +1492,7 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                           className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                             item.isBpjsActive
                               ? 'bg-emerald-500 shadow-sm'
-                              : 'bg-gray-400 dark:bg-gray-600'
+                              : 'bg-slate-400 dark:bg-slate-600'
                           }`}
                           role="switch"
                           aria-checked={item.isBpjsActive}
@@ -926,10 +1514,14 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                           />
                         </button>
                         <span
-                          className={`text-[9px] font-bold tracking-tight px-1.5 py-0.2 rounded ${
+                          className={`text-[11px] font-mono font-normal tracking-tight px-1.5 py-0.5 rounded border ${
                             item.isBpjsActive
-                              ? 'text-emerald-700 bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-500/20'
-                              : 'text-gray-500 bg-gray-100 dark:text-gray-400 dark:bg-gray-500/20'
+                              ? isLight
+                                ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                : 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+                              : isLight
+                              ? 'text-slate-600 bg-slate-100 border-slate-200'
+                              : 'text-slate-400 bg-slate-500/15 border-slate-500/30'
                           }`}
                         >
                           {item.isBpjsActive ? '-4% Deduct' : 'Opt-Out'}
@@ -938,11 +1530,11 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                     </td>
 
                     {/* 8. Take Home Pay (THP) */}
-                    <td className="py-3.5 px-3 text-right font-mono font-black text-sm">
-                      <span className="text-emerald-700 dark:text-emerald-400">
+                    <td className="py-3.5 px-3 text-right font-mono">
+                      <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
                         Rp {item.takeHomePay.toLocaleString('id-ID')}
                       </span>
-                      <div className="text-[9px] text-gray-500 dark:text-gray-400 font-normal">
+                      <div className="text-[11px] font-mono font-normal text-slate-500 dark:text-slate-400">
                         Bruto: Rp {item.grossEarnings.toLocaleString('id-ID')}
                       </div>
                     </td>
@@ -951,26 +1543,39 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                     <td className="py-3.5 px-3 text-center whitespace-nowrap">
                       {emp.payrollStatus === 'PAID' ? (
                         <div className="flex flex-col items-center gap-0.5">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black font-mono bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/40">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal tracking-widest border ${
+                              isLight
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.16)]'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                             <span>PAID</span>
                           </span>
                           {emp.payrollPaidAt && (
-                            <span className="text-[9px] text-gray-500 dark:text-gray-400 font-mono">
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono font-normal">
                               {emp.payrollPaidAt}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <div className="flex flex-col items-center gap-1">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold font-mono bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40">
+                        <div className="flex flex-col items-center gap-1.5">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal tracking-widest border ${
+                              isLight
+                                ? 'bg-amber-50 text-amber-700 border-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.16)]'
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.18)]'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
                             <span>PENDING</span>
                           </span>
                           <button
                             type="button"
                             id={`btn-pay-salary-${emp.id}`}
                             onClick={() => handleOpenPayModal(emp)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] shadow-sm transition cursor-pointer active:scale-95"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-[11px] font-mono shadow-sm transition-all duration-150 cursor-pointer active:scale-[0.99]"
                           >
                             <DollarSign className="w-3 h-3" />
                             <span>Bayar</span>
@@ -985,14 +1590,14 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                         type="button"
                         id={`btn-generate-slip-${emp.id}`}
                         onClick={() => setSelectedSlipEmployee(emp)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-bold text-xs cursor-pointer transition hover:scale-105 active:scale-95 ${
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border font-medium text-xs cursor-pointer transition-all duration-150 active:scale-[0.99] ${
                           isLight
-                            ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300 shadow-xs'
-                            : 'bg-[#0052FF]/15 hover:bg-[#0052FF]/25 text-[#0052FF] dark:text-[#58a6ff] border-[#0052FF]/30'
+                            ? 'bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border-cyan-300 shadow-xs'
+                            : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/35'
                         }`}
                         title="Buka dan cetak rincian slip gaji resmi karyawan"
                       >
-                        <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-[#58a6ff]" />
+                        <FileText className="w-3.5 h-3.5" />
                         <span>Generate Slip Gaji</span>
                       </button>
                     </td>
@@ -1005,492 +1610,330 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
       </div>
 
       {/* ========================================================================= */}
-      {/* 5. MODAL: RINCIAN SLIP GAJI KARYAWAN SIAP CETAK / UNDUH */}
+      {/* 5. MODAL: RINCIAN SLIP GAJI KARYAWAN STANDAR A5 LANDSCAPE (COBA MART) */}
       {/* ========================================================================= */}
       {selectedSlipEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
-          <div
-            id="printable-pay-slip"
-            className={`w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[92vh] ${
-              isLight
-                ? 'bg-white border-slate-300 text-slate-900'
-                : 'bg-[#161b22] border-[#30363d] text-white'
-            }`}
-          >
-            {/* Slip Header (Kop Surat Resmi) */}
-            <div
-              className={`p-5 border-b flex items-center justify-between ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}
-            >
-              <div className="flex items-center gap-3.5">
-                {businessProfile?.logoUrl ? (
-                  <img
-                    src={businessProfile.logoUrl}
-                    alt="Logo"
-                    className="w-12 h-12 object-contain rounded-xl bg-white/5 p-1 border border-cyan-500/30 shadow-sm"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-[#0052FF] to-[#00b4d8] flex items-center justify-center text-white font-black text-xl shadow-md">
-                    {businessProfile?.name?.charAt(0) || 'J'}
-                  </div>
-                )}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="w-full max-w-4xl bg-white text-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto border border-cyan-500/50">
+            {/* Modal Top Bar (Toolbar Kasir / HRD - No Print) */}
+            <div className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between no-print border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <FileText className="w-4 h-4" />
+                </div>
                 <div>
-                  <div className="text-[11px] font-black tracking-widest text-[#0052FF] dark:text-[#58a6ff] uppercase">
-                    {businessProfile?.name || 'JacS RetailOS ERP'} • HUMAN RESOURCES
+                  <div className="font-medium text-base text-white flex items-center gap-2">
+                    <span>Voucher Slip Gaji Karyawan (A5 Landscape)</span>
+                    <span className="px-2 py-0.5 rounded text-[11px] font-mono font-normal uppercase tracking-widest bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      CONFIDENTIAL
+                    </span>
                   </div>
-                  <h4 className="text-base font-black tracking-tight text-slate-900 dark:text-white">
-                    {isEn ? 'OFFICIAL EMPLOYEE PAYSLIP' : 'SLIP GAJI RESMI KARYAWAN'}
-                  </h4>
-                  {(hasValidProfileValue(businessProfile?.address) ||
-                    hasValidProfileValue(businessProfile?.phone) ||
-                    hasValidProfileValue(businessProfile?.licenseNumber)) && (
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                      {[
-                        hasValidProfileValue(businessProfile?.address) ? businessProfile!.address : null,
-                        hasValidProfileValue(businessProfile?.phone) ? `Telp: ${businessProfile!.phone}` : null,
-                        hasValidProfileValue(businessProfile?.licenseNumber)
-                          ? businessProfile!.licenseNumber
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' • ')}
-                    </p>
-                  )}
+                  <div className="text-[11px] font-mono font-normal text-slate-400">
+                    {businessProfile?.name || 'JacS RetailOS ERP'} &bull; {businessProfile?.address || 'Jakarta, Indonesia'} &bull; Dokumen Resmi Payroll
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 no-print">
-                <button
-                  type="button"
-                  onClick={() => setSelectedSlipEmployee(null)}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-gray-800 transition cursor-pointer"
-                  title="Tutup Modal"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Slip Body Content */}
-            <div className="p-6 overflow-y-auto space-y-4 text-xs">
-              {(() => {
-                const item = payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id)!;
-                return (
-                  <>
-                    {/* Status Slip & Jurnal Akuntansi */}
-                    {item.employee.payrollStatus === 'PAID' ? (
-                      <div
-                        className={`p-4 rounded-xl border flex items-center justify-between ${
-                          isLight
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                            : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-                            <CheckCircle2 className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="font-mono font-black text-xs uppercase tracking-wider flex items-center gap-2">
-                              <span>STATUS SLIP: PAID (LUNAS)</span>
-                              <span className="px-2 py-0.2 rounded-full text-[10px] bg-emerald-800 text-white dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-500/40">
-                                TERVERIFIKASI FINANCE
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">
-                              Dibayarkan pada:{' '}
-                              <strong className="font-mono text-slate-900 dark:text-white">
-                                {item.employee.payrollPaidAt || 'September 2026'}
-                              </strong>
-                              {item.employee.payrollPaymentRef && (
-                                <span>
-                                  {' '}
-                                  • Ref Jurnal:{' '}
-                                  <code className="text-cyan-700 dark:text-cyan-300 font-mono font-bold">
-                                    {item.employee.payrollPaymentRef}
-                                  </code>
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] opacity-80 mt-0.5 font-medium">
-                              Entri Buku Besar: Debit Beban Gaji Karyawan (5-10201) &bull; Kredit Kas/Bank
-                              (1-10000 / 1-10002)
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                          isLight
-                            ? 'bg-amber-50 border-amber-300 text-amber-900'
-                            : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/30 shrink-0">
-                            <Clock className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="font-bold text-xs uppercase tracking-wider text-amber-800 dark:text-amber-400">
-                              STATUS SLIP: PENDING (BELUM DICAIRKAN)
-                            </div>
-                            <div className="text-[11px] text-gray-600 dark:text-gray-300 mt-0.5">
-                              Gaji bersih THP siap dicairkan melalui Kas Utama atau Rekening Bank Operasional.
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          id="btn-pay-slip-modal"
-                          onClick={() => handleOpenPayModal(item.employee)}
-                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95 no-print"
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span>Bayar Gaji Sekarang</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Metadata Staf */}
-                    <div
-                      className={`p-4 rounded-xl border grid grid-cols-2 sm:grid-cols-4 gap-3.5 ${
-                        isLight
-                          ? 'bg-slate-50 border-slate-200 text-slate-800'
-                          : 'bg-[#0d1117] border-[#30363d] text-gray-200'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-[10px] text-gray-500 dark:text-[#8b949e] uppercase font-bold">
-                          {isEn ? 'Staff Name' : 'Nama Lengkap'}
-                        </div>
-                        <div className="font-bold text-sm text-[#0052FF] dark:text-[#58a6ff] mt-0.5">
-                          {selectedSlipEmployee.name}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-gray-500 dark:text-[#8b949e] uppercase font-bold">
-                          NIP &amp; Nomor Slip
-                        </div>
-                        <div className="font-mono font-bold mt-0.5">
-                          {selectedSlipEmployee.nip}
-                        </div>
-                        <div className="text-[9px] text-gray-400 font-mono">
-                          SLIP/2026/09/{selectedSlipEmployee.nip.split('-').pop()}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-gray-500 dark:text-[#8b949e] uppercase font-bold">
-                          {isEn ? 'Period' : 'Periode Gaji'}
-                        </div>
-                        <div className="font-bold mt-0.5">September 2026</div>
-                        <div className="text-[9px] text-gray-400">
-                          {item.attendedDays} Hari Kerja Hadir
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[10px] text-gray-500 dark:text-[#8b949e] uppercase font-bold">
-                          {isEn ? 'Department & Role' : 'Jabatan / Divisi'}
-                        </div>
-                        <div className="font-medium mt-0.5">{selectedSlipEmployee.role}</div>
-                        <div className="text-[9px] text-gray-500 dark:text-gray-400">
-                          {selectedSlipEmployee.department} ({selectedSlipEmployee.contractStatus})
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Rincian Penghasilan & Potongan */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* 1. Penghasilan / Earnings */}
-                      <div
-                        className={`rounded-xl border overflow-hidden ${
-                          isLight ? 'border-slate-200 bg-white' : 'border-[#30363d] bg-[#0d1117]'
-                        }`}
-                      >
-                        <div
-                          className={`px-3.5 py-2 font-bold uppercase text-[11px] flex items-center justify-between border-b ${
-                            isLight
-                              ? 'bg-slate-100 text-slate-800 border-slate-200'
-                              : 'bg-slate-900 text-gray-200 border-[#30363d]'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <span>{isEn ? 'A. Earnings & Allowances' : 'A. Penerimaan (Penerimaan Kotor)'}</span>
-                          </span>
-                          <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">
-                            Rp {item.grossEarnings.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-                        <div className="p-3.5 space-y-2.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-gray-600 dark:text-gray-400">
-                              {isEn ? 'Basic Salary' : 'Gaji Pokok'}
-                            </span>
-                            <span className="font-mono font-bold text-slate-900 dark:text-white">
-                              Rp {item.baseSalary.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-gray-600 dark:text-gray-400">
-                                {isEn ? 'Daily Allowance' : 'Tunjangan Harian (Makan & Transport)'}
-                              </div>
-                              <div className="text-[10px] text-sky-600 dark:text-sky-400">
-                                {item.attendedDays} hari hadir &times; Rp{' '}
-                                {item.dailyRate.toLocaleString('id-ID')}
-                              </div>
-                            </div>
-                            <span className="font-mono font-bold text-sky-700 dark:text-sky-400">
-                              + Rp {item.dailyAllowance.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-
-                          {/* Komisi Penjualan Kasir (1%) */}
-                          {item.isCashier ? (
-                            <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
-                                  <Sparkles className="w-3 h-3 text-emerald-500" />
-                                  <span>Komisi Penjualan POS (1%)</span>
-                                </span>
-                                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                                  + Rp {item.cashierCommission.toLocaleString('id-ID')}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center justify-between">
-                                <span>Basis Omzet Kasir:</span>
-                                <span className="font-mono font-semibold text-slate-800 dark:text-gray-200">
-                                  Rp {item.commissionSalesTotal.toLocaleString('id-ID')}
-                                </span>
-                              </div>
-                              <div className="text-[9px] text-emerald-600 dark:text-emerald-400/90 flex items-center justify-between">
-                                <span>Total Transaksi Selesai:</span>
-                                <span>{item.commissionTrxCount} transaksi shift</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between text-gray-400 dark:text-gray-500">
-                              <span>{isEn ? 'Cashier Commission' : 'Komisi Penjualan Kasir'}</span>
-                              <span className="text-[11px] font-mono">- (Non-Kasir)</span>
-                            </div>
-                          )}
-
-                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-bold">
-                            <span>Subtotal Penerimaan Kotor:</span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                              Rp {item.grossEarnings.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 2. Potongan / Deductions */}
-                      <div
-                        className={`rounded-xl border overflow-hidden ${
-                          isLight ? 'border-slate-200 bg-white' : 'border-[#30363d] bg-[#0d1117]'
-                        }`}
-                      >
-                        <div
-                          className={`px-3.5 py-2 font-bold uppercase text-[11px] flex items-center justify-between border-b ${
-                            isLight
-                              ? 'bg-slate-100 text-slate-800 border-slate-200'
-                              : 'bg-slate-900 text-gray-200 border-[#30363d]'
-                          }`}
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full bg-rose-500" />
-                            <span>{isEn ? 'B. Deductions' : 'B. Rincian Potongan Gaji'}</span>
-                          </span>
-                          <span className="text-rose-600 dark:text-rose-400 font-mono font-bold">
-                            - Rp {item.totalEmployeeDeduction.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-                        <div className="p-3.5 space-y-2.5">
-                          {/* Potongan Absensi */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-gray-600 dark:text-gray-400">
-                                {isEn ? 'Attendance Penalty' : 'Potongan Absensi / Keterlambatan'}
-                              </div>
-                              <div className="text-[10px] text-gray-400">
-                                {item.lateCount > 0
-                                  ? `${item.lateCount}x terlambat @ Rp ${item.latePenaltyRate.toLocaleString('id-ID')}`
-                                  : 'Presensi tertib tanpa sanksi'}
-                              </div>
-                            </div>
-                            <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
-                              {item.absenceDeduction > 0
-                                ? `- Rp ${item.absenceDeduction.toLocaleString('id-ID')}`
-                                : 'Rp 0'}
-                            </span>
-                          </div>
-
-                          {/* BPJS Kesehatan Karyawan (1%) */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-gray-600 dark:text-gray-400">
-                                {isEn ? 'BPJS Health (1%)' : 'BPJS Kesehatan Karyawan (1%)'}
-                              </div>
-                              <div className="text-[10px] text-gray-400">
-                                {item.isBpjsActive ? '1% dari Gaji Pokok' : 'Non-Aktif (Opt-Out)'}
-                              </div>
-                            </div>
-                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                              {item.isBpjsActive
-                                ? `- Rp ${item.kesEmployee.toLocaleString('id-ID')}`
-                                : 'Rp 0'}
-                            </span>
-                          </div>
-
-                          {/* BPJS Ketenagakerjaan Karyawan (3%) */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="text-gray-600 dark:text-gray-400">
-                                {isEn ? 'BPJS Employment (3%)' : 'BPJS Ketenagakerjaan Karyawan (3%)'}
-                              </div>
-                              <div className="text-[10px] text-gray-400">
-                                {item.isBpjsActive ? 'JHT (2%) + JP (1%)' : 'Non-Aktif (Opt-Out)'}
-                              </div>
-                            </div>
-                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
-                              {item.isBpjsActive
-                                ? `- Rp ${item.tkEmployee.toLocaleString('id-ID')}`
-                                : 'Rp 0'}
-                            </span>
-                          </div>
-
-                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-bold">
-                            <span>Subtotal Potongan:</span>
-                            <span className="font-mono text-rose-600 dark:text-rose-400">
-                              - Rp {item.totalEmployeeDeduction.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Beban Perusahaan (Informasional - Tidak Memotong Gaji) */}
-                    {item.isBpjsActive && (
-                      <div
-                        className={`p-3.5 rounded-xl border text-[11px] space-y-1.5 ${
-                          isLight
-                            ? 'bg-blue-50/70 border-blue-200 text-blue-900'
-                            : 'bg-[#0052FF]/10 border-[#0052FF]/30 text-gray-300'
-                        }`}
-                      >
-                        <div className="font-bold text-[#0052FF] dark:text-[#58a6ff] flex items-center gap-1.5">
-                          <Info className="w-3.5 h-3.5" />
-                          <span>
-                            {isEn
-                              ? 'Company Contribution (Borne by Employer - Not Deducted from Salary):'
-                              : 'Beban Iuran BPJS Ditanggung Perusahaan (Tidak Memotong Gaji):'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-[10px] text-gray-600 dark:text-gray-400 pt-1">
-                          <div className="flex items-center justify-between">
-                            <span>BPJS Kesehatan Perusahaan (4%):</span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-white">
-                              Rp {item.kesCompany.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span>BPJS Ketenagakerjaan (6.24%):</span>
-                            <span className="font-mono font-bold text-slate-800 dark:text-white">
-                              Rp {item.tkCompany.toLocaleString('id-ID')}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* BANNER UTAMA TAKE-HOME PAY (THP) BERSIH */}
-                    <div
-                      className={`p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                        isLight
-                          ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-xs'
-                          : 'bg-emerald-950/40 border-emerald-500/50 text-white'
-                      }`}
-                    >
-                      <div className="space-y-1">
-                        <div className="text-[11px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-                          {isEn ? 'NET TAKE-HOME PAY (READY FOR DISBURSEMENT)' : 'TOTAL GAJI BERSIH DITERIMA (TAKE-HOME PAY)'}
-                        </div>
-                        <div className="text-[11px] text-gray-600 dark:text-gray-300">
-                          Perhitungan:{' '}
-                          <span className="font-mono font-bold">
-                            Rp {item.grossEarnings.toLocaleString('id-ID')} (Bruto) - Rp{' '}
-                            {item.totalEmployeeDeduction.toLocaleString('id-ID')} (Potongan)
-                          </span>
-                        </div>
-                        <div className="text-[10px] italic text-emerald-800 dark:text-emerald-300/90 font-medium">
-                          &ldquo;{formatTerbilang(item.takeHomePay)}&rdquo;
-                        </div>
-                      </div>
-
-                      <div className="text-right shrink-0">
-                        <div className="text-2xl sm:text-3xl font-black font-mono text-emerald-700 dark:text-emerald-400">
-                          Rp {item.takeHomePay.toLocaleString('id-ID')}
-                        </div>
-                        <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
-                          Penyaluran via: <strong>{selectedPaymentSource}</strong>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-
-            {/* Slip Footer Actions */}
-            <div
-              className={`p-4 border-t flex flex-wrap items-center justify-between gap-3 no-print ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}
-            >
-              <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                Dokumen resmi HRD JacS RetailOS ERP &bull; Sah tanpa tanda tangan basah
-              </div>
-
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    const item = payrollItems.find(
-                      (p) => p.employee.id === selectedSlipEmployee.id
-                    )!;
+                    const item = payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id)!;
                     handleCopySlipText(item);
                   }}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                    isLight
-                      ? 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
-                      : 'bg-[#1c2128] hover:bg-[#252c37] text-gray-200 border-[#30363d]'
-                  }`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all duration-150 active:scale-[0.99] cursor-pointer"
                   title="Salin rincian slip gaji ke clipboard"
                 >
                   <Copy className="w-3.5 h-3.5" />
-                  <span>Salin Slip</span>
+                  <span className="hidden sm:inline">Salin Teks</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={handlePrintSlip}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs cursor-pointer transition shadow-sm"
+                  onClick={() => {
+                    const item = payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id)!;
+                    handlePrintSlip(item);
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-all duration-150 cursor-pointer shadow-sm active:scale-[0.99]"
                   title="Cetak atau unduh slip gaji dalam format PDF"
                 >
-                  <Printer className="w-4 h-4 text-white" />
+                  <Printer className="w-3.5 h-3.5 text-white" />
                   <span>Cetak / Unduh PDF</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSelectedSlipEmployee(null)}
-                  className="px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold text-xs cursor-pointer transition shadow-sm"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-all duration-150 active:scale-[0.99] cursor-pointer ml-1"
+                  title="Tutup Modal"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* KERTAS PUTIH RESMI SLIP GAJI A5 LANDSCAPE (ID: printable-pay-slip) */}
+            <div id="printable-pay-slip" className="p-6 sm:p-7 bg-white text-slate-800 font-sans text-sm font-normal">
+              {(() => {
+                const item = payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id)!;
+                return (
+                  <div className="space-y-3">
+                    {/* Kop Surat Resmi */}
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="text-xl font-medium tracking-tight text-slate-900">COBA MART</div>
+                        <div className="text-[11px] font-mono font-normal text-sky-700 tracking-widest uppercase">MINIMARKET &amp; GROSIR MODERN</div>
+                        <div className="text-xs font-normal text-slate-600 mt-0.5">
+                          Jl. Veteran Selatan No. 128, Mamajang, Kota Makassar, Sulawesi Selatan 90132
+                        </div>
+                        <div className="text-xs font-normal text-slate-600">
+                          Telp: (0411) 876-5432 &bull; Email: finance@cobamart.co.id
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="inline-block px-2.5 py-0.5 border border-rose-500 text-rose-600 bg-rose-50 text-[11px] font-mono font-normal tracking-widest rounded uppercase">
+                          CONFIDENTIAL
+                        </div>
+                        <div className="font-mono text-xs font-medium text-slate-800 mt-1">
+                          SLIP/2026/09/{selectedSlipEmployee.nip.split('-').pop() || selectedSlipEmployee.nip}
+                        </div>
+                        <div className="text-[11px] font-mono font-normal text-slate-500 mt-0.5">
+                          Makassar, 30 September 2026
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Garis Ganda Kop Surat Klasik */}
+                    <div className="border-t-2 border-slate-900 border-b border-slate-400 py-[1px]" />
+
+                    {/* Baris Judul Dokumen */}
+                    <div className="flex items-center justify-between bg-slate-100 border border-slate-300 px-3 py-1.5 rounded">
+                      <div className="font-medium text-xs text-slate-900 tracking-wider uppercase">
+                        SLIP GAJI KARYAWAN (PAYROLL VOUCHER)
+                      </div>
+                      <div className="font-mono font-normal text-[11px] text-slate-700">
+                        PERIODE: SEPTEMBER 2026
+                      </div>
+                    </div>
+
+                    {/* Data Karyawan (Metadata) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-2.5 rounded border border-slate-200 text-xs font-normal">
+                      <div>
+                        <div className="text-slate-500 font-mono font-normal text-[11px] uppercase tracking-wider">Nama Karyawan</div>
+                        <div className="font-medium text-slate-900 mt-0.5">{selectedSlipEmployee.name}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 font-mono font-normal text-[11px] uppercase tracking-wider">NIP / ID Staf</div>
+                        <div className="font-mono font-medium text-slate-800 mt-0.5">{selectedSlipEmployee.nip}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 font-mono font-normal text-[11px] uppercase tracking-wider">Jabatan &amp; Divisi</div>
+                        <div className="font-normal text-slate-800 mt-0.5">
+                          {selectedSlipEmployee.role} &bull; {selectedSlipEmployee.department}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 font-mono font-normal text-[11px] uppercase tracking-wider">Status &amp; Hadir</div>
+                        <div className="font-normal text-slate-800 mt-0.5">
+                          {selectedSlipEmployee.contractStatus || 'Karyawan Tetap'} &bull; <span className="font-mono font-medium">{item.attendedDays} Hari</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2 Kolom Bersanding: Penerimaan vs Potongan */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* Kolom Kiri: PENERIMAAN */}
+                      <div className="border border-slate-300 rounded overflow-hidden">
+                        <div className="bg-emerald-50 text-emerald-900 font-medium text-xs px-3 py-1.5 border-b border-slate-300 flex items-center justify-between">
+                          <span>A. PENERIMAAN (EARNINGS)</span>
+                          <span className="font-mono text-emerald-800">
+                            Rp {item.grossEarnings.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <table className="w-full text-xs">
+                          <tbody>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">Gaji Pokok</div>
+                                <div className="text-[11px] text-slate-500">Gaji dasar bulanan terstandar</div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                Rp {item.baseSalary.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">Tunjangan Harian</div>
+                                <div className="text-[11px] text-slate-500">
+                                  {item.attendedDays} hari hadir &times; Rp {item.dailyRate.toLocaleString('id-ID')} (makan &amp; transport)
+                                </div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                Rp {item.dailyAllowance.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">Komisi Penjualan POS (1%)</div>
+                                <div className="text-[11px] text-slate-500">
+                                  {item.isCashier
+                                    ? `1% dari omzet kasir Rp ${item.commissionSalesTotal.toLocaleString('id-ID')} (${item.commissionTrxCount} transaksi)`
+                                    : 'Non-Kasir (Bukan Operator Kasir POS)'}
+                                </div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                {item.isCashier ? `Rp ${item.cashierCommission.toLocaleString('id-ID')}` : 'Rp 0'}
+                              </td>
+                            </tr>
+                            {item.hasLaundryCommission && (
+                              <tr className="border-b border-dashed border-slate-200">
+                                <td className="p-2 text-slate-700">
+                                  <div className="font-medium text-slate-900">Insentif Produksi Laundry</div>
+                                  <div className="text-[11px] text-slate-500">
+                                    {item.laundryOrdersCount} order ({item.laundryKgProcessed} kg &bull; {item.laundrySatuanPcs} pcs &bull; {item.laundrySpecialistUnits} unit khusus)
+                                  </div>
+                                </td>
+                                <td className="p-2 text-right font-mono font-normal text-cyan-700 whitespace-nowrap">
+                                  Rp {item.laundryCommission.toLocaleString('id-ID')}
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="bg-slate-50 font-medium border-t border-slate-300">
+                              <td className="p-2 text-slate-900">TOTAL PENERIMAAN KOTOR</td>
+                              <td className="p-2 text-right font-mono font-medium text-emerald-700 whitespace-nowrap">
+                                Rp {item.grossEarnings.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Kolom Kanan: POTONGAN */}
+                      <div className="border border-slate-300 rounded overflow-hidden">
+                        <div className="bg-rose-50 text-rose-900 font-medium text-xs px-3 py-1.5 border-b border-slate-300 flex items-center justify-between">
+                          <span>B. POTONGAN (DEDUCTIONS)</span>
+                          <span className="font-mono text-rose-800">
+                            - Rp {item.totalEmployeeDeduction.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                        <table className="w-full text-xs">
+                          <tbody>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">Denda Keterlambatan</div>
+                                <div className="text-[11px] text-slate-500">
+                                  {item.lateCount > 0
+                                    ? `${item.lateCount}x terlambat presensi @ Rp ${item.latePenaltyRate.toLocaleString('id-ID')}`
+                                    : 'Disiplin hadir tepat waktu (Tanpa Denda)'}
+                                </div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                {item.absenceDeduction > 0
+                                  ? `- Rp ${item.absenceDeduction.toLocaleString('id-ID')}`
+                                  : 'Rp 0'}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">BPJS Kesehatan (1%)</div>
+                                <div className="text-[11px] text-slate-500">Iuran wajib pekerja 1% dari Gaji Pokok</div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                {item.isBpjsActive
+                                  ? `- Rp ${item.kesEmployee.toLocaleString('id-ID')}`
+                                  : 'Rp 0'}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-dashed border-slate-200">
+                              <td className="p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">BPJS Ketenagakerjaan (3%)</div>
+                                <div className="text-[11px] text-slate-500">Jaminan Hari Tua (2%) + Jaminan Pensiun (1%)</div>
+                              </td>
+                              <td className="p-2 text-right font-mono font-normal text-slate-900 whitespace-nowrap">
+                                {item.isBpjsActive
+                                  ? `- Rp ${item.tkEmployee.toLocaleString('id-ID')}`
+                                  : 'Rp 0'}
+                              </td>
+                            </tr>
+                            <tr className="bg-slate-50 font-medium border-t border-slate-300">
+                              <td className="p-2 text-slate-900">TOTAL POTONGAN</td>
+                              <td className="p-2 text-right font-mono font-medium text-rose-700 whitespace-nowrap">
+                                - Rp {item.totalEmployeeDeduction.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Ringkasan: Take Home Pay & Terbilang */}
+                    <div className="bg-slate-50 border border-slate-900 rounded p-2.5 sm:p-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <div className="font-medium text-xs font-mono uppercase tracking-widest text-slate-900">
+                          TOTAL PENERIMAAN BERSIH (TAKE HOME PAY)
+                        </div>
+                        <div className="text-lg font-mono font-medium text-slate-900">
+                          Rp {item.takeHomePay.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-700 italic mt-1 pt-1.5 border-t border-slate-300">
+                        Terbilang: <span className="font-medium"># {formatTerbilang(item.takeHomePay)} #</span>
+                      </div>
+                    </div>
+
+                    {/* Kolom Tanda Tangan: 2 Kolom Bersanding */}
+                    <div className="grid grid-cols-2 gap-8 pt-2 text-center text-xs">
+                      <div>
+                        <div className="font-normal text-slate-700">Diterima Oleh (Karyawan),</div>
+                        <div className="h-12 flex items-end justify-center pb-1">
+                          {/* Signature line space */}
+                        </div>
+                        <div className="font-medium underline text-slate-900">( {selectedSlipEmployee.name} )</div>
+                        <div className="text-[11px] font-mono text-slate-500">NIP. {selectedSlipEmployee.nip}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-mono text-slate-500">Makassar, 30 September 2026</div>
+                        <div className="font-normal text-slate-700">Disetujui Oleh (Finance / HRD),</div>
+                        <div className="h-12 flex items-end justify-center pb-1">
+                          {/* Signature line space */}
+                        </div>
+                        <div className="font-medium underline text-slate-900">( Siti Rahma, S.E. )</div>
+                        <div className="text-[11px] font-mono text-slate-500">Manager Finance &amp; HRD</div>
+                      </div>
+                    </div>
+
+                    {/* Catatan Kaki */}
+                    <div className="text-[11px] text-slate-400 text-center italic pt-1">
+                      * Slip gaji ini merupakan dokumen rahasia dan bukti pembayaran resmi dari COBA MART Makassar. Dicetak secara otomatis oleh JacS RetailOS.
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Bottom Actions (No Print) */}
+            <div className="bg-slate-100 px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 no-print">
+              <div className="text-xs font-normal text-slate-600 flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Format Standar Voucher Payroll A5 Landscape &bull; Terverifikasi Sistem HRD</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const item = payrollItems.find((p) => p.employee.id === selectedSlipEmployee.id)!;
+                    handlePrintSlip(item);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-medium text-sm flex items-center gap-2 transition-all duration-150 cursor-pointer shadow-sm active:scale-[0.99]"
+                  title="Cetak atau unduh slip gaji dalam format PDF"
+                >
+                  <Printer className="w-3.5 h-3.5 text-white" />
+                  <span>Cetak / Unduh PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSlipEmployee(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium text-sm transition-all duration-150 active:scale-[0.99] cursor-pointer"
                 >
                   {isEn ? 'Close' : 'Tutup'}
                 </button>
@@ -1508,18 +1951,24 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
           <div
             className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden p-5 sm:p-6 space-y-4 ${
               isLight
-                ? 'bg-white border-slate-300 text-slate-900'
-                : 'bg-[#161b22] border-[#30363d] text-white'
+                ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_24px_rgba(6,182,212,0.2)]'
+                : 'bg-[#161b22] border-cyan-500/40 text-white shadow-[0_0_24px_rgba(6,182,212,0.16)]'
             }`}
           >
-            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-700/40">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700/40">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                  <DollarSign className="w-6 h-6" />
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+                    isLight
+                      ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                      : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  }`}
+                >
+                  <DollarSign className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="font-black text-base">Konfirmasi Pembayaran Gaji</h4>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <h4 className="font-medium text-base">Konfirmasi Pembayaran Gaji</h4>
+                  <p className="text-sm font-normal text-slate-500 dark:text-slate-400">
                     Pencairan payroll &amp; penerbitan jurnal akuntansi
                   </p>
                 </div>
@@ -1527,37 +1976,37 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               <button
                 type="button"
                 onClick={() => setIsPayModalOpen(false)}
-                className="text-gray-400 hover:text-slate-900 dark:hover:text-white transition"
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-all duration-150 active:scale-[0.99] cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <div className="space-y-3 text-sm font-normal">
               <div
                 className={`p-3.5 rounded-xl border space-y-2 ${
                   isLight
                     ? 'bg-slate-50 border-slate-200 text-slate-800'
-                    : 'bg-slate-900/60 border-slate-800 text-gray-200'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-200'
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Target Penerima:</span>
-                  <span className="font-bold">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 dark:text-slate-400">Target Penerima:</span>
+                  <span className="font-medium text-right">
                     {targetPayEmployee === 'ALL'
                       ? `Seluruh Karyawan (${employees.length} Orang)`
                       : `${targetPayEmployee?.name} (${targetPayEmployee?.nip})`}
                   </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500 dark:text-gray-400">Periode Gaji:</span>
-                  <span className="font-mono font-bold text-blue-600 dark:text-cyan-400">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 dark:text-slate-400">Periode Gaji:</span>
+                  <span className="font-mono font-normal text-cyan-600 dark:text-cyan-400">
                     September 2026
                   </span>
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
-                  <span className="font-bold">Total Pembayaran (THP):</span>
-                  <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  <span className="font-medium">Total Pembayaran (THP):</span>
+                  <span className="text-lg font-mono font-medium text-emerald-600 dark:text-emerald-400">
                     Rp{' '}
                     {(targetPayEmployee === 'ALL'
                       ? summary.totalTakeHomePay
@@ -1570,45 +2019,49 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
 
               {/* Pilihan Sumber Dana */}
               <div>
-                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1.5">
+                <label className="text-[11px] font-mono font-normal uppercase tracking-widest text-slate-600 dark:text-slate-300 block mb-1.5">
                   Pilih Sumber Rekening / Kas Pengeluaran:
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setSelectedPaymentSource('Bank Operasional')}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all duration-150 active:scale-[0.99] ${
                       selectedPaymentSource === 'Bank Operasional'
-                        ? 'bg-blue-500/15 border-blue-500 text-blue-600 dark:text-blue-300 shadow-sm'
+                        ? isLight
+                          ? 'bg-cyan-50 border-cyan-500 text-cyan-700 shadow-[0_0_12px_rgba(6,182,212,0.18)]'
+                          : 'bg-cyan-500/15 border-cyan-500 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.2)]'
                         : isLight
                         ? 'bg-slate-50 border-slate-200 text-slate-700'
-                        : 'bg-[#0d1117] border-[#30363d] text-gray-300'
+                        : 'bg-[#0d1117] border-[#30363d] text-slate-300'
                     }`}
                   >
-                    <div className="font-bold">Bank Operasional</div>
-                    <div className="text-[10px] text-gray-400 font-mono">Akun 1-10002</div>
+                    <div className="text-sm font-medium">Bank Operasional</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">Akun 1-10002</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedPaymentSource('Kas Utama')}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition-all duration-150 active:scale-[0.99] ${
                       selectedPaymentSource === 'Kas Utama'
-                        ? 'bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-300 shadow-sm'
+                        ? isLight
+                          ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.18)]'
+                          : 'bg-emerald-500/15 border-emerald-500 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
                         : isLight
                         ? 'bg-slate-50 border-slate-200 text-slate-700'
-                        : 'bg-[#0d1117] border-[#30363d] text-gray-300'
+                        : 'bg-[#0d1117] border-[#30363d] text-slate-300'
                     }`}
                   >
-                    <div className="font-bold">Kas Utama / Brankas</div>
-                    <div className="text-[10px] text-gray-400 font-mono">Akun 1-10000</div>
+                    <div className="text-sm font-medium">Kas Utama / Brankas</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">Akun 1-10000</div>
                   </button>
                 </div>
               </div>
 
               {/* Catatan Pembayaran */}
               <div>
-                <label className="text-[11px] font-bold text-gray-600 dark:text-gray-300 block mb-1">
+                <label className="text-[11px] font-mono font-normal uppercase tracking-widest text-slate-600 dark:text-slate-300 block mb-1">
                   Catatan Memo Pembukuan:
                 </label>
                 <input
@@ -1616,16 +2069,16 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                   value={payNotes}
                   onChange={(e) => setPayNotes(e.target.value)}
                   placeholder="Catatan memo pembayaran..."
-                  className={`w-full px-3 py-2 text-xs rounded-xl border outline-none ${
+                  className={`w-full px-3 py-2 text-sm font-normal rounded-xl border outline-none ${
                     isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-blue-500'
-                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-blue-500'
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500'
+                      : 'bg-[#0d1117] border-[#30363d] text-white focus:border-cyan-500'
                   }`}
                 />
               </div>
 
               <div
-                className={`p-3 rounded-xl border text-[11px] flex items-start gap-2 ${
+                className={`p-3 rounded-xl border text-xs font-normal flex items-start gap-2 ${
                   isLight
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                     : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
@@ -1633,8 +2086,8 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               >
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
                 <span>
-                  Sistem otomatis mendebit <strong>Beban Gaji Karyawan (5-10201)</strong> dan mengkredit akun{' '}
-                  <strong>{selectedPaymentSource}</strong> di modul Keuangan &amp; Akuntansi.
+                  Sistem otomatis mendebit <span className="font-medium">Beban Gaji Karyawan (5-10201)</span> dan mengkredit akun{' '}
+                  <span className="font-medium">{selectedPaymentSource}</span> di modul Keuangan &amp; Akuntansi.
                 </span>
               </div>
             </div>
@@ -1643,10 +2096,10 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
               <button
                 type="button"
                 onClick={() => setIsPayModalOpen(false)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all duration-150 active:scale-[0.99] cursor-pointer ${
                   isLight
                     ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                    : 'bg-gray-800 hover:bg-gray-700 text-gray-200'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
                 }`}
               >
                 Batal
@@ -1656,7 +2109,7 @@ Terbilang: ${formatTerbilang(item.takeHomePay)}
                 id="btn-confirm-payroll-payment"
                 onClick={handleConfirmPayment}
                 disabled={isProcessingPayment}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer active:scale-95 disabled:opacity-50"
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm flex items-center gap-1.5 shadow-[0_0_14px_rgba(16,185,129,0.28)] transition-all duration-150 cursor-pointer active:scale-[0.99] disabled:opacity-50"
               >
                 <DollarSign className="w-4 h-4" />
                 <span>{isProcessingPayment ? 'Memproses...' : 'Konfirmasi Pencairan'}</span>

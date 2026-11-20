@@ -14,6 +14,7 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
   showSyncButton = true,
 }) => {
   const {
+    activeNav,
     theme,
     isOnline: contextIsOnline,
     offlineQueue = [],
@@ -36,7 +37,6 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
 
   // Heartbeat probe function
   const runHeartbeat = useCallback(async () => {
-    // If navigator explicitly reports offline, immediate offline
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setIsOnline(false);
       setHeartbeatStatus('degraded');
@@ -48,17 +48,14 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
     const startTime = performance.now();
 
     try {
-      // Lightweight probe with 3-second timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-      // Probe origin with cache-busting head request
       const response = await fetch(`/?heartbeat=${Date.now()}`, {
         method: 'HEAD',
         cache: 'no-store',
         signal: controller.signal,
       }).catch(async () => {
-        // Fallback probe to current window location if subpath or relative path
         return await fetch(window.location.href, {
           method: 'HEAD',
           cache: 'no-store',
@@ -77,20 +74,16 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
         setLatency(roundTrip);
         setLastHeartbeat(new Date());
       } else {
-        // Even if server returns 500, internet connection is alive
         setIsOnline(true);
         setHeartbeatStatus('healthy');
         setLatency(roundTrip);
       }
     } catch {
-      // If fetch fails (timeout or network error)
-      // Check if navigator still considers network up
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setIsOnline(false);
         setHeartbeatStatus('degraded');
         setLatency(null);
       } else {
-        // Device is nominally connected according to navigator
         setIsOnline(true);
         setHeartbeatStatus('healthy');
         setLastHeartbeat(new Date());
@@ -98,7 +91,7 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
     }
   }, []);
 
-  // Window event listeners for immediate online / offline detection without reload
+  // Window event listeners for immediate online / offline detection
   useEffect(() => {
     const handleWindowOnline = () => {
       setIsOnline(true);
@@ -118,14 +111,11 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
       }
     };
 
-    // Attach native window event listeners
     window.addEventListener('online', handleWindowOnline);
     window.addEventListener('offline', handleWindowOffline);
 
-    // Initial heartbeat ping
     runHeartbeat();
 
-    // Periodic heartbeat check every 25 seconds
     heartbeatTimerRef.current = setInterval(() => {
       runHeartbeat();
     }, 25000);
@@ -167,13 +157,17 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
     }
   };
 
+  // Jangan render TelemetryBar jika user sedang di layar kasir (POS) agar tidak menabrak header kasir
+  if (activeNav === 'pos') {
+    return null;
+  }
+
   const formattedHeartbeatTime = lastHeartbeat
     ? lastHeartbeat.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '-';
 
   return (
     <div id="telemetry-bar-root" className={`flex items-center shrink-0 ${className}`}>
-      {/* Dynamic Condition: navigator.onLine === true */}
       {isOnline ? (
         <div
           id="system-online-badge"
@@ -184,7 +178,6 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
           }`}
           title={`Cloud Connected • Heartbeat: ${heartbeatStatus === 'healthy' ? 'Normal' : 'Checking'} • Latency: ${latency ? `${latency}ms` : '<10ms'} • Waktu: ${formattedHeartbeatTime}`}
         >
-          {/* Indikator titik hijau berkedip (blinking green dot) */}
           <span className="relative flex h-2 w-2 shrink-0">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span
@@ -229,7 +222,6 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
           )}
         </div>
       ) : (
-        /* Dynamic Condition: navigator.onLine === false */
         <div
           id="system-offline-badge"
           className={`flex items-center gap-1.5 sm:gap-2 rounded-full px-2.5 sm:px-3 py-1 text-xs font-semibold border whitespace-nowrap transition-all duration-300 animate-pulse ${
@@ -239,7 +231,6 @@ export const TelemetryBar: React.FC<TelemetryBarProps> = ({
           }`}
           title="Koneksi Terputus: Transaksi disimpan ke Local Storage & Struk tetap dapat dicetak"
         >
-          {/* Indikator titik oranye berkedip */}
           <span className="relative flex h-2 w-2 shrink-0">
             <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500 animate-ping"></span>
           </span>

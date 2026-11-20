@@ -77,10 +77,10 @@ export const AddTerminalModal: React.FC<AddTerminalModalProps> = ({
       id="modal-add-terminal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
     >
-      <div className="w-full max-w-lg bg-[#161b22] border border-[#30363d] rounded-2xl p-6 shadow-2xl text-white relative">
+      <div className="w-full max-w-lg bg-[#161b22] border border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] rounded-2xl p-6 text-white relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-[#21262d] transition cursor-pointer"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-[#21262d] transition cursor-pointer active:scale-[0.99]"
         >
           <X className="w-5 h-5" />
         </button>
@@ -97,8 +97,8 @@ export const AddTerminalModal: React.FC<AddTerminalModalProps> = ({
             <Plus className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">Tambah Terminal Kasir Baru</h3>
-            <p className="text-xs text-[#8b949e]">
+            <h3 className="text-base font-medium text-white">Tambah Terminal Kasir Baru</h3>
+            <p className="text-xs text-gray-400 font-normal">
               Daftarkan pos kasir baru dengan tema neon dan profil model bisnis JacS ERP
             </p>
           </div>
@@ -236,11 +236,11 @@ export const AddTerminalModal: React.FC<AddTerminalModalProps> = ({
               Pilihan Pendaran Warna Neon
             </label>
             <div className="grid grid-cols-5 gap-2">
-              {NEON_PRESETS.map((p) => {
+              {NEON_PRESETS.map((p, pIdx) => {
                 const isSelected = selectedColor === p.colorHex;
                 return (
                   <button
-                    key={p.colorHex}
+                    key={`${p.colorHex}-${pIdx}`}
                     type="button"
                     onClick={() => setSelectedColor(p.colorHex)}
                     className={`p-2 rounded-xl border flex flex-col items-center gap-1 transition cursor-pointer ${
@@ -276,7 +276,7 @@ export const AddTerminalModal: React.FC<AddTerminalModalProps> = ({
             <button
               type="button"
               onClick={() => setIsLocked(!isLocked)}
-              className={`px-3 py-1.5 rounded-lg font-bold text-xs transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-medium text-xs transition cursor-pointer active:scale-[0.99] ${
                 isLocked
                   ? 'bg-rose-500 text-white'
                   : 'bg-[#21262d] text-gray-400 hover:text-white'
@@ -290,13 +290,13 @@ export const AddTerminalModal: React.FC<AddTerminalModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="w-1/2 py-2.5 rounded-xl font-bold bg-[#21262d] hover:bg-[#30363d] text-gray-300 transition cursor-pointer"
+              className="w-1/2 py-2.5 rounded-xl font-medium bg-[#21262d] hover:bg-[#30363d] text-gray-300 transition cursor-pointer active:scale-[0.99]"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="w-1/2 py-2.5 rounded-xl font-bold bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-[0_0_15px_rgba(0,82,255,0.4)] transition cursor-pointer"
+              className="w-1/2 py-2.5 rounded-xl font-medium bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-[0_0_15px_rgba(0,82,255,0.4)] transition cursor-pointer active:scale-[0.99]"
             >
               Simpan Terminal
             </button>

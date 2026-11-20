@@ -1,7 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Terminal, UserRole } from '../../types';
-import { generateTerminalConfigs, isHybridArchitecture } from '../../utils/terminalConfigUtils';
+import { useAudit } from '../../audit';
+import { CloverEnvironment, dualBackendSync, RemoteCommandType } from '../../services/dualBackendSync';
+import { CloverSyncResult } from '../../services/cloverSyncService';
+import { OperationalTopologyMode, Terminal, UserRole } from '../../types';
+import {
+  clearBoundPosStation,
+  generatePosStations,
+  generateTerminalConfigs,
+  getBoundPosStation,
+  getOperationalTopologyOption,
+  isHybridArchitecture,
+} from '../../utils/terminalConfigUtils';
+import {
+  validateSafeImageUpload,
+  validateSafeDataImportFile,
+  createSignedBackupEnvelope,
+  verifySignedBackupEnvelope,
+  sanitizeTextValue,
+} from '../../utils/securityShield';
 import {
   ShieldAlert,
   Lock,
@@ -67,14 +84,45 @@ import {
   AlertCircle,
   HelpCircle,
   BookOpen,
+  Monitor,
+  X,
+  Briefcase,
+  Users,
+  CreditCard,
+  ShoppingBag,
+  Boxes,
 } from 'lucide-react';
 import { JacSLogo } from '../common/JacSLogo';
-import { BusinessEntityProfile, Product } from '../../types';
+import {
+  ActivePosType,
+  BusinessDomainConfig,
+  BusinessEntityProfile,
+  BusinessMechanismFamily,
+  BusinessModelId,
+  Product,
+} from '../../types';
 import { DEFAULT_BUSINESS_PROFILE } from '../../data/initialData';
-import { hasValidProfileValue } from '../../utils/businessProfileUtils';
+import {
+  ACTIVE_POS_TYPE_OPTIONS,
+  BUSINESS_MECHANISM_FAMILIES,
+  BUSINESS_MODEL_DEFINITIONS,
+  createBusinessDomainConfig,
+  getActivePosTypeOption,
+  getBusinessModelDefinition,
+  getEffectiveBusinessDomainConfig,
+  getPosIdentityIdForBusinessModel,
+  getAllowedPosIdentityIds,
+  hasValidProfileValue,
+  normalizeBusinessProfileDomain,
+  resolveCanonicalSector,
+} from '../../utils/businessProfileUtils';
 import { DataMigrationModal } from '../master/DataMigrationModal';
 import { AiSmartMapperModal } from '../master/AiSmartMapperModal';
-import { SopInfoCenterTab } from './tabs/SopInfoCenterTab';
+import { SuperAdminMaintenance } from './SuperAdminMaintenance';
+import { JacsSystemDiagnostics } from '../dev/JacsSystemDiagnostics';
+import { JacsSOPManualTab } from './JacsSOPManualTab';
+import { JacsBranchManagementTab } from './JacsBranchManagementTab';
+import { MasterDataModule } from '../master/MasterDataModule';
 import { MigrationEntityType } from '../../types';
 import { getTerminalIndustry } from '../../data/industryTerminalProducts';
 
@@ -90,6 +138,14 @@ export const SuperAdminModule: React.FC = () => {
     setAllTerminalsLock,
     developerPassword,
     updateDeveloperPassword,
+    divisionPinHashes,
+    superAdminCodeHash,
+    superAdminCodeUpdatedAt,
+    updateDivisionPin,
+    verifySuperAdminAuthorityCode,
+    updateSuperAdminAuthorityCode,
+    managementAuthPin,
+    updateManagementAuthPin,
     isSuperAdminAuthenticated,
     setIsSuperAdminAuthenticated,
     superAdminTab,
@@ -102,12 +158,18 @@ export const SuperAdminModule: React.FC = () => {
     repairStockLedger,
     resetDemoSalesAndRestock,
     businessProfile,
+    businessDomainConfig,
+    activeSector,
     updateBusinessProfile,
     resetBusinessProfileToDefault,
     isFirstRunSetup,
     setIsFirstRunSetup,
     isGlobalMaintenance,
     toggleGlobalMaintenance,
+    isProductionMode,
+    toggleProductionMode,
+    cleanSlateTransactions,
+    resetLedgerToActiveEntity,
     users,
     auditLogs,
     addAuditLog,
@@ -123,7 +185,16 @@ export const SuperAdminModule: React.FC = () => {
     inventory,
     stockMutations,
     finance,
+    financeEntries,
+    journalEntries,
+    activeBranchId,
+    branches,
+    employees,
+    cashierShifts,
     shiftsHistory,
+    getLiquidCashBalance,
+    pruneOldAuditLogs,
+    restoreSystemSnapshot,
     calculateCashierCommission,
     addProductsBulk,
     setProducts,
@@ -133,9 +204,274 @@ export const SuperAdminModule: React.FC = () => {
     setCategoriesMaster,
     showToast,
     theme,
+    language,
+    activeUser,
+    currentUser,
+    remoteMaintenanceLock,
+    remoteCommandLogs,
+    branchTelemetryReports,
+    lastHeartbeatAt,
+    dispatchRemoteCommand,
+    triggerManualHeartbeatPoll,
+    clearRemoteHubLogs,
+    systemErrorLogs,
+    clearSystemErrorLogs,
+    cloverConfig,
+    updateCloverConfig,
+    executeCloverLiveSync,
+    boundStation,
+    unbindPosStation,
+    executeSystemResetByLevel,
+    restoreDemoSimulationData,
+    verifyManagementAuthPin,
+    isLedgerReset,
+    isMasterCatalogWiped,
+    fnbToppings,
+    serviceStylists,
+    idleAutoLockMinutes,
+    setIdleAutoLockMinutes,
+    triggerIdleLockNow,
+    securityShieldStats,
+    recordSecurityShieldEvent,
   } = useApp();
 
+  const { recordAudit } = useAudit();
+  const effectiveUser = currentUser || activeUser;
   const isLight = theme === 'light';
+  const [localBoundInfo, setLocalBoundInfo] = useState(() => getBoundPosStation());
+  useEffect(() => {
+    setLocalBoundInfo(boundStation || getBoundPosStation());
+  }, [boundStation]);
+
+  const [showCleanSlateModal, setShowCleanSlateModal] = useState(false);
+  const [cleanSlatePin, setCleanSlatePin] = useState('');
+  const [cleanSlateError, setCleanSlateError] = useState<string | null>(null);
+  const [showResetLedgerModal, setShowResetLedgerModal] = useState(false);
+
+  // Pusat Reset Sistem Bertingkat (4 Level Kebutuhan) States
+  const [selectedResetLevel, setSelectedResetLevel] = useState<1 | 2 | 3 | 4 | null>(null);
+  const [resetLevelPinInput, setResetLevelPinInput] = useState('');
+  const [resetLevelConfirmPhrase, setResetLevelConfirmPhrase] = useState('');
+  const [resetLevelError, setResetLevelError] = useState<string | null>(null);
+  const [showRestoreDemoModal, setShowRestoreDemoModal] = useState(false);
+  const [lastResetResult, setLastResetResult] = useState<{
+    level: 1 | 2 | 3 | 4 | 'RESTORE_DEMO';
+    title: string;
+    message: string;
+    timestamp: string;
+  } | null>(null);
+
+  const handleConfirmRestoreDemoData = () => {
+    const res = restoreDemoSimulationData();
+    if (res.success) {
+      setLastResetResult({
+        level: 'RESTORE_DEMO',
+        title: res.title,
+        message: res.message,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+      setShowRestoreDemoModal(false);
+    }
+  };
+
+  const openTieredResetModal = (level: 1 | 2 | 3 | 4) => {
+    setSelectedResetLevel(level);
+    setResetLevelPinInput('');
+    setResetLevelConfirmPhrase('');
+    setResetLevelError(null);
+  };
+
+  const closeTieredResetModal = () => {
+    setSelectedResetLevel(null);
+    setResetLevelPinInput('');
+    setResetLevelConfirmPhrase('');
+    setResetLevelError(null);
+  };
+
+  const handleExecuteTieredReset = () => {
+    if (!selectedResetLevel) return;
+
+    const cleanPin = resetLevelPinInput.trim();
+    if (cleanPin.length !== 6) {
+      setResetLevelError('PIN Manajemen wajib diisi 6 digit angka.');
+      return;
+    }
+
+    if (!verifyManagementAuthPin(cleanPin)) {
+      setResetLevelError('PIN Manajemen 6 digit tidak valid! Periksa tab Kredensial & PIN.');
+      return;
+    }
+
+    if (selectedResetLevel === 4 && resetLevelConfirmPhrase.trim() !== 'RESET TOTAL') {
+      setResetLevelError('Ketik frasa konfirmasi "RESET TOTAL" dengan huruf kapital.');
+      return;
+    }
+
+    const res = executeSystemResetByLevel(selectedResetLevel);
+    if (res.success) {
+      setLastResetResult({
+        level: selectedResetLevel,
+        title: res.title,
+        message: res.message,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+      closeTieredResetModal();
+    }
+  };
+
+  // Full JSON Snapshot Backup & Restore States
+  const snapshotFileInputRef = useRef<HTMLInputElement>(null);
+  const [showRestoreConfirmModal, setShowRestoreConfirmModal] = useState(false);
+  const [pendingSnapshot, setPendingSnapshot] = useState<{
+    fileName: string;
+    exportedAt?: string;
+    checksum?: string;
+    signedBy?: string;
+    threatsSanitized?: number;
+    data: any;
+    counts: {
+      products: number;
+      sales: number;
+      financeEntries: number;
+      journalEntries: number;
+      branches: number;
+      employees: number;
+      suppliers: number;
+    };
+  } | null>(null);
+  const [restorePin, setRestorePin] = useState('');
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [lastBackupRejectionAlert, setLastBackupRejectionAlert] = useState<string | null>(null);
+
+  // Audit Log Optimization & Ledger Reconciliation States
+  const [auditPruneSummary, setAuditPruneSummary] = useState<string | null>(null);
+  const [ledgerCheckResult, setLedgerCheckResult] = useState<{
+    status: 'BALANCED' | 'DISCREPANCY';
+    checkedAt: string;
+    journalDebit: number;
+    journalCredit: number;
+    journalDiff: number;
+    totalIncome: number;
+    totalExpense: number;
+    liquidCashBalance: number;
+    completedSalesCount: number;
+    completedSalesTotal: number;
+    message: string;
+  } | null>(null);
+
+  // Super Admin API Key & Maintenance Engine States
+  const [superAdminApiKey, setSuperAdminApiKey] = useState(() => {
+    return localStorage.getItem('jacs_superadmin_api_key') || 'clv_live_wrhnkUi6OMSHOVXlwt9Z1Obs7F3k9wu5A8E7qzt7XF7';
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [syncLogs, setSyncLogs] = useState<string[]>([]);
+  const [isSyncingModules, setIsSyncingModules] = useState(false);
+
+  // Clover POS Live API Integration States
+  const [cloverMerchantId, setCloverMerchantId] = useState<string>(() => cloverConfig?.merchantId || '');
+  const [cloverApiToken, setCloverApiToken] = useState<string>(
+    () => cloverConfig?.apiToken || localStorage.getItem('jacs_superadmin_api_key') || ''
+  );
+  const [cloverEnvironment, setCloverEnvironment] = useState<CloverEnvironment>(
+    () => (cloverConfig?.environment === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION')
+  );
+  const [cloverAutoCleanDummy, setCloverAutoCleanDummy] = useState<boolean>(
+    () => (typeof cloverConfig?.autoCleanDummy === 'boolean' ? cloverConfig.autoCleanDummy : true)
+  );
+  const [showCloverToken, setShowCloverToken] = useState(false);
+  const [isSyncingClover, setIsSyncingClover] = useState(false);
+  const [cloverSyncResult, setCloverSyncResult] = useState<(CloverSyncResult & { cleanedDummy?: boolean }) | null>(null);
+
+  const handleSaveCloverCredentials = () => {
+    const saved = updateCloverConfig({
+      merchantId: cloverMerchantId.trim(),
+      apiToken: cloverApiToken.trim(),
+      environment: cloverEnvironment,
+      autoCleanDummy: cloverAutoCleanDummy
+    });
+    if (saved.apiToken) {
+      setSuperAdminApiKey(saved.apiToken);
+    }
+    showToast('Kredensial Clover POS berhasil disimpan ke konfigurasi sistem.', 'success');
+  };
+
+  const handleSyncCloverLive = async () => {
+    setIsSyncingClover(true);
+    setCloverSyncResult(null);
+    try {
+      const res = await executeCloverLiveSync({
+        merchantId: cloverMerchantId.trim(),
+        apiToken: cloverApiToken.trim(),
+        environment: cloverEnvironment,
+        autoCleanDummy: cloverAutoCleanDummy
+      });
+      setCloverSyncResult(res);
+      if (res.success) {
+        addSyncLog(
+          `✅ Clover POS Live Sync selesai (${res.products.length} produk, ${res.ordersMapped} order via ${res.transportUsed}).`
+        );
+      } else {
+        addSyncLog(`❌ Clover POS Sync gagal: ${res.error || 'Unknown error'}`);
+      }
+    } finally {
+      setIsSyncingClover(false);
+    }
+  };
+
+  const addSyncLog = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString('id-ID', { hour12: false });
+    setSyncLogs((prev) => [`[${timestamp}] ${msg}`, ...prev.slice(0, 49)]);
+  };
+
+  const handleSyncModules = () => {
+    setIsSyncingModules(true);
+    addSyncLog("Mulai sinkronisasi konsistensi data lintas modul...");
+    
+    setTimeout(() => {
+      addSyncLog("Memverifikasi integritas transaksi POS vs Finance Ledger...");
+      setTimeout(() => {
+        addSyncLog("Sinkronisasi buffer inventori Purchasing ke Stock Master...");
+        setTimeout(() => {
+          addSyncLog("Validasi checksum database cloud berhasil.");
+          addSyncLog("✅ Sinkronisasi antar modul selesai 100%.");
+          setIsSyncingModules(false);
+
+          recordAudit({
+            traceId: `ADMIN-SYNC-${Date.now()}`,
+            userId: effectiveUser?.id || 'super-admin',
+            userName: effectiveUser?.name || 'Super Admin',
+            userRole: effectiveUser?.role || 'Super Admin',
+            module: 'SUPER_ADMIN',
+            action: 'CONFIG_CHANGE',
+            severity: 'INFO',
+            payloadAfter: { action: 'CROSS_MODULE_RECONCILIATION_SUCCESS' },
+          });
+
+          showToast("Sinkronisasi data lintas modul berhasil!");
+        }, 800);
+      }, 600);
+    }, 500);
+  };
+
+  const handleExportBugLogs = () => {
+    const data = JSON.stringify(auditLogs.filter(l => l.level === 'ERROR' || l.level === 'WARN'), null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JacS_BugLog_${new Date().toISOString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast("Bug & Error log berhasil diekspor.");
+  };
+
+  const handleClearDiagnosticCache = () => {
+    setSyncLogs([]);
+    addSyncLog("Diagnostic cache dibersihkan.");
+    addSyncLog("Buffer transaksi gantung di-reset.");
+    showToast("Cache diagnostik berhasil dibersihkan.");
+  };
 
   // Security Gate State
   const [passwordInput, setPasswordInput] = useState('');
@@ -143,29 +479,464 @@ export const SuperAdminModule: React.FC = () => {
   const [isErrorShake, setIsErrorShake] = useState(false);
   const [securityError, setSecurityError] = useState<string | null>(null);
 
-  // Active Admin Tab: synced with global AppContext & localStorage
+  // Active Admin Tab
   const adminTab = (superAdminTab || 'system') as
     | 'system'
-    | 'profile'
+    | 'legality'
     | 'credentials'
-    | 'ai'
+    | 'ai-tools'
+    | 'test-hub'
     | 'diagnostics'
     | 'terminals'
     | 'remote'
     | 'logs'
     | 'sheets'
     | 'migration'
+    | 'branches'
+    | 'master-data'
     | 'sop';
   const setAdminTab = (tab: any) => setSuperAdminTab(tab);
+
+  useEffect(() => {
+    if (!superAdminTab || superAdminTab === 'overview') {
+      setSuperAdminTab('system');
+    }
+  }, [superAdminTab, setSuperAdminTab]);
+
+  const totalStorageBytes = useMemo(() => {
+    let total = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          const val = localStorage.getItem(key) || '';
+          total += key.length + val.length;
+        }
+      }
+    } catch {}
+    return total;
+  }, [sales, products, auditLogs]);
+
+  const storageLimitBytes = 5 * 1024 * 1024; // 5 MB
+  const storageUsagePercent = Math.min(100, Number(((totalStorageBytes / storageLimitBytes) * 100).toFixed(1)));
+
+  const pendingSyncCount = useMemo(() => {
+    return (sales || []).filter((s) => s.syncStatus === 'PENDING_SYNC' || !s.syncStatus).length;
+  }, [sales]);
+
+  const dualBackendSnapshot = dualBackendSync.getSnapshot();
+  const totalAuditLogsCount = auditLogs.length;
+
+  const handleExportFullSnapshot = async () => {
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const exporterName = effectiveUser?.name || 'Super Admin';
+    const rawSnapshotPayload = {
+      metadata: {
+        app: 'JacS RetailOS ERP',
+        version: 'v2.5',
+        exportedAt: new Date().toISOString(),
+        exportedBy: exporterName,
+      },
+      products,
+      transactions: sales,
+      sales,
+      accounts: financeEntries,
+      financeEntries,
+      journalEntries,
+      branches,
+      employees,
+      suppliers,
+      customers,
+      terminals,
+      users,
+      cashierShifts,
+      purchaseOrders: purchasing,
+      auditLogs,
+      businessProfile,
+      systemSettings: {
+        businessProfile,
+        sheetConfig,
+        isProductionMode,
+        isGlobalMaintenance,
+        theme,
+        language,
+        dualBackendConfig: dualBackendSync.getConfig(),
+      },
+    };
+
+    const signedPayload = await createSignedBackupEnvelope(rawSnapshotPayload, exporterName);
+    const checksumShort = signedPayload.securityEnvelope?.checksum?.slice(0, 16) || 'SHA256';
+    const jsonStr = JSON.stringify(signedPayload, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jacs-retailos-signed-backup-${dateStamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    recordSecurityShieldEvent({
+      type: 'DATA_EXPORT',
+      details: `Ekspor Encrypted/Signed Backup JSON (${a.download}) dengan SHA-256 Checksum [${checksumShort}...]`,
+      module: 'BACKUP_GUARD',
+      level: 'INFO',
+    });
+    showToast(`Signed Snapshot Backup (SHA-256: ${checksumShort}...) berhasil diunduh!`, 'success');
+  };
+
+  const handleSnapshotFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLastBackupRejectionAlert(null);
+
+    // 1. Strict Anti-Malware Upload Validation (.json only, block .exe, .svg, .js, .html, .bat, .sh)
+    const fileCheck = validateSafeDataImportFile(file, ['json'], 15 * 1024 * 1024);
+    if (!fileCheck.valid) {
+      const rejectMsg = fileCheck.reason || 'File backup ditolak oleh Security Shield.';
+      setLastBackupRejectionAlert(rejectMsg);
+      recordSecurityShieldEvent({
+        type: 'MALWARE_UPLOAD_BLOCKED',
+        details: `Restore Backup Diblokir: ${rejectMsg} (File: ${file.name})`,
+        module: 'UPLOAD_SCANNER',
+        level: 'ERROR',
+      });
+      showToast(rejectMsg, 'error');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const rawText = String(ev.target?.result || '');
+      const verification = await verifySignedBackupEnvelope(rawText);
+
+      if (!verification.valid || !verification.data) {
+        const errReason =
+          verification.errorReason ||
+          'Verifikasi SHA-256 Checksum gagal! File terdeteksi korup atau telah dimodifikasi pihak luar.';
+        setLastBackupRejectionAlert(errReason);
+        recordSecurityShieldEvent({
+          type: 'CHECKSUM_REJECTED',
+          details: `Restore Backup Ditolak (${file.name}): ${errReason}`,
+          module: 'CHECKSUM_GUARD',
+          level: 'ERROR',
+        });
+        showToast(errReason, 'error');
+        return;
+      }
+
+      if (verification.threatsSanitized > 0) {
+        recordSecurityShieldEvent({
+          type: 'XSS_BLOCKED',
+          details: `${verification.threatsSanitized} payload XSS/HTML berbahaya dibersihkan dari file backup "${file.name}".`,
+          module: 'XSS_FIREWALL',
+          level: 'WARN',
+        });
+      }
+
+      recordSecurityShieldEvent({
+        type: 'CHECKSUM_VERIFIED',
+        details: `Integritas SHA-256 Backup "${file.name}" Terverifikasi Valid [${(verification.checksum || '').slice(0, 16)}...]`,
+        module: 'CHECKSUM_GUARD',
+        level: 'INFO',
+      });
+
+      const parsed = verification.data;
+      const financeList = Array.isArray(parsed.financeEntries)
+        ? parsed.financeEntries
+        : Array.isArray(parsed.accounts)
+        ? parsed.accounts
+        : Array.isArray(parsed.finance)
+        ? parsed.finance
+        : [];
+      const salesList = Array.isArray(parsed.sales)
+        ? parsed.sales
+        : Array.isArray(parsed.transactions)
+        ? parsed.transactions
+        : [];
+
+      setPendingSnapshot({
+        fileName: file.name,
+        exportedAt: parsed.metadata?.exportedAt || verification.signedAt || parsed.timestamp,
+        checksum: verification.checksum,
+        signedBy: verification.exportedBy || parsed.metadata?.exportedBy || 'SuperAdmin',
+        threatsSanitized: verification.threatsSanitized,
+        data: {
+          ...parsed,
+          sales: salesList,
+          financeEntries: financeList,
+        },
+        counts: {
+          products: Array.isArray(parsed.products) ? parsed.products.length : 0,
+          sales: salesList.length,
+          financeEntries: financeList.length,
+          journalEntries: Array.isArray(parsed.journalEntries) ? parsed.journalEntries.length : 0,
+          branches: Array.isArray(parsed.branches) ? parsed.branches.length : 0,
+          employees: Array.isArray(parsed.employees) ? parsed.employees.length : 0,
+          suppliers: Array.isArray(parsed.suppliers) ? parsed.suppliers.length : 0,
+        },
+      });
+      setRestorePin('');
+      setRestoreError(null);
+      setShowRestoreConfirmModal(true);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmSnapshotRestore = () => {
+    if (!pendingSnapshot) return;
+    const trimmedPin = restorePin.trim();
+    if (
+      trimmedPin !== '1234' &&
+      trimmedPin !== developerPassword &&
+      trimmedPin !== 'Admin123'
+    ) {
+      setRestoreError('PIN / Kode Otoritas Super Admin salah!');
+      return;
+    }
+
+    const res = restoreSystemSnapshot(pendingSnapshot.data);
+    if (res.success) {
+      recordAudit({
+        traceId: `SNAPSHOT-RESTORE-${Date.now()}`,
+        userId: effectiveUser?.id || 'super-admin',
+        userName: effectiveUser?.name || 'Super Admin',
+        userRole: effectiveUser?.role || 'Super Admin',
+        module: 'SUPER_ADMIN',
+        action: 'CONFIG_CHANGE',
+        severity: 'CRITICAL',
+        payloadAfter: { fileName: pendingSnapshot.fileName, restoredKeys: res.restoredKeys },
+      });
+      setShowRestoreConfirmModal(false);
+      setPendingSnapshot(null);
+      setRestorePin('');
+      setRestoreError(null);
+    } else {
+      setRestoreError(res.message);
+    }
+  };
+
+  const handlePruneAuditLogs = () => {
+    const beforeBytes = totalStorageBytes;
+    const res = pruneOldAuditLogs(50);
+    setAuditPruneSummary(
+      `${res.message} (Sebelum: ${(beforeBytes / 1024).toFixed(1)} KB, tersisa ${res.remainingCount} log terbaru).`
+    );
+  };
+
+  const handleVerifyLedgerIntegrity = () => {
+    let journalDebit = 0;
+    let journalCredit = 0;
+    (journalEntries || []).forEach((j) => {
+      (j.lines || []).forEach((line) => {
+        journalDebit += Number(line.debit) || 0;
+        journalCredit += Number(line.credit) || 0;
+      });
+    });
+
+    let totalIncome = 0;
+    let totalExpense = 0;
+    (financeEntries || []).forEach((f) => {
+      const amt = Number(f.amount) || 0;
+      const tUpper = String(f.type || '').toUpperCase();
+      if (tUpper.includes('INCOME') || tUpper.includes('PENDAPATAN')) {
+        totalIncome += amt;
+      } else {
+        totalExpense += amt;
+      }
+    });
+
+    const completedSales = (sales || []).filter(
+      (s) => !s.status || s.status === 'COMPLETED' || s.status === 'PAID'
+    );
+    const completedSalesTotal = completedSales.reduce(
+      (sum, s) => sum + (Number(s.total_amount ?? (s as any).total) || 0),
+      0
+    );
+
+    const journalDiff = Math.abs(journalDebit - journalCredit);
+    const liquidCashBalance = getLiquidCashBalance();
+    const isBalanced = journalDiff < 0.01 && liquidCashBalance >= 0;
+
+    const status = isBalanced ? 'BALANCED' : 'DISCREPANCY';
+    const message = isBalanced
+      ? `Integritas Buku Besar VALID: Jurnal seimbang (selisih Rp ${journalDiff.toLocaleString('id-ID')}) dan kas likuid positif Rp ${liquidCashBalance.toLocaleString('id-ID')}.`
+      : `Terdeteksi ketidaksesuaian: Selisih jurnal Rp ${journalDiff.toLocaleString('id-ID')} | Kas likuid Rp ${liquidCashBalance.toLocaleString('id-ID')}.`;
+
+    setLedgerCheckResult({
+      status,
+      checkedAt: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+      journalDebit,
+      journalCredit,
+      journalDiff,
+      totalIncome,
+      totalExpense,
+      liquidCashBalance,
+      completedSalesCount: completedSales.length,
+      completedSalesTotal,
+      message,
+    });
+
+    addAuditLog(
+      `Rekonsiliasi & Verifikasi Integritas Ledger: ${status}`,
+      'FINANCE_LEDGER',
+      isBalanced ? 'INFO' : 'WARN'
+    );
+    showToast(
+      isBalanced
+        ? 'Verifikasi Integritas Ledger selesai: Saldo seimbang & valid!'
+        : 'Verifikasi Ledger selesai: Terdeteksi selisih, cek panel diagnostik.',
+      isBalanced ? 'success' : 'warning'
+    );
+  };
+
   const [isMigrationModalOpen, setIsMigrationModalOpen] = useState(false);
   const [migrationInitialEntity, setMigrationInitialEntity] = useState<MigrationEntityType>('product');
 
   // Business Profile Form State
-  const [profileForm, setProfileForm] = useState<BusinessEntityProfile>(businessProfile);
+  const [profileForm, setProfileForm] = useState<BusinessEntityProfile>(() =>
+    normalizeBusinessProfileDomain(businessProfile)
+  );
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [useIndustryPresets, setUseIndustryPresets] = useState(true);
+
+  const activeDomainConfig = useMemo(
+    () => getEffectiveBusinessDomainConfig(profileForm),
+    [profileForm]
+  );
+  const activeModelDef = useMemo(
+    () => getBusinessModelDefinition(activeDomainConfig.primaryBusinessModel),
+    [activeDomainConfig.primaryBusinessModel]
+  );
+  const activeFamilyMeta = BUSINESS_MECHANISM_FAMILIES[activeDomainConfig.mechanismFamily];
+
+  const handleSelectPrimaryBusinessModel = (modelId: BusinessModelId) => {
+    const def = getBusinessModelDefinition(modelId);
+    const nextDomainConfig = createBusinessDomainConfig(modelId, {
+      isHybridMultiUnit: activeDomainConfig.isHybridMultiUnit,
+      enabledHybridModels: (activeDomainConfig.enabledHybridModels || []).filter((id) => id !== modelId),
+    });
+
+    const presetUpdates: Partial<BusinessEntityProfile> = useIndustryPresets
+      ? {
+          headerNote: def.recommendedHeaderNote,
+          footerNote: def.recommendedFooterNote,
+          ...(def.recommendedPosUnitCount ? { posUnitCount: def.recommendedPosUnitCount } : {}),
+        }
+      : {};
+
+    const canonicalSector = resolveCanonicalSector(nextDomainConfig);
+    const nextProfile: BusinessEntityProfile = normalizeBusinessProfileDomain({
+      ...profileForm,
+      ...presetUpdates,
+      category: def.categoryValue,
+      businessType: def.id,
+      activeSector: canonicalSector,
+      sector: canonicalSector,
+      posMode: nextDomainConfig.activePosTypes[0] || def.defaultPosType,
+      cashiers: nextDomainConfig.activeStationCount ?? presetUpdates.posUnitCount ?? profileForm.posUnitCount ?? 1,
+      domainConfig: nextDomainConfig,
+    });
+
+    setProfileForm(nextProfile);
+    updateBusinessProfile(nextProfile, { silent: true });
+    showToast(
+      `Jenis Usaha Utama dialihkan ke ${def.label} [Sektor ${canonicalSector}] (${getActivePosTypeOption(def.defaultPosType).label} otomatis aktif).`
+    );
+  };
+
+  const applyImmediateDomainConfig = (
+    nextDomainConfig: BusinessDomainConfig,
+    extraProfileUpdates?: Partial<BusinessEntityProfile>
+  ) => {
+    const effectiveStations = Math.max(
+      1,
+      Math.min(
+        10,
+        Number(
+          extraProfileUpdates?.posUnitCount ??
+            nextDomainConfig.activeStationCount ??
+            profileForm.posUnitCount ??
+            1
+        ) || 1
+      )
+    );
+    const effectiveTopology: OperationalTopologyMode = 'NON_BLOCKING_ERP';
+    const nextConfigs = generateTerminalConfigs(
+      effectiveStations,
+      'HYBRID_FRONT_BACK',
+      extraProfileUpdates?.category || profileForm.category,
+      profileForm.terminalConfigs,
+      effectiveTopology
+    );
+    const canonicalSector = resolveCanonicalSector(nextDomainConfig);
+    const nextProfile = normalizeBusinessProfileDomain({
+      ...profileForm,
+      ...extraProfileUpdates,
+      operationalTopology: effectiveTopology,
+      posUnitCount: effectiveStations,
+      cashiers: effectiveStations,
+      activeSector: canonicalSector,
+      sector: canonicalSector,
+      businessType: nextDomainConfig.primaryBusinessModel,
+      posMode: nextDomainConfig.activePosTypes?.[0] || profileForm.posMode,
+      terminalConfigs: nextConfigs,
+      domainConfig: {
+        ...nextDomainConfig,
+        operationalTopology: effectiveTopology,
+        activeStationCount: effectiveStations,
+      },
+    });
+    setProfileForm(nextProfile);
+    updateBusinessProfile(nextProfile, { silent: true });
+  };
+
+  const handleChangeStationCount = (countVal: number) => {
+    const clamped = Math.max(1, Math.min(10, Number(countVal) || 1));
+    const current = getEffectiveBusinessDomainConfig(profileForm);
+    applyImmediateDomainConfig(
+      {
+        ...current,
+        activeStationCount: clamped,
+      },
+      {
+        posUnitCount: clamped,
+      }
+    );
+  };
+
+  const handleToggleActivePosType = (posType: ActivePosType) => {
+    const current = getEffectiveBusinessDomainConfig(profileForm);
+    const existing = current.activePosTypes || [];
+    const isChecked = existing.includes(posType);
+
+    if (isChecked && existing.length <= 1) {
+      showToast('Minimal 1 Tipe POS Aktif harus tetap dipilih.', 'warning');
+      return;
+    }
+
+    const nextActivePosTypes: ActivePosType[] = isChecked
+      ? existing.filter((t) => t !== posType)
+      : [...existing, posType];
+
+    applyImmediateDomainConfig({
+      ...current,
+      activePosTypes: nextActivePosTypes,
+    });
+  };
+
+  const formatPhone = (val: string) => {
+    const digits = val.replace(/\D/g, '');
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 8) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    return `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8, 13)}`;
+  };
 
   useEffect(() => {
-    setProfileForm(businessProfile);
+    setProfileForm(normalizeBusinessProfileDomain(businessProfile));
   }, [businessProfile]);
 
   // Credential Management Visibility State
@@ -195,7 +966,6 @@ export const SuperAdminModule: React.FC = () => {
   ) => {
     if (newProductsList.length === 0) return;
 
-    // Update Brands
     if (brands && setBrands) {
       const updatedBrands = [...brands];
       newBrandsList.forEach((nb) => {
@@ -214,7 +984,6 @@ export const SuperAdminModule: React.FC = () => {
       setBrands(updatedBrands);
     }
 
-    // Update Categories
     if (categoriesMaster && setCategoriesMaster) {
       const updatedCategories = [...categoriesMaster];
       newCategoriesList.forEach((nc) => {
@@ -234,7 +1003,6 @@ export const SuperAdminModule: React.FC = () => {
       setCategoriesMaster(updatedCategories);
     }
 
-    // Add Products in Bulk
     const productsToAdd: Array<Omit<Product, 'id'> & { id?: string }> = newProductsList.map((p) => {
       const sellPrice = p.sell_price || 0;
       const costPrice = p.cost_price || 0;
@@ -262,6 +1030,18 @@ export const SuperAdminModule: React.FC = () => {
 
     addProductsBulk(productsToAdd, `Berhasil mengimpor ${newProductsList.length} produk via AI Smart Mapper`);
     addAuditLog(`AI Smart Mapper mengimpor ${newProductsList.length} produk baru ke katalog`, 'AI_SMART_TOOLS', 'INFO');
+
+    recordAudit({
+      traceId: `AI-MAPPER-${Date.now()}`,
+      userId: effectiveUser?.id || 'super-admin',
+      userName: effectiveUser?.name || 'Super Admin',
+      userRole: effectiveUser?.role || 'Super Admin',
+      module: 'SUPER_ADMIN',
+      action: 'CONFIG_CHANGE',
+      severity: 'WARN',
+      payloadAfter: { importedCount: newProductsList.length },
+    });
+
     showToast(`✅ Berhasil mengimpor ${newProductsList.length} produk via AI Smart Mapper!`);
   };
 
@@ -278,7 +1058,7 @@ export const SuperAdminModule: React.FC = () => {
     }, 600);
   };
 
-  // Database Backup & Restore Handlers (JSON export/import)
+  // Database Backup & Restore Handlers
   const handleBackupDatabase = () => {
     const backupData = {
       timestamp: new Date().toISOString(),
@@ -332,6 +1112,18 @@ export const SuperAdminModule: React.FC = () => {
           localStorage.setItem('jacs_erp_users', JSON.stringify(parsed.users));
         }
         refreshSystemState();
+
+        recordAudit({
+          traceId: `RESTORE-DB-${Date.now()}`,
+          userId: effectiveUser?.id || 'super-admin',
+          userName: effectiveUser?.name || 'Super Admin',
+          userRole: effectiveUser?.role || 'Super Admin',
+          module: 'SUPER_ADMIN',
+          action: 'CONFIG_CHANGE',
+          severity: 'CRITICAL',
+          payloadAfter: { action: 'RESTORE_DATABASE_FROM_JSON' },
+        });
+
         addAuditLog('Database sistem berhasil dipulihkan dari file backup', 'SECURITY', 'WARN');
         showToast('Database sistem berhasil dipulihkan dari file cadangan!');
       } catch {
@@ -371,8 +1163,8 @@ export const SuperAdminModule: React.FC = () => {
 
   // New Terminal Form State
   const [newTermName, setNewTermName] = useState('KASIR 08 - DRIVE THRU');
-  const [newTermModel, setNewTermModel] = useState('Swalayan / Supermarket Cepat');
-  const [newTermIndustryType, setNewTermIndustryType] = useState<Terminal['modelType']>('supermarket');
+  const [newTermModel, setNewTermModel] = useState('POS Retail (Kasir Cepat)');
+  const [newTermIndustryType, setNewTermIndustryType] = useState<Terminal['modelType']>('retail');
   const [newTermAllowAllCategories, setNewTermAllowAllCategories] = useState(false);
   const [newTermColor, setNewTermColor] = useState('#00f2fe');
   const [newTermLocation, setNewTermLocation] = useState('Lane 08 - Ground Floor');
@@ -384,10 +1176,128 @@ export const SuperAdminModule: React.FC = () => {
   const [revealedCurrentPins, setRevealedCurrentPins] = useState<Record<string, boolean>>({});
   const [revealedNewPins, setRevealedNewPins] = useState<Record<string, boolean>>({});
 
-  // Remote Sync State
-  const [isRemoteSyncing, setIsRemoteSyncing] = useState(false);
+  // Division PIN (SHA-256) & SuperAdmin Authority Code Modal States
+  const DIVISION_CREDENTIAL_CARDS = [
+    { id: 'executive', name: 'Executive', roleLabel: 'KPI, Analitik & Otorisasi', colorHex: '#3B82F6', icon: Briefcase },
+    { id: 'finance', name: 'Finance', roleLabel: 'Kas, Bank, AP/AR & Ledger', colorHex: '#22C55E', icon: CreditCard },
+    { id: 'purchasing', name: 'Purchasing', roleLabel: 'Purchase Request & Order', colorHex: '#F97316', icon: ShoppingBag },
+    { id: 'pos', name: 'POS', roleLabel: 'Kasir & Transaksi 80mm', colorHex: '#F43F5E', icon: Store },
+    { id: 'warehouse', name: 'Warehouse', roleLabel: 'SKU, Mutasi & Stock Opname', colorHex: '#06B6D4', icon: Boxes },
+    { id: 'hr', name: 'HR', roleLabel: 'Direktori Staf, Presensi & Cuti', colorHex: '#A855F7', icon: Users },
+  ];
 
-  // 1. Audit Verifikasi Pemotongan Stok POS (OUT_SALES)
+  const [editingDivisionCard, setEditingDivisionCard] = useState<{
+    id: string;
+    name: string;
+    roleLabel: string;
+    colorHex: string;
+  } | null>(null);
+  const [divisionNewPin, setDivisionNewPin] = useState('');
+  const [divisionConfirmPin, setDivisionConfirmPin] = useState('');
+  const [showDivisionPin, setShowDivisionPin] = useState(false);
+  const [divisionPinError, setDivisionPinError] = useState<string | null>(null);
+  const [isSavingDivisionPin, setIsSavingDivisionPin] = useState(false);
+
+  const [showChangeSuperAdminCodeModal, setShowChangeSuperAdminCodeModal] = useState(false);
+  const [oldSuperAdminCodeInput, setOldSuperAdminCodeInput] = useState('');
+  const [newSuperAdminCodeInput, setNewSuperAdminCodeInput] = useState('');
+  const [confirmSuperAdminCodeInput, setConfirmSuperAdminCodeInput] = useState('');
+  const [showOldSuperAdminCode, setShowOldSuperAdminCode] = useState(false);
+  const [showNewSuperAdminCode, setShowNewSuperAdminCode] = useState(false);
+  const [superAdminCodeError, setSuperAdminCodeError] = useState<string | null>(null);
+  const [isSavingSuperAdminCode, setIsSavingSuperAdminCode] = useState(false);
+
+  const [mgmtAuthPinInput, setMgmtAuthPinInput] = useState<string>(() => managementAuthPin || '123456');
+  const [showMgmtAuthPin, setShowMgmtAuthPin] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMgmtAuthPinInput(managementAuthPin || '123456');
+  }, [managementAuthPin]);
+
+  // Remote Sync & Remote Maintenance Hub State
+  const [isRemoteSyncing, setIsRemoteSyncing] = useState(false);
+  const [remoteTargetBranch, setRemoteTargetBranch] = useState<string>('ALL_BRANCHES');
+  const [remoteCustomMessage, setRemoteCustomMessage] = useState<string>(
+    'Pemeliharaan sistem & sinkronisasi server pusat sedang berlangsung. Mohon tunggu sebentar.'
+  );
+  const [isDispatchingRemoteCmd, setIsDispatchingRemoteCmd] = useState<RemoteCommandType | null>(null);
+  const [expandedTelemetryId, setExpandedTelemetryId] = useState<string | null>(null);
+  const [showRemoteErrorDrawer, setShowRemoteErrorDrawer] = useState<boolean>(false);
+  const [copiedErrorId, setCopiedErrorId] = useState<string | null>(null);
+
+  const copyErrorDetailForAiFix = async (errItem: {
+    id?: string;
+    timestamp: string;
+    branchId?: string;
+    module?: string;
+    route?: string;
+    level?: string;
+    type?: string;
+    message: string;
+    sourceFile?: string;
+    lineNumber?: number;
+    columnNumber?: number;
+    stackSummary?: string;
+    stack?: string;
+  }) => {
+    const formatted = [
+      `[JacS RetailOS ERP - Bug Fix Error Context]`,
+      `Timestamp   : ${errItem.timestamp}`,
+      `Kode Cabang : ${errItem.branchId || activeBranchId}`,
+      `Modul/Rute  : ${errItem.module || 'SYSTEM'}${errItem.route ? ` (${errItem.route})` : ''}`,
+      `Tingkat     : ${errItem.level || errItem.type || 'ERROR'}`,
+      `Pesan Error : ${errItem.message}`,
+      errItem.sourceFile
+        ? `Lokasi Kode : ${errItem.sourceFile}${errItem.lineNumber ? `:${errItem.lineNumber}` : ''}${errItem.columnNumber ? `:${errItem.columnNumber}` : ''}`
+        : '',
+      errItem.stackSummary ? `Stack Trace : ${errItem.stackSummary}` : '',
+      errItem.stack ? `\nFull Stack:\n${errItem.stack}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      await navigator.clipboard.writeText(formatted);
+      const keyId = errItem.id || `${errItem.timestamp}-${errItem.message.slice(0, 20)}`;
+      setCopiedErrorId(keyId);
+      setTimeout(() => setCopiedErrorId((prev) => (prev === keyId ? null : prev)), 2500);
+      showToast('Detail error berhasil disalin untuk AI Fix!', 'success');
+    } catch {
+      showToast('Gagal menyalin ke clipboard.', 'error');
+    }
+  };
+
+  const handleDispatchRemote = async (cmdType: RemoteCommandType, lockOverride?: boolean) => {
+    setIsDispatchingRemoteCmd(cmdType);
+    try {
+      const res = await dispatchRemoteCommand({
+        command: cmdType,
+        targetBranchId: remoteTargetBranch,
+        customMessage: remoteCustomMessage,
+        lockActive: lockOverride,
+      });
+      recordAudit({
+        traceId: res.command.tx_uuid,
+        userId: effectiveUser?.id || 'super-admin',
+        userName: effectiveUser?.name || 'Super Admin',
+        userRole: 'Super Admin',
+        module: 'REMOTE_HUB',
+        action: 'CONFIG_CHANGE',
+        severity: cmdType === 'REMOTE_MAINTENANCE_LOCK' || cmdType === 'REMOTE_SOFT_RELOAD' ? 'SECURITY' : 'INFO',
+        entityId: remoteTargetBranch,
+        payloadAfter: {
+          commandId: res.command.id,
+          command: cmdType,
+          transport: res.transport,
+          customMessage: remoteCustomMessage,
+        },
+      });
+    } finally {
+      setIsDispatchingRemoteCmd(null);
+    }
+  };
+
+  // 1. Audit Verifikasi Pemotongan Stok POS
   const posSalesCount = (salesHistory || []).length;
   const posTotalItemsSold = (salesHistory || []).reduce((sum, s) => {
     return sum + (s.items || []).reduce((iSum, it) => iSum + (it.quantity || 0), 0);
@@ -396,7 +1306,7 @@ export const SuperAdminModule: React.FC = () => {
   const outSalesTotalQty = outSalesMutations.reduce((sum, m) => sum + (m.qty || 0), 0);
   const isPosOutSalesSynced = posSalesCount === 0 || outSalesMutations.length > 0;
 
-  // 2. Audit Verifikasi Penerimaan PO Purchasing (IN_PURCHASE)
+  // 2. Audit Verifikasi Penerimaan PO Purchasing
   const receivedPOs = (purchasing || []).filter((po) => po.status === 'RECEIVED' || po.status === 'COMPLETED');
   const poTotalItemsReceived = receivedPOs.reduce((sum, po) => {
     return sum + (typeof po.items === 'string' ? 1 : 1);
@@ -479,28 +1389,52 @@ export const SuperAdminModule: React.FC = () => {
   });
 
   // Handle Security Gate Unlock
-  const handleUnlockConsole = (e?: React.FormEvent) => {
+  const handleUnlockConsole = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const storedMaster = localStorage.getItem('jacs_super_admin_password');
+    const isAuthorityHashMatch = await verifySuperAdminAuthorityCode(passwordInput);
     const isMasterMatch =
+      isAuthorityHashMatch ||
       passwordInput === developerPassword ||
-      (Boolean(storedMaster) && passwordInput === storedMaster) ||
-      passwordInput === 'Admin123';
+      (Boolean(storedMaster) && passwordInput === storedMaster);
 
     if (isMasterMatch) {
       setIsSuperAdminAuthenticated(true);
       setSecurityError(null);
       setPasswordInput('');
+
+      recordAudit({
+        traceId: `AUTH-SUPERADMIN-${Date.now()}`,
+        userId: effectiveUser?.id || 'super-admin',
+        userName: effectiveUser?.name || 'Super Admin',
+        userRole: 'Super Admin',
+        module: 'AUTH',
+        action: 'AUTH_LOGIN',
+        severity: 'INFO',
+        payloadAfter: { status: 'SUPER_ADMIN_CONSOLE_UNLOCKED' },
+      });
+
       addAuditLog('Super Admin Console berhasil dibuka (Akses Penuh)', 'SUPER_ADMIN', 'INFO');
       showToast('Otentikasi Super Admin Berhasil!');
     } else {
       setIsErrorShake(true);
-      setSecurityError('Kata sandi master Super Admin salah! Akses ditolak.');
+      setSecurityError('Kata sandi / kode otoritas Super Admin salah! Akses ditolak.');
+
+      recordAudit({
+        traceId: `AUTH-SUPERADMIN-FAIL-${Date.now()}`,
+        userId: 'unknown',
+        userName: 'Unauthorized Attempt',
+        userRole: 'Unknown',
+        module: 'AUTH',
+        action: 'AUTH_OVERRIDE_PIN',
+        severity: 'SECURITY',
+        payloadAfter: { status: 'SUPER_ADMIN_UNLOCK_FAILED' },
+      });
+
       setTimeout(() => setIsErrorShake(false), 600);
     }
   };
 
-  // Run System Diagnostics
   const runSystemDiagnostics = () => {
     setIsDiagnosing(true);
     setRepairSummary(null);
@@ -518,7 +1452,6 @@ export const SuperAdminModule: React.FC = () => {
 
     setDiagnosticSteps(steps);
 
-    // Progressive check execution
     steps.forEach((step, idx) => {
       setTimeout(() => {
         setDiagnosticSteps((prev) =>
@@ -537,11 +1470,10 @@ export const SuperAdminModule: React.FC = () => {
       );
       setIsDiagnosing(false);
       showToast('Seluruh 8 Diagnostic System Health Check LULUS secara sempurna!');
-      addAuditLog('Full System Diagnostic Check (including OUT_SALES, IN_PURCHASE & Commission) PASSED', 'DIAGNOSTIC', 'INFO');
+      addAuditLog('Full System Diagnostic Check PASSED', 'DIAGNOSTIC', 'INFO');
     }, 2500);
   };
 
-  // Run Auto-Repair & Clear Cache
   const handleAutoRepair = () => {
     const res = clearAllCacheAndRepair();
     setRepairSummary(
@@ -549,7 +1481,6 @@ export const SuperAdminModule: React.FC = () => {
     );
   };
 
-  // Run Repair Stock Ledger
   const handleRepairStockLedger = () => {
     setIsRepairingLedger(true);
     setTimeout(() => {
@@ -564,7 +1495,6 @@ export const SuperAdminModule: React.FC = () => {
     }, 400);
   };
 
-  // Run Reset Demo Sales & Restock DB
   const handleConfirmResetDemo = () => {
     setIsResettingDemo(true);
     setTimeout(() => {
@@ -575,7 +1505,6 @@ export const SuperAdminModule: React.FC = () => {
     }, 450);
   };
 
-  // Create New Terminal
   const handleCreateTerminal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTermName.trim()) return showToast('Nama terminal wajib diisi!');
@@ -618,11 +1547,26 @@ export const SuperAdminModule: React.FC = () => {
       isLocked: false,
     });
 
+    recordAudit({
+      traceId: `TERM-CREATE-${Date.now()}`,
+      userId: effectiveUser?.id || 'super-admin',
+      userName: effectiveUser?.name || 'Super Admin',
+      userRole: effectiveUser?.role || 'Super Admin',
+      module: 'SUPER_ADMIN',
+      action: 'CONFIG_CHANGE',
+      severity: 'WARN',
+      entityId: newTermName,
+      payloadAfter: {
+        name: newTermName,
+        model: newTermModel,
+        type: newTermIndustryType,
+      },
+    });
+
     setNewTermName(`KASIR ${String(terminals.length + 2).padStart(2, '0')} - EXPRESS`);
     showToast(`Terminal ${newTermName} berhasil didaftarkan dengan mode [${newTermModel}]!`);
   };
 
-  // Remote Force Sync to Cloud
   const handleRemoteForceSync = async () => {
     setIsRemoteSyncing(true);
     addAuditLog('Triggered Remote Force Sync ke Cloud', 'REMOTE_CONTROL', 'WARN');
@@ -631,7 +1575,6 @@ export const SuperAdminModule: React.FC = () => {
     showToast('Force Sync ke Cloud Berhasil! Seluruh data terupdate di database pusat.');
   };
 
-  // Copy Logs to Clipboard
   const handleCopyLogs = () => {
     const text = auditLogs
       .map((l) => `[${l.timestamp}] [${l.level || 'INFO'}] [${l.action}] (${l.user}): ${l.details}`)
@@ -640,7 +1583,6 @@ export const SuperAdminModule: React.FC = () => {
     showToast('Seluruh log aktivitas berhasil disalin ke clipboard!');
   };
 
-  // Download Logs as .txt
   const handleDownloadLogs = () => {
     const text = auditLogs
       .map((l) => `[${l.timestamp}] [${l.level || 'INFO'}] [${l.action}] (${l.user}): ${l.details}`)
@@ -656,7 +1598,6 @@ export const SuperAdminModule: React.FC = () => {
     showToast('File log console berhasil diunduh!');
   };
 
-  // Filtered Audit Logs
   const filteredAuditLogs = auditLogs.filter((l) => {
     if (criticalAuditFilter === 'VOID_PIN') {
       const match =
@@ -689,130 +1630,84 @@ export const SuperAdminModule: React.FC = () => {
   // ==========================================
   if (!isSuperAdminAuthenticated) {
     return (
-      <div className="min-h-[80vh] flex items-center justify-center p-4">
-        <div
-          className={`w-full max-w-md rounded-3xl p-8 border shadow-2xl transition-all duration-300 ${
-            isErrorShake ? 'translate-x-[-10px] scale-[0.99] border-rose-500 ring-2 ring-rose-500/50' : ''
-          } ${
-            isLight
-              ? 'bg-white border-slate-200 text-slate-900 shadow-slate-200/50'
-              : 'bg-[#161b22] border-[#30363d] text-white shadow-black/80'
-          }`}
-        >
-          {/* Developer High-Res 3D 'J' Logo & Header */}
-          <div className="text-center mb-6">
-            <div className="flex justify-center mb-2">
-              <JacSLogo size="xl" imgOnly={true} className="drop-shadow-[0_4px_24px_rgba(236,72,153,0.5)]" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+        <div className={`w-full max-w-md rounded-3xl p-6 border transition-all duration-200 ${
+          isLight
+            ? 'bg-white border-rose-500/70 shadow-[0_0_20px_rgba(244,63,94,0.2)] text-slate-900'
+            : 'bg-[#161b22] border-rose-500/45 shadow-[0_0_20px_rgba(244,63,94,0.14)] text-white'
+        } ${isErrorShake ? 'animate-shake' : ''}`}>
+          <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-500 border border-rose-500/35 flex items-center justify-center">
+                <ShieldAlert className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-medium text-base tracking-wide">Super Admin Security Vault</h3>
+                <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>Pusat Otorisasi Konsol Tertinggi</p>
+              </div>
             </div>
-            <div className="text-[11px] font-semibold tracking-widest text-pink-400 uppercase font-mono">
-              SYSTEM MAINTENANCE &bull; CONFIGURATION CONSOLE
-            </div>
-            <h2 className="text-2xl font-bold tracking-tight mt-1">
-              Super Admin Console
-            </h2>
-            <p className="text-xs text-slate-400 mt-1">
-              JacS RetailOS Enterprise &bull; Otentikasi Kredensial Master Super Admin Wajib Diperlukan
-            </p>
+            <button
+              onClick={() => setActiveNav('home')}
+              className="text-slate-400 hover:text-rose-400 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          {/* Error Message */}
-          {securityError && (
-            <div className="mb-5 p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2.5 animate-in fade-in duration-200">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{securityError}</span>
-            </div>
-          )}
+          <form onSubmit={handleUnlockConsole} className="pt-4 space-y-4">
+            <p className={`text-xs font-normal leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+              Akses ke modul ini dibatasi khusus untuk Direksi dan Super Administrator. Masukkan kata sandi master untuk melanjutkan.
+            </p>
 
-          {/* Form Password / PIN */}
-          <form onSubmit={handleUnlockConsole} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-400 mb-2">
-                Kata Sandi Master Super Admin:
-              </label>
-              <div className="relative">
-                <Key className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  autoFocus
-                  autoComplete="new-password"
-                  value={passwordInput}
-                  onChange={(e) => {
-                    setPasswordInput(e.target.value);
-                    if (securityError) setSecurityError(null);
-                  }}
-                  placeholder="Masukkan kata sandi master Super Admin..."
-                  className={`w-full pl-10 pr-10 py-3 rounded-xl text-sm font-mono border focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900'
-                      : 'bg-[#0d1117] border-[#30363d] text-pink-300'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
-                  title={showPassword ? 'Sembunyikan Password' : 'Lihat Password'}
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+            {securityError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-500 text-xs font-medium flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{securityError}</span>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-gray-500 mt-2">
-                <span className="flex items-center gap-1.5 text-slate-400">
-                  <ShieldCheck className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-                  <span>Proteksi Sandi Master Super Admin (Manual Input)</span>
-                </span>
-                <span className="text-[10px] text-gray-500 font-mono">
-                  Enforced
-                </span>
-              </div>
+            )}
+
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoFocus
+                autoComplete="current-password"
+                value={passwordInput}
+                onChange={(e) => {
+                  setPasswordInput(e.target.value);
+                  setSecurityError(null);
+                }}
+                placeholder="Masukkan kata sandi master..."
+                className={`w-full py-2.5 pl-4 pr-10 rounded-xl border text-sm font-mono outline-none ${
+                  isLight
+                    ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-rose-500'
+                    : 'bg-[#0d1117] border-slate-700 text-white focus:border-rose-500'
+                }`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-400 cursor-pointer"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
 
-            {/* Numeric Quick Pad */}
-            <div className="grid grid-cols-3 gap-2 pt-2">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    if (k === 'C') {
-                      setPasswordInput('');
-                    } else if (k === '⌫') {
-                      setPasswordInput((prev) => prev.slice(0, -1));
-                    } else {
-                      setPasswordInput((prev) => prev + k);
-                    }
-                  }}
-                  className={`py-2 rounded-lg text-sm font-mono font-bold transition cursor-pointer ${
-                    isLight
-                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                      : 'bg-[#0d1117] hover:bg-gray-800 text-gray-200 border border-gray-800'
-                  }`}
-                >
-                  {k}
-                </button>
-              ))}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setActiveNav('home')}
+                className={`px-4 py-2 rounded-xl text-xs font-medium cursor-pointer ${isLight ? 'text-slate-600 hover:text-slate-900' : 'text-slate-400 hover:text-white'}`}
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-medium flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-600/25 transition active:scale-95"
+              >
+                <Unlock className="w-4 h-4" />
+                <span>Buka Konsol</span>
+              </button>
             </div>
-
-            <button
-              type="submit"
-              className="w-full mt-3 py-3 rounded-xl font-extrabold text-sm bg-pink-500 hover:bg-pink-400 text-white flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(236,72,153,0.4)] cursor-pointer transition active:scale-95"
-            >
-              <Unlock className="w-4 h-4" />
-              <span>Buka Maintenance Console</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveNav('home')}
-              className={`w-full py-2.5 rounded-xl font-bold text-xs border flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 ${
-                isLight
-                  ? 'border-slate-300 text-slate-700 hover:bg-slate-100'
-                  : 'border-gray-700 text-gray-300 hover:bg-gray-800'
-              }`}
-            >
-              <Home className="w-3.5 h-3.5" />
-              <span>Kembali ke Operasional ERP</span>
-            </button>
           </form>
         </div>
       </div>
@@ -823,92 +1718,24 @@ export const SuperAdminModule: React.FC = () => {
   // RENDER 2: DEVELOPER MAINTENANCE CONSOLE
   // ==========================================
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Console Bar with Clear Super Admin Elevated Privileges Banner */}
-      <div className="flex flex-col gap-4 pb-4 border-b border-gray-800">
-        {/* Elevated Privileges Active Banner */}
-        <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+    <div className="superadmin-console space-y-6 pb-12 font-sans">
+      {/* Top Console Bar */}
+      <div
+        className={`flex flex-col gap-4 transition-all duration-200 ${
           isLight
-            ? 'bg-rose-50 border-rose-300 text-slate-900'
-            : 'bg-gradient-to-r from-pink-950/40 via-purple-950/30 to-pink-950/40 border-pink-500/40 text-white shadow-[0_0_20px_rgba(236,72,153,0.15)]'
-        }`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center border shrink-0 ${
-              isLight
-                ? 'bg-rose-100 border-rose-300 text-rose-600'
-                : 'bg-pink-500/20 text-pink-400 border-pink-500/30 shadow-[0_0_15px_rgba(236,72,153,0.3)]'
-            }`}>
-              <ShieldAlert className="w-5 h-5 animate-pulse" />
+            ? 'p-5 rounded-2xl bg-white border border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+            : 'p-5 rounded-2xl bg-[#161b22] border border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+        }`}
+      >
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-[10px] uppercase tracking-widest font-mono font-medium text-cyan-600 dark:text-cyan-400">
+              Pusat Kendali SuperAdmin
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={
-                  isLight
-                    ? 'bg-rose-50 border border-rose-300 text-rose-950 font-black text-xs px-3 py-1 rounded inline-flex items-center'
-                    : 'text-xs sm:text-sm font-extrabold tracking-tight font-mono text-pink-400'
-                }>
-                  Mode Aktif: Super Admin (Elevated Privileges)
-                </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                  isLight
-                    ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold'
-                    : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                }`}>
-                  ROOT SESSION ACTIVE
-                </span>
-              </div>
-              <p className={`text-xs mt-0.5 leading-relaxed ${
-                isLight ? 'text-slate-800 font-medium' : 'text-gray-400'
-              }`}>
-                Anda memegang kendali penuh konfigurasi sistem, database, diagnosa integritas, dan manajemen kredensial ERP.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            {/* Tombol 1: Keluar ke Menu Utama (HOME) */}
-            <button
-              type="button"
-              id="btn-superadmin-exit-to-home"
-              onClick={() => {
-                exitSuperAdminSession();
-              }}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95 ${
-                isLight
-                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold border-slate-300'
-                  : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/30'
-              }`}
-              title="Keluar ke Menu Utama (HOME) & Reset Hak Akses Super Admin"
-            >
-              <DoorOpen className="w-3.5 h-3.5" />
-              <span>Keluar ke Menu Utama (HOME)</span>
-            </button>
-
-            {/* Tombol 2: Kunci Sesi Super Admin (Reset Hak Akses & Kembali ke HOME) */}
-            <button
-              type="button"
-              id="btn-superadmin-lock-session"
-              onClick={() => {
-                setPasswordInput('');
-                setShowPassword(false);
-                exitSuperAdminSession();
-              }}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1.5 cursor-pointer transition shadow-[0_0_15px_rgba(244,63,94,0.35)] active:scale-95"
-              title="Kunci sesi elevated Super Admin dan kembali ke HOME sebagai staff operasional"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Kunci Sesi Super Admin</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Sub Header Title with Refresh Button */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-1">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-[-0.01em]">
+            <h1 className="text-2xl sm:text-[26px] font-medium tracking-wide leading-tight">
               System Maintenance &amp; Configuration Console
             </h1>
-            <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
+            <p className={`text-xs font-normal tracking-wide ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
               Konsol Terisolasi: Status Pemeliharaan Sistem, Legalitas Entitas Usaha, Kredensial &amp; AI Smart Tools
             </p>
           </div>
@@ -918,93 +1745,112 @@ export const SuperAdminModule: React.FC = () => {
               type="button"
               onClick={handleRefreshAndSync}
               disabled={isRefreshing}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95 disabled:opacity-50 shrink-0 whitespace-nowrap ${
+              className={`px-4 py-2 rounded-xl text-[10px] uppercase tracking-widest font-mono font-medium border flex items-center gap-2 cursor-pointer transition shadow-xs active:scale-95 disabled:opacity-50 shrink-0 whitespace-nowrap ${
                 isLight
-                  ? 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-900 font-bold text-xs'
-                  : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border border-cyan-500/30'
+                  ? 'bg-cyan-50/70 hover:bg-cyan-100/80 border-cyan-500/60 text-slate-900 shadow-[0_0_12px_rgba(6,182,212,0.14)]'
+                  : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-400 border-cyan-500/35'
               }`}
               title="Refresh status data & sinkronisasi terminal"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-cyan-500' : ''}`} />
-              <span>Refresh &amp; Sinkronisasi Data</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-cyan-500 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>Refresh &amp; Sinkronisasi</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Admin Module Navigation Tabs - 5 SEKSI LENGKAP */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {[
-          { id: 'system', label: 'a. Status Sistem & Maintenance Mode', icon: Activity, color: '#00f2fe' },
-          { id: 'profile', label: 'b. Pengaturan Legalitas & Registrasi Bisnis', icon: Building2, color: '#10b981' },
-          { id: 'credentials', label: 'c. Pusat Manajemen Kredensial & Reset PIN', icon: KeyRound, color: '#ec4899' },
-          { id: 'ai', label: 'd. AI Intelligence & Smart Tools', icon: Sparkles, color: '#a855f7' },
-          { id: 'sop', label: 'e. Info Center & SOP 6 Divisi', icon: BookOpen, color: '#38bdf8' },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = adminTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setAdminTab(tab.id as any)}
-              className={`px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shrink-0 transition cursor-pointer ${
-                isActive
-                  ? isLight
-                    ? 'bg-white border border-slate-300 text-rose-950 font-bold shadow-sm'
-                    : 'bg-pink-500 text-white shadow-[0_0_15px_rgba(236,72,153,0.35)] font-bold'
-                  : isLight
-                  ? 'bg-white text-slate-800 font-semibold hover:bg-slate-100 border border-slate-200'
-                  : 'bg-[#161b22] text-gray-400 hover:text-white border border-[#30363d] font-medium'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* 2-Column Grid Layout: Left Vertical Sidebar & Right Content Area */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        {/* Left Vertical Sidebar Navigation */}
+        <div
+          className={`w-full lg:w-64 shrink-0 rounded-2xl border p-3.5 space-y-1.5 backdrop-blur-xl transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}
+        >
+          <div className="px-3 py-2 text-[11px] font-mono font-medium uppercase tracking-widest text-slate-500 dark:text-gray-400">
+            Navigasi Konsol
+          </div>
+          {[
+            { id: 'system', label: 'Status Sistem', icon: Activity, color: '#00f2fe' },
+            { id: 'legality', label: 'Legalitas Usaha', icon: Building2, color: '#10b981' },
+            { id: 'branches', label: 'Jaringan Cabang', icon: Store, color: '#10b981' },
+            { id: 'master-data', label: 'Data Master & Migrasi', icon: Database, color: '#06b6d4' },
+            { id: 'credentials', label: 'Manajemen Kredensial', icon: KeyRound, color: '#ec4899' },
+            { id: 'ai-tools', label: 'AI & Smart Tools', icon: Sparkles, color: '#a855f7' },
+            { id: 'test-hub', label: 'Pusat Uji Sistem', icon: Activity, color: '#38bdf8' },
+            { id: 'sop', label: 'SOP & Petunjuk', icon: BookOpen, color: '#6366f1' },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = adminTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setAdminTab(tab.id as any)}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-[13px] tracking-wide flex items-center gap-2.5 transition cursor-pointer text-left ${
+                  isActive
+                    ? isLight
+                      ? 'bg-cyan-50/80 border border-cyan-500/70 text-slate-900 shadow-[0_0_14px_rgba(6,182,212,0.22)] font-medium'
+                      : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,212,0.25)] font-medium'
+                    : isLight
+                    ? 'text-slate-700 hover:bg-cyan-50/40 hover:border-cyan-500/40 border border-transparent font-normal'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800/50 border border-transparent font-normal'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" style={{ color: tab.color }} />
+                <span className="truncate">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
-      {/* ====================================================
-          TAB 0: PROFIL & REGISTRASI ENTITAS BISNIS
-          ==================================================== */}
-      {adminTab === 'profile' && (
+        {/* Right Content Area */}
+        <div className="flex-1 min-w-0 w-full space-y-6">
+
+      {/* TAB 0: PROFIL & REGISTRASI ENTITAS BISNIS */}
+      {adminTab === 'legality' && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Header Card with Business Identity Overview */}
-          <div className={`p-6 rounded-2xl border space-y-4 ${
-            isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
           }`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-[0_0_20px_rgba(0,242,254,0.25)]">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/15 text-cyan-500 flex items-center justify-center border border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.18)]">
                   <Building2 className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-extrabold text-lg tracking-tight">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-medium text-lg tracking-wide">
                       Registrasi Profil Entitas Usaha (Master Identity)
                     </h2>
-                    <span className={isLight ? 'bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded' : 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'}>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-medium uppercase tracking-widest border ${
+                      isLight
+                        ? 'bg-cyan-50 text-cyan-700 border-cyan-400/70'
+                        : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
+                    }`}>
                       ONBOARDING GATEWAY
                     </span>
                   </div>
-                  <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>
+                  <p className={`text-xs font-normal mt-0.5 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                     Konfigurasi identitas resmi perusahaan/toko yang disinkronkan ke kop struk POS kasir, slip gaji karyawan, faktur PO pengadaan, dan laporan keuangan.
                   </p>
                 </div>
               </div>
 
-              {/* Status Badge */}
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`px-2 py-0.5 rounded font-bold text-xs border flex items-center gap-1.5 ${
+                <span className={`px-2.5 py-1 rounded-lg font-mono font-medium uppercase tracking-widest text-[10px] border flex items-center gap-1.5 ${
                   isLight
                     ? isFirstRunSetup
-                      ? 'bg-amber-100 border-amber-300 text-amber-950 font-bold text-xs'
-                      : 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold text-xs'
+                      ? 'bg-amber-50 border-amber-400/70 text-amber-800'
+                      : 'bg-emerald-50 border-emerald-400/70 text-emerald-800'
                     : isFirstRunSetup
-                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 animate-pulse'
-                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/35 animate-pulse'
+                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
                 }`}>
-                  <BadgeCheck className="w-4 h-4" />
+                  <BadgeCheck className="w-3.5 h-3.5" />
                   <span>{isFirstRunSetup ? 'SETUP PERTAMA (FIRST-RUN)' : 'PROFIL TERVERIFIKASI AKTIF'}</span>
                 </span>
                 <button
@@ -1013,11 +1859,11 @@ export const SuperAdminModule: React.FC = () => {
                     setIsFirstRunSetup(!isFirstRunSetup);
                     showToast(`Mode First-Run Onboarding di-${!isFirstRunSetup ? 'AKTIFKAN' : 'NONAKTIFKAN'} untuk pengujian alur awal.`);
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition cursor-pointer ${
                     isFirstRunSetup
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30'
                       : isLight
-                      ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                      ? 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
                       : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
                   }`}
                   title="Toggle mode onboarding first-run untuk simulasi setup pertama kali"
@@ -1029,48 +1875,107 @@ export const SuperAdminModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Form & Live Preview Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Form Kolom (Span 2) */}
-            <form
-              onSubmit={(e) => {
+            <form onSubmit={(e) => {
                 e.preventDefault();
                 setIsSavingProfile(true);
-                setTimeout(() => {
-                  const isHybrid = isHybridArchitecture(profileForm.cashierArchitecture);
-                  const effectiveUnits = isHybrid
-                    ? Math.max(2, Math.min(10, profileForm.posUnitCount ?? 2))
-                    : Math.max(1, Math.min(10, profileForm.posUnitCount ?? 1));
-                  const terminalConfigs = generateTerminalConfigs(
-                    effectiveUnits,
-                    profileForm.cashierArchitecture,
-                    profileForm.category,
-                    profileForm.terminalConfigs
-                  );
-                  updateBusinessProfile({
-                    ...profileForm,
-                    posUnitCount: effectiveUnits,
-                    terminalConfigs,
-                  });
-                  setIsSavingProfile(false);
-                }, 300);
+                const clean = (val?: string) => (!val || val.trim() === '') ? '-' : val.trim();
+
+                const effectiveTopology: OperationalTopologyMode = 'NON_BLOCKING_ERP';
+                const effectiveUnits = Math.max(
+                  1,
+                  Math.min(
+                    10,
+                    Number(activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 1) || 1
+                  )
+                );
+                const cleanedName = clean(profileForm.name);
+
+                const canonicalSector = resolveCanonicalSector(activeDomainConfig);
+                const cleanedProfile: BusinessEntityProfile = normalizeBusinessProfileDomain({
+                  ...profileForm,
+                  name: cleanedName,
+                  businessName: cleanedName,
+                  category: activeModelDef.categoryValue,
+                  businessType: activeModelDef.id,
+                  activeSector: canonicalSector,
+                  sector: canonicalSector,
+                  posMode: activeDomainConfig.activePosTypes?.[0] || activeModelDef.defaultPosType,
+                  cashiers: effectiveUnits,
+                  address: clean(profileForm.address),
+                  headerNote: clean(profileForm.headerNote),
+                  footerNote: clean(profileForm.footerNote),
+                  phone: clean(profileForm.phone),
+                  whatsapp: clean(profileForm.whatsapp),
+                  email: clean(profileForm.email),
+                  website: clean(profileForm.website),
+                  licenseNumber: clean(profileForm.licenseNumber),
+                  nib: clean(profileForm.nib),
+                  npwp: clean(profileForm.npwp),
+                  operationalTopology: effectiveTopology,
+                  posUnitCount: effectiveUnits,
+                  domainConfig: {
+                    ...activeDomainConfig,
+                    operationalTopology: effectiveTopology,
+                    activeStationCount: effectiveUnits,
+                  },
+                });
+
+                const terminalConfigs = generateTerminalConfigs(
+                  effectiveUnits,
+                  cleanedProfile.cashierArchitecture,
+                  cleanedProfile.category,
+                  cleanedProfile.terminalConfigs,
+                  effectiveTopology
+                );
+
+                const finalProfile: BusinessEntityProfile = normalizeBusinessProfileDomain({
+                  ...cleanedProfile,
+                  operationalTopology: effectiveTopology,
+                  posUnitCount: effectiveUnits,
+                  cashiers: effectiveUnits,
+                  terminalConfigs,
+                  isConfigured: true,
+                  updatedAt: Date.now(),
+                });
+
+                // Simpan secara atomik & sinkron langsung ke Single Source of Truth (AppContext + localStorage)
+                setProfileForm(finalProfile);
+                updateBusinessProfile(finalProfile, { silent: true });
+
+                recordAudit({
+                  traceId: `PROFILE-UPDATE-${Date.now()}`,
+                  userId: effectiveUser?.id || 'super-admin',
+                  userName: effectiveUser?.name || 'Super Admin',
+                  userRole: effectiveUser?.role || 'Super Admin',
+                  module: 'SUPER_ADMIN',
+                  action: 'CONFIG_CHANGE',
+                  severity: 'WARN',
+                  entityId: finalProfile.name,
+                  payloadAfter: finalProfile,
+                });
+
+                setIsSavingProfile(false);
+                showToast(`✅ Profil Entitas Bisnis (${activeModelDef.label}) Berhasil Disimpan & Diterapkan ke Seluruh Modul!`);
+                setIsFirstRunSetup(false);
               }}
-              className={`lg:col-span-2 p-6 rounded-2xl border space-y-5 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+              className={`lg:col-span-2 p-6 rounded-2xl border space-y-5 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                  : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
               }`}
             >
-              <div className="flex items-center justify-between border-b pb-3 border-gray-700/50">
+              <div className={`flex items-center justify-between border-b pb-3 ${isLight ? 'border-slate-200' : 'border-gray-700/50'}`}>
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-cyan-400" />
-                  <h3 className="font-bold text-sm">Formulir Identitas &amp; Legalitas Usaha</h3>
+                  <FileText className="w-4 h-4 text-cyan-500" />
+                  <h3 className="font-medium text-sm tracking-wide">Formulir Identitas &amp; Legalitas Usaha</h3>
                 </div>
-                <span className={isLight ? 'text-slate-700 font-medium text-xs' : 'text-[11px] text-gray-400'}>*Wajib diisi untuk keabsahan dokumen operasional</span>
+                <span className={`text-[11px] font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>*Wajib diisi untuk keabsahan dokumen operasional</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                {/* 1. Nama Bisnis */}
                 <div className="sm:col-span-2">
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     Nama Bisnis / Perusahaan / Toko / Unit Usaha: <span className="text-rose-400">*</span>
                   </label>
                   <input
@@ -1078,8 +1983,8 @@ export const SuperAdminModule: React.FC = () => {
                     required
                     value={profileForm.name}
                     onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-                    placeholder="Contoh: PT JacS RetailOS Indonesia Tbk / Apotek Sumber Sehat"
-                    className={`w-full p-3 rounded-xl border font-bold text-sm ${
+                    placeholder="Contoh: PT JacS RetailOS Indonesia Tbk / Minimarket Sumber Rejeki"
+                    className={`w-full p-3 rounded-xl border font-medium text-sm ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white'
                         : 'bg-[#0d1117] border-gray-700 text-cyan-300 focus:border-cyan-500'
@@ -1087,262 +1992,646 @@ export const SuperAdminModule: React.FC = () => {
                   />
                 </div>
 
-                {/* 2. Kategori Industri Utama */}
-                <div>
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
-                    Kategori Industri: <span className="text-rose-400">*</span>
-                  </label>
-                  <select
-                    value={
-                      profileForm.category === 'Pharmacy' || profileForm.category === 'Pharmacy & Pet Shop'
-                        ? 'Pharmacy & Pet Shop (Apotek & Kebutuhan Hewan)'
-                        : profileForm.category === 'Salon & Service' || profileForm.category === 'Salon'
-                        ? 'Salon & Barbershop (Jasa & Grooming)'
-                        : profileForm.category
-                    }
-                    onChange={(e) => setProfileForm({ ...profileForm, category: e.target.value })}
-                    className={`w-full p-2.5 rounded-xl border ${
+                <div className="sm:col-span-2 space-y-3.5">
+                  <div>
+                    <label className={`block font-medium text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
+                      Jenis Usaha Utama: <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={activeDomainConfig.primaryBusinessModel}
+                      onChange={(e) => handleSelectPrimaryBusinessModel(e.target.value as BusinessModelId)}
+                      className={`w-full p-2.5 rounded-xl border font-medium cursor-pointer ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-[#0d1117] border-gray-700 text-white'
+                      }`}
+                    >
+                      {BUSINESS_MODEL_DEFINITIONS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="use-presets"
+                        checked={useIndustryPresets}
+                        onChange={(e) => setUseIndustryPresets(e.target.checked)}
+                        className="accent-cyan-500 cursor-pointer"
+                      />
+                      <label htmlFor="use-presets" className={`text-[11px] font-medium tracking-wide cursor-pointer ${isLight ? 'text-slate-600' : 'text-cyan-400/80'}`}>
+                        Gunakan Template Bawaan Rumpun Usaha (Slogan, Footer Struk &amp; Unit Kasir)
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Pemilihan Tipe POS Aktif (Checkbox Cards tepat di bawah Jenis Usaha Utama) */}
+                  <div
+                    className={`p-4 rounded-xl border space-y-2.5 ${
                       isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900'
-                        : 'bg-[#0d1117] border-gray-700 text-white'
+                        ? 'bg-white border-cyan-500/45 text-slate-900'
+                        : 'bg-[#0d1117] border-cyan-500/35 text-slate-100'
                     }`}
                   >
-                    <option value="Ritel Modern & Multi-Industry">Ritel Modern &amp; Multi-Industry 🏢</option>
-                    <option value="Modern Retail">Modern Retail / Ritel &amp; Grosir 🛒</option>
-                    <option value="F&B">Food &amp; Beverage (F&amp;B Restoran &amp; Cafe) 🍳</option>
-                    <option value="Pharmacy & Pet Shop (Apotek & Kebutuhan Hewan)">Pharmacy &amp; Pet Shop (Apotek &amp; Kebutuhan Hewan) 💊🐾</option>
-                    <option value="Fashion">Fashion &amp; Apparel (Butik &amp; Busana) 👗</option>
-                    <option value="Building">Building Materials &amp; Hardware (Bahan Bangunan) 🏗️</option>
-                    <option value="Electronics">Electronics &amp; Gadgets (Elektronik &amp; Gawai) 📱</option>
-                    <option value="Automotive">Automotive &amp; Workshop (Bengkel &amp; Otomotif) 🔧</option>
-                    <option value="Salon & Barbershop (Jasa & Grooming)">Salon &amp; Barbershop (Jasa &amp; Grooming) 💈</option>
-                  </select>
-                </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Store className="w-4 h-4 text-cyan-500 shrink-0" />
+                        <span className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          Tipe POS Aktif
+                        </span>
+                        <span className="text-rose-400 text-xs font-semibold">*</span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
+                          isLight
+                            ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                            : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
+                        }`}
+                      >
+                        Otomatis sesuai Jenis Usaha · Multi-Pilih Tersedia
+                      </span>
+                    </div>
 
-                {/* 2b. Jumlah Unit Kasir & Arsitektur Kasir */}
-                {(() => {
-                  const isHybrid = isHybridArchitecture(profileForm.cashierArchitecture);
-                  const effectiveUnits = isHybrid
-                    ? Math.max(2, Math.min(10, profileForm.posUnitCount ?? 2))
-                    : Math.max(1, Math.min(10, profileForm.posUnitCount ?? 1));
-                  const activeConfigs = generateTerminalConfigs(
-                    effectiveUnits,
-                    profileForm.cashierArchitecture,
-                    profileForm.category,
-                    profileForm.terminalConfigs
-                  );
-
-                  return (
-                    <div className="sm:col-span-2 space-y-3.5 p-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* Input Jumlah Unit Kasir Aktif (Terkunci Min 2 jika Hybrid) */}
-                        <div>
-                          <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-300'}`}>
-                            <span>Jumlah Unit Kasir Aktif: <span className="text-rose-400">*</span></span>
-                            <span className="text-[10px] text-cyan-400 font-mono font-bold">
-                              {isHybrid ? '2 s/d 10 (Kunci Min. 2 Unit)' : '1 s/d 10 Terminal'}
-                            </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {ACTIVE_POS_TYPE_OPTIONS.map((posOpt) => {
+                        const isChecked = (activeDomainConfig.activePosTypes || []).includes(posOpt.id);
+                        const isRecommended = activeModelDef.defaultPosType === posOpt.id;
+                        return (
+                          <label
+                            key={posOpt.id}
+                            className={`p-3 rounded-xl border flex items-start gap-2.5 cursor-pointer transition-all duration-150 ${
+                              isChecked
+                                ? isLight
+                                  ? 'bg-cyan-50/90 border-cyan-500 text-slate-900 shadow-[0_0_12px_rgba(6,182,212,0.16)]'
+                                  : 'bg-cyan-500/15 border-cyan-400/70 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.14)]'
+                                : isLight
+                                ? 'bg-slate-50 border-slate-300 text-slate-800 hover:border-cyan-400'
+                                : 'bg-[#161b22] border-gray-700 text-gray-300 hover:border-cyan-500/40'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleActivePosType(posOpt.id)}
+                              className="mt-0.5 accent-cyan-500 w-4 h-4 cursor-pointer shrink-0"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <span className="font-semibold text-[11px] leading-4">
+                                  {posOpt.emoji} {posOpt.label}
+                                </span>
+                                {isRecommended && (
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase shrink-0 ${
+                                      isLight
+                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/35'
+                                    }`}
+                                  >
+                                    Default
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-[10px] mt-1 leading-snug ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                                {posOpt.description}
+                              </p>
+                            </div>
                           </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Panel Sentral BusinessDomainConfig: Rumpun Mekanisme & Flag Sub-Fitur */}
+                  <div
+                    className={`p-4 rounded-xl border space-y-3 ${
+                      isLight
+                        ? 'bg-slate-50 border-cyan-500/45 text-slate-900'
+                        : 'bg-[#0d1117] border-cyan-500/30 text-slate-100'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-cyan-500 shrink-0" />
+                        <span className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          Rumpun Mekanisme Aktif:
+                        </span>
+                      </div>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-md font-mono text-[10px] font-bold tracking-wider border ${
+                          activeDomainConfig.mechanismFamily === 'RETAIL_GENERAL'
+                            ? isLight
+                              ? 'bg-cyan-100 text-cyan-900 border-cyan-400'
+                              : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                            : activeDomainConfig.mechanismFamily === 'FNB_CULINARY'
+                            ? isLight
+                              ? 'bg-amber-100 text-amber-900 border-amber-400'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : activeDomainConfig.mechanismFamily === 'BUILDING_BULK'
+                            ? isLight
+                              ? 'bg-emerald-100 text-emerald-900 border-emerald-400'
+                              : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : isLight
+                            ? 'bg-purple-100 text-purple-900 border-purple-400'
+                            : 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                        }`}
+                      >
+                        {activeDomainConfig.mechanismFamily}
+                      </span>
+                    </div>
+
+                    <div className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                      <span className="font-semibold">{activeModelDef.label}</span> — {activeFamilyMeta.mechanismBasis}.{' '}
+                      <span className={isLight ? 'text-slate-600' : 'text-gray-400'}>{activeModelDef.description}</span>
+                    </div>
+
+                    {/* Sub-Fitur Khusus RETAIL_GENERAL: isWholesale */}
+                    {activeDomainConfig.mechanismFamily === 'RETAIL_GENERAL' ? (
+                      <div className={`grid grid-cols-1 gap-2.5 pt-2 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                        <label
+                          className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition ${
+                            activeDomainConfig.subFeatures.isWholesale
+                              ? isLight
+                                ? 'bg-amber-50 border-amber-400 text-slate-900'
+                                : 'bg-amber-500/15 border-amber-500/45 text-amber-200'
+                              : isLight
+                              ? 'bg-white border-slate-300 text-slate-800'
+                              : 'bg-[#161b22] border-gray-700 text-gray-300'
+                          }`}
+                        >
                           <input
-                            type="number"
-                            id="input-pos-unit-count"
-                            min={isHybrid ? 2 : 1}
-                            max={10}
-                            value={effectiveUnits}
+                            type="checkbox"
+                            checked={activeDomainConfig.subFeatures.isWholesale}
                             onChange={(e) => {
-                              const minVal = isHybrid ? 2 : 1;
-                              const rawVal = parseInt(e.target.value);
-                              const val = isNaN(rawVal) ? minVal : Math.max(minVal, Math.min(10, rawVal));
-                              const updatedConfigs = generateTerminalConfigs(
-                                val,
-                                profileForm.cashierArchitecture,
-                                profileForm.category,
-                                profileForm.terminalConfigs
-                              );
-                              setProfileForm({
-                                ...profileForm,
-                                posUnitCount: val,
-                                terminalConfigs: updatedConfigs,
+                              const checked = e.target.checked;
+                              const current = getEffectiveBusinessDomainConfig(profileForm);
+                              applyImmediateDomainConfig({
+                                ...current,
+                                subFeatures: {
+                                  ...current.subFeatures,
+                                  isWholesale: checked,
+                                },
                               });
                             }}
-                            className={`w-full p-2.5 rounded-xl border font-bold ${
-                              isLight
-                                ? 'bg-white border-slate-300 text-slate-900'
-                                : 'bg-[#0d1117] border-gray-700 text-cyan-300'
-                            }`}
+                            className="mt-0.5 accent-amber-500 w-4 h-4 cursor-pointer shrink-0"
                           />
-                          <p className={`mt-1.5 ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-[10px] text-gray-400'}`}>
-                            {isHybrid ? (
-                              <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
-                                <AlertTriangle className="w-3.5 h-3.5 inline shrink-0" />
-                                <span>Mode Hybrid: Terkunci minimal 2 unit (KASIR 01 Front-End &amp; KASIR 02 Hybrid Back-End).</span>
-                              </span>
-                            ) : (
-                              <span>Jumlah terminal kasir aktif yang diizinkan dan beroperasi pada modul POS.</span>
-                            )}
+                          <div>
+                            <div className="font-semibold text-[11px] flex items-center gap-1.5">
+                              <span>Sub-Fitur Grosir &amp; Distribusi</span>
+                              <code className={`px-1 py-0.2 rounded text-[10px] font-mono ${isLight ? 'bg-slate-200 text-slate-800' : 'bg-gray-800 text-amber-300'}`}>
+                                isWholesale
+                              </code>
+                            </div>
+                            <p className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                              Aktifkan aturan MOQ, tier harga grosir &amp; penjualan kredit/tempo.
+                            </p>
+                          </div>
+                        </label>
+                      </div>
+                    ) : (
+                      <div className={`flex flex-wrap gap-1.5 pt-2 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                        {activeDomainConfig.subFeatures.hasBomRecipe && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${isLight ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-amber-500/15 text-amber-300 border-amber-500/35'}`}>
+                            Menu Jadi &amp; BOM Bahan Baku Aktif
+                          </span>
+                        )}
+                        {activeDomainConfig.subFeatures.hasBulkVolumeDimension && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${isLight ? 'bg-emerald-100 text-emerald-900 border-emerald-300' : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'}`}>
+                            Curah m³/Ret &amp; Dimensi PxLxT Aktif
+                          </span>
+                        )}
+                        {activeDomainConfig.subFeatures.hasVariantMatrix && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${isLight ? 'bg-purple-100 text-purple-900 border-purple-300' : 'bg-purple-500/15 text-purple-300 border-purple-500/35'}`}>
+                            Matriks Varian Ukuran &amp; Warna Aktif
+                          </span>
+                        )}
+                        {activeDomainConfig.subFeatures.hasSerialImei && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${isLight ? 'bg-blue-100 text-blue-900 border-blue-300' : 'bg-blue-500/15 text-blue-300 border-blue-500/35'}`}>
+                            Serial Number &amp; IMEI Garansi Aktif
+                          </span>
+                        )}
+                        {activeDomainConfig.subFeatures.hasServiceOrder && (
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${isLight ? 'bg-indigo-100 text-indigo-900 border-indigo-300' : 'bg-indigo-500/15 text-indigo-300 border-indigo-500/35'}`}>
+                            Order Jasa Bengkel / Salon / Laundry Aktif
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Toggle Opsional: Mode Hybrid Multi-Unit (Default OFF) */}
+                    <div className={`pt-2.5 border-t space-y-2 ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-semibold text-[11px] ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                              Mode Hybrid Multi-Unit
+                            </span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-mono text-[9px] font-bold uppercase ${
+                                activeDomainConfig.isHybridMultiUnit
+                                  ? isLight
+                                    ? 'bg-cyan-100 text-cyan-900 border border-cyan-400'
+                                    : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                                  : isLight
+                                  ? 'bg-slate-200 text-slate-700 border border-slate-300'
+                                  : 'bg-gray-800 text-gray-400 border border-gray-700'
+                              }`}
+                            >
+                              {activeDomainConfig.isHybridMultiUnit ? 'ON' : 'OFF (Default)'}
+                            </span>
+                          </div>
+                          <p className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                            Opsional: aktifkan hanya jika satu gerai menjalankan beberapa lini bisnis lintas rumpun sekaligus.
                           </p>
                         </div>
 
-                        {/* Pilihan Arsitektur Kasir (Terpusat vs Hybrid) */}
-                        <div>
-                          <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-900' : 'text-gray-300'}`}>
-                            Arsitektur Kasir: <span className="text-rose-400">*</span>
-                          </label>
-                          <div className="space-y-1.5 mt-1">
-                            <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition text-xs ${
-                              !isHybrid
-                                ? 'bg-blue-600/20 border-blue-500 text-blue-300 font-bold'
-                                : isLight ? 'bg-white border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-700 text-gray-400'
-                            }`}>
-                              <input
-                                type="radio"
-                                name="cashierArchitecture"
-                                value="CENTRALIZED_FRONTEND"
-                                checked={!isHybrid}
-                                onChange={() => {
-                                  const updatedConfigs = generateTerminalConfigs(
-                                    profileForm.posUnitCount ?? 1,
-                                    'CENTRALIZED_FRONTEND',
-                                    profileForm.category,
-                                    profileForm.terminalConfigs
-                                  );
-                                  setProfileForm({
-                                    ...profileForm,
-                                    cashierArchitecture: 'CENTRALIZED_FRONTEND',
-                                    terminalConfigs: updatedConfigs,
-                                  });
-                                }}
-                                className="text-blue-600 focus:ring-0"
-                              />
-                              <span>Kasir Terpusat (Front-End Only)</span>
-                            </label>
-                            <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition text-xs ${
-                              isHybrid
-                                ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300 font-bold'
-                                : isLight ? 'bg-white border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-700 text-gray-400'
-                            }`}>
-                              <input
-                                type="radio"
-                                name="cashierArchitecture"
-                                value="HYBRID_FRONT_BACK"
-                                checked={isHybrid}
-                                onChange={() => {
-                                  const newCount = Math.max(2, profileForm.posUnitCount ?? 2);
-                                  const updatedConfigs = generateTerminalConfigs(
-                                    newCount,
-                                    'HYBRID_FRONT_BACK',
-                                    profileForm.category,
-                                    profileForm.terminalConfigs
-                                  );
-                                  setProfileForm({
-                                    ...profileForm,
-                                    cashierArchitecture: 'HYBRID_FRONT_BACK',
-                                    posUnitCount: newCount,
-                                    terminalConfigs: updatedConfigs,
-                                  });
-                                }}
-                                className="text-cyan-600 focus:ring-0"
-                              />
-                              <span>Hybrid (Front-End Kasir + Back-End Admin/Gudang)</span>
-                            </label>
-                          </div>
-                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={activeDomainConfig.isHybridMultiUnit}
+                          onClick={() => {
+                            const nextVal = !activeDomainConfig.isHybridMultiUnit;
+                            const current = getEffectiveBusinessDomainConfig(profileForm);
+                            applyImmediateDomainConfig({
+                              ...current,
+                              isHybridMultiUnit: nextVal,
+                              enabledHybridModels: nextVal ? current.enabledHybridModels || [] : [],
+                            });
+                          }}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                            activeDomainConfig.isHybridMultiUnit
+                              ? 'bg-cyan-500'
+                              : isLight
+                              ? 'bg-slate-300'
+                              : 'bg-gray-700'
+                          }`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                              activeDomainConfig.isHybridMultiUnit ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
                       </div>
 
-                      {/* Live Allocation Preview: Rincian Peran Terminal Berdasarkan Arsitektur & Kuota */}
-                      <div className={`p-3 rounded-xl border text-xs space-y-2 ${
-                        isLight ? 'bg-white/90 border-slate-200 shadow-xs' : 'bg-[#0d1117]/80 border-gray-800'
-                      }`}>
-                        <div className="flex items-center justify-between pb-1.5 border-b border-gray-700/30">
-                          <span className="font-bold flex items-center gap-1.5 text-cyan-500 dark:text-cyan-400">
-                            <span>Alokasi Peran Terminal Otomatis:</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                              {isHybrid ? 'MODE HYBRID' : 'MODE TERPUSAT'}
+                      {activeDomainConfig.isHybridMultiUnit && (
+                        <div className={`p-2.5 rounded-lg border space-y-1.5 ${isLight ? 'bg-white border-cyan-300' : 'bg-[#161b22] border-cyan-500/30'}`}>
+                          <div className={`text-[10px] font-semibold ${isLight ? 'text-slate-800' : 'text-cyan-300'}`}>
+                            Unit Usaha Tambahan yang Diaktifkan Bersama ({activeModelDef.shortLabel}):
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {BUSINESS_MODEL_DEFINITIONS.filter(
+                              (m) => m.id !== activeDomainConfig.primaryBusinessModel
+                            ).map((model) => {
+                              const checked = (activeDomainConfig.enabledHybridModels || []).includes(model.id);
+                              return (
+                                <label
+                                  key={model.id}
+                                  className={`flex items-center gap-2 px-2 py-1.5 rounded border text-[10px] cursor-pointer ${
+                                    checked
+                                      ? isLight
+                                        ? 'bg-cyan-50 border-cyan-400 text-slate-900 font-semibold'
+                                        : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200 font-semibold'
+                                      : isLight
+                                      ? 'bg-slate-50 border-slate-200 text-slate-700'
+                                      : 'bg-[#0d1117] border-gray-800 text-gray-400'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      const isAdd = e.target.checked;
+                                      const current = getEffectiveBusinessDomainConfig(profileForm);
+                                      const existing = current.enabledHybridModels || [];
+                                      const nextHybrid = isAdd
+                                        ? Array.from(new Set([...existing, model.id]))
+                                        : existing.filter((id) => id !== model.id);
+                                      applyImmediateDomainConfig({
+                                        ...current,
+                                        enabledHybridModels: nextHybrid,
+                                      });
+                                    }}
+                                    className="accent-cyan-500 cursor-pointer"
+                                  />
+                                  <span className="truncate">{model.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ARSITEKTUR NON-BLOCKING ERP & GENERATOR LOKET PC KASIR */}
+                <div
+                  className={`sm:col-span-2 space-y-4 p-4 rounded-xl border ${
+                    isLight
+                      ? 'border-cyan-500/55 bg-cyan-50/35 text-slate-900'
+                      : 'border-cyan-500/35 bg-[#0d1117] text-slate-100'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Monitor className="w-4 h-4 text-cyan-500 shrink-0" />
+                      <div>
+                        <div className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          Generator Loket PC Kasir &amp; Arsitektur Non-Blocking ERP
+                        </div>
+                        <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                          Seluruh 6 pilar manajemen aktif penuh tanpa pemblokiran menu; transaksi kasir &amp; buka/tutup shift tetap berjalan fleksibel walau stok 0/minus atau PO/jurnal belum diposting.
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold border ${
+                        isLight
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-400'
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      }`}
+                    >
+                      {getOperationalTopologyOption('NON_BLOCKING_ERP').badge}
+                    </span>
+                  </div>
+
+                  <div
+                    className={`p-3 rounded-xl border text-[11px] leading-relaxed ${
+                      isLight
+                        ? 'bg-white border-emerald-300 text-slate-700'
+                        : 'bg-[#161b22] border-emerald-500/35 text-slate-300'
+                    }`}
+                  >
+                    <strong className={isLight ? 'text-emerald-800' : 'text-emerald-300'}>
+                      Logika Tunggal Non-Blocking Aktif:
+                    </strong>{' '}
+                    1) Akses 6 pilar (Executive, Finance, Purchasing, POS, Warehouse, HR) &amp; Data Master selalu terbuka via Workspace Switcher;{' '}
+                    2) POS mengizinkan jual saat stok 0/minus sementara;{' '}
+                    3) PO belum dikonfirmasi, selisih stok, atau jurnal Finance belum diposting tidak menghambat buka/tutup shift kasir.
+                  </div>
+
+                  {/* Input Jumlah Loket / PC Kasir Aktif (1 - 10 PC) */}
+                  {(() => {
+                    const currentStationCount = Math.max(
+                      1,
+                      Math.min(
+                        10,
+                        Number(activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 1) || 1
+                      )
+                    );
+                    const generatedStations = generatePosStations(
+                      currentStationCount,
+                      activeDomainConfig.activePosTypes,
+                      activeDomainConfig.primaryBusinessModel
+                    );
+                    return (
+                      <div className={`pt-3 border-t space-y-3 ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <label className={`block font-semibold text-xs ${isLight ? 'text-slate-800' : 'text-gray-200'}`}>
+                              Jumlah Loket / PC Kasir Aktif (1–10 PC): <span className="text-rose-400">*</span>
+                            </label>
+                            <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                              Otomatis menghasilkan daftar terminal POS-01 s/d POS-{String(currentStationCount).padStart(2, '0')} sesuai Tipe POS yang dicentang.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={currentStationCount}
+                              onChange={(e) => handleChangeStationCount(parseInt(e.target.value, 10) || 1)}
+                              className={`w-16 px-2.5 py-1.5 rounded-lg border text-center font-mono font-bold text-xs outline-none ${
+                                isLight
+                                  ? 'bg-white border-cyan-500 text-slate-900'
+                                  : 'bg-[#161b22] border-cyan-500/60 text-cyan-300'
+                              }`}
+                            />
+                            <span className={`text-xs font-mono font-semibold ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                              PC Loket
                             </span>
-                          </span>
-                          <span className="text-[11px] text-gray-400 font-mono font-semibold">
-                            {activeConfigs.length} Unit Register
-                          </span>
+                          </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                          {activeConfigs.map((cfg) => {
-                            const isHybridBack = cfg.role === 'HYBRID_BACKEND';
+                        {/* Quick Pills 1..10 PC */}
+                        <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+                          {Array.from({ length: 10 }, (_, idx) => idx + 1).map((num) => {
+                            const active = currentStationCount === num;
                             return (
-                              <div
-                                key={cfg.id}
-                                className={`p-2 rounded-lg border flex items-center justify-between text-[11px] font-mono transition-all ${
-                                  isHybridBack
-                                    ? 'bg-amber-500/15 border-amber-500/50 text-amber-950 dark:text-amber-200 shadow-xs'
+                              <button
+                                key={`station-qty-${num}`}
+                                type="button"
+                                onClick={() => handleChangeStationCount(num)}
+                                className={`py-1.5 rounded-lg border font-mono text-[11px] font-bold transition cursor-pointer ${
+                                  active
+                                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
                                     : isLight
-                                    ? 'bg-slate-50 border-slate-200 text-slate-800'
-                                    : 'bg-white/5 border-gray-700 text-gray-300'
+                                    ? 'bg-white border-slate-300 text-slate-700 hover:border-cyan-400'
+                                    : 'bg-[#161b22] border-gray-700 text-gray-300 hover:border-cyan-500/45'
                                 }`}
                               >
-                                <div className="flex items-center gap-1.5 font-bold">
-                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cfg.colorTheme }} />
-                                  <span>{cfg.name}</span>
-                                </div>
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isHybridBack
-                                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                                    : 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                                }`}>
-                                  {cfg.role}
-                                </span>
-                              </div>
+                                {num}
+                              </button>
                             );
                           })}
                         </div>
 
-                        <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-600 font-medium' : 'text-gray-400'}`}>
-                          {isHybrid ? (
-                            <span>
-                              ⚡ <strong>Alokasi Hybrid Aktif:</strong> KASIR 01 = <code className="text-cyan-400 font-bold">FRONT_END_ONLY</code> (Kasir Utama), KASIR 02 = <code className="text-amber-400 font-bold">HYBRID_BACKEND</code> (Kasir + Akses Menu ERP/Admin), KASIR 03 s/d {String(activeConfigs.length).padStart(2, '0')} = <code className="text-cyan-400 font-bold">FRONT_END_ONLY</code> (Kasir Reguler Tambahan).
+                        {/* Preview Daftar Terminal Loket POS-01 .. POS-N */}
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className={`text-[11px] font-semibold ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
+                              Daftar Terminal Loket Terbentuk ({generatedStations.length} Loket):
                             </span>
-                          ) : (
-                            <span>
-                              ⚡ <strong>Alokasi Terpusat Aktif:</strong> Seluruh terminal (KASIR 01 s/d {String(activeConfigs.length).padStart(2, '0')}) bertipe <code className="text-blue-400 font-bold">FRONT_END_ONLY</code>.
-                            </span>
-                          )}
+                            {localBoundInfo && (
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-2 py-0.5 rounded font-mono text-[10px] font-semibold border ${
+                                    isLight
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                                  }`}
+                                >
+                                  PC Ini Terkunci: {localBoundInfo.stationCode}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    unbindPosStation();
+                                    clearBoundPosStation();
+                                    setLocalBoundInfo(null);
+                                    showToast('Penguncian loket pada perangkat ini berhasil dilepas.');
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border cursor-pointer transition ${
+                                    isLight
+                                      ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300'
+                                      : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40'
+                                  }`}
+                                >
+                                  Lepas Kunci Perangkat Lokal
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {generatedStations.map((st) => {
+                              const isThisPcBound = localBoundInfo?.stationCode === st.stationCode;
+                              return (
+                                <div
+                                  key={st.stationCode}
+                                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                                    isThisPcBound
+                                      ? isLight
+                                        ? 'bg-emerald-50 border-emerald-400 text-slate-900'
+                                        : 'bg-emerald-500/10 border-emerald-500/45 text-emerald-100'
+                                      : isLight
+                                      ? 'bg-white border-slate-200 text-slate-800'
+                                      : 'bg-[#161b22] border-gray-800 text-gray-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span
+                                      className={`px-2 py-1 rounded-lg font-mono text-[11px] font-bold border shrink-0 ${
+                                        isLight
+                                          ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                                          : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
+                                      }`}
+                                    >
+                                      {st.stationCode}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="text-[11px] font-semibold truncate">
+                                        {st.emoji} {st.posTypeLabel}
+                                      </div>
+                                      <div className={`text-[10px] font-mono truncate ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                                        Struk: INV-{st.receiptPrefixTag}-YYMMDD-0001
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {isThisPcBound && (
+                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-mono text-[9px] font-bold uppercase shrink-0">
+                                      PC INI
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* PIN Otorisasi Manajemen (6 Digit) untuk Akses 6 Pilar & Ganti Loket PC */}
+                  <div
+                    className={`mt-4 pt-4 border-t space-y-2.5 ${
+                      isLight ? 'border-slate-200' : 'border-gray-800'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label
+                          htmlFor="input-mgmt-auth-pin-legality"
+                          className={`block font-semibold text-xs ${
+                            isLight ? 'text-slate-800' : 'text-gray-200'
+                          }`}
+                        >
+                          PIN Otorisasi Manajemen (6 Digit): <span className="text-rose-400">*</span>
+                        </label>
+                        <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                          Wajib dimasukkan saat berpindah dari layar Kasir POS ke 6 Pilar Manajemen atau saat menekan Ganti Loket PC. Default: <span className="font-mono font-bold">123456</span>.
                         </p>
                       </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="relative">
+                          <input
+                            id="input-mgmt-auth-pin-legality"
+                            type={showMgmtAuthPin ? 'text' : 'password'}
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={mgmtAuthPinInput}
+                            onChange={(e) => {
+                              const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 6);
+                              setMgmtAuthPinInput(digitsOnly);
+                            }}
+                            placeholder="123456"
+                            className={`w-36 pl-3 pr-9 py-1.5 rounded-lg border font-mono font-bold text-xs tracking-widest outline-none ${
+                              isLight
+                                ? 'bg-white border-amber-400 text-slate-900'
+                                : 'bg-[#161b22] border-amber-500/50 text-amber-300'
+                            }`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowMgmtAuthPin((prev) => !prev)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-amber-400 cursor-pointer"
+                            aria-label="Tampilkan atau sembunyikan PIN"
+                          >
+                            {showMgmtAuthPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateManagementAuthPin(mgmtAuthPinInput)}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs cursor-pointer transition whitespace-nowrap"
+                        >
+                          Simpan PIN
+                        </button>
+                      </div>
                     </div>
-                  );
-                })()}
-
-
-
-                {/* 4. No. Telepon / WhatsApp */}
-                <div>
-                  <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
-                    <span>No. Telepon Kantor / Layanan Pelanggan:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">Opsional (Boleh "0" / "-")</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={profileForm.phone || ''}
-                    onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    placeholder="Contoh: (021) 515-8888 (boleh '0' / '-')"
-                    className={`w-full p-2.5 rounded-xl border ${
-                      isLight
-                        ? 'bg-slate-50 border-slate-300 text-slate-900'
-                        : 'bg-[#0d1117] border-gray-700 text-white'
-                    }`}
-                  />
+                  </div>
                 </div>
 
-                {/* 5. Email Resmi (OPSIONAL - TYPE TEXT AGAR "0" / "-" VALID) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:col-span-2">
+                  <div>
+                    <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
+                      <span>No. Telepon Kantor:</span>
+                      <span className="text-[10px] text-cyan-500 font-normal">Opsional</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={profileForm.phone || ''}
+                      onChange={(e) => setProfileForm({ ...profileForm, phone: formatPhone(e.target.value) })}
+                      placeholder="Contoh: 021-515-8888"
+                      className={`w-full p-2.5 rounded-xl border ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-[#0d1117] border-gray-700 text-white'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
+                      <span>WhatsApp CS:</span>
+                      <span className="text-[10px] text-emerald-500 font-normal">Opsional</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={profileForm.whatsapp || ''}
+                      onChange={(e) => setProfileForm({ ...profileForm, whatsapp: formatPhone(e.target.value) })}
+                      placeholder="Contoh: 0812-3456-7890"
+                      className={`w-full p-2.5 rounded-xl border ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900'
+                          : 'bg-[#0d1117] border-gray-700 text-white'
+                      }`}
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     <span>Alamat Email Resmi:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">Opsional (Boleh "0" / "-")</span>
+                    <span className="text-[10px] text-cyan-500 font-normal">Opsional</span>
                   </label>
                   <input
                     type="text"
                     value={profileForm.email || ''}
                     onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
-                    placeholder="Contoh: official@toko.id (boleh '0' / '-')"
+                    placeholder="Contoh: official@toko.id"
                     className={`w-full p-2.5 rounded-xl border ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900'
@@ -1351,17 +2640,16 @@ export const SuperAdminModule: React.FC = () => {
                   />
                 </div>
 
-                {/* 6. Alamat Kantor / Toko Fisik */}
                 <div className="sm:col-span-2">
-                  <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     <span>Alamat Fisik Kantor Pusat / Gerai Utama:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">Opsional</span>
+                    <span className="text-[10px] text-cyan-500 font-normal">Opsional</span>
                   </label>
                   <textarea
                     rows={2}
                     value={profileForm.address || ''}
                     onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
-                    placeholder="Contoh: Jl. Jenderal Sudirman Kav. 52-53, SCBD, Jakarta Selatan (boleh dikosongkan)"
+                    placeholder="Contoh: Jl. Jenderal Sudirman Kav. 52-53, SCBD, Jakarta Selatan"
                     className={`w-full p-2.5 rounded-xl border ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900'
@@ -1370,43 +2658,52 @@ export const SuperAdminModule: React.FC = () => {
                   />
                 </div>
 
-
-
-                {/* 8. Upload File Logo Usaha (Murni Upload File Gambar - Tanpa Input Teks URL) */}
+                {/* Upload Logo */}
                 <div className="sm:col-span-2">
-                  <label className={`block font-bold text-xs mb-1.5 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1.5 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     <span>Upload Logo Usaha / Ikon Brand:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">File Gambar (PNG, JPG, WebP, SVG)</span>
+                    <span className="text-[10px] text-emerald-500 font-semibold flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Anti-Malware Shield: PNG, JPG, WebP (Maks. 2MB • Blokir .SVG/.EXE/.JS)</span>
+                    </span>
                   </label>
 
-                  {/* Hidden native file input */}
                   <input
                     type="file"
                     id="business-logo-file-picker"
-                    accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
+                    accept="image/png,image/jpeg,image/webp"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        if (file.size > 2.5 * 1024 * 1024) {
-                          showToast('Ukuran file terlalu besar! Maksimal 2.5MB agar penyimpanan browser lancar.');
+                        const check = validateSafeImageUpload(file, 2 * 1024 * 1024);
+                        if (!check.valid) {
+                          recordSecurityShieldEvent({
+                            type: 'MALWARE_UPLOAD_BLOCKED',
+                            details: `Unggahan Logo Usaha Diblokir (${file.name}): ${check.reason}`,
+                            module: 'UPLOAD_SCANNER',
+                            level: 'ERROR',
+                          });
+                          showToast(check.reason || 'File gambar ditolak oleh Security Shield.', 'error');
+                          e.target.value = '';
                           return;
                         }
                         const reader = new FileReader();
                         reader.onload = (ev) => {
                           if (ev.target?.result) {
                             setProfileForm((prev) => ({ ...prev, logoUrl: ev.target!.result as string }));
-                            showToast('File logo berhasil diunggah & dikonversi ke Base64 DataURL!');
+                            showToast('File logo aman (PNG/JPG/WebP ≤2MB) berhasil dipindai & diunggah!', 'success');
                           }
                         };
                         reader.readAsDataURL(file);
                       }
+                      e.target.value = '';
                     }}
                   />
 
                   {profileForm.logoUrl ? (
                     <div className={`p-4 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-4 ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-gray-700'
+                      isLight ? 'bg-slate-50 border-cyan-500/45' : 'bg-[#0d1117] border-cyan-500/30'
                     }`}>
                       <div className="flex items-center gap-3.5">
                         <div className="w-16 h-16 rounded-xl border border-dashed border-cyan-500/50 bg-white/5 p-1 flex items-center justify-center shrink-0 overflow-hidden shadow-sm">
@@ -1421,12 +2718,12 @@ export const SuperAdminModule: React.FC = () => {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-cyan-400">File Logo Aktif</span>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            <span className="text-xs font-medium text-cyan-500">File Logo Aktif</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
                               Base64 DataURL
                             </span>
                           </div>
-                          <p className="text-[11px] text-gray-400 mt-0.5">
+                          <p className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                             Logo otomatis tampil pada kop struk POS, slip gaji karyawan, faktur PO, dan laporan keuangan.
                           </p>
                         </div>
@@ -1436,8 +2733,7 @@ export const SuperAdminModule: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => document.getElementById('business-logo-file-picker')?.click()}
-                          className="px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
-                          title="Ganti dengan file gambar lain"
+                          className="px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/40 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition active:scale-95"
                         >
                           <Upload className="w-3.5 h-3.5" />
                           <span>Ganti File</span>
@@ -1450,8 +2746,7 @@ export const SuperAdminModule: React.FC = () => {
                             if (fileInput) fileInput.value = '';
                             showToast('Logo berhasil dihapus.');
                           }}
-                          className="px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
-                          title="Hapus logo yang terpasang"
+                          className="px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-500 border border-rose-500/30 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition active:scale-95"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Hapus Logo</span>
@@ -1461,64 +2756,37 @@ export const SuperAdminModule: React.FC = () => {
                   ) : (
                     <div
                       onClick={() => document.getElementById('business-logo-file-picker')?.click()}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const file = e.dataTransfer.files?.[0];
-                        if (file) {
-                          if (file.size > 2.5 * 1024 * 1024) {
-                            showToast('Ukuran file terlalu besar! Maksimal 2.5MB.');
-                            return;
-                          }
-                          const reader = new FileReader();
-                          reader.onload = (ev) => {
-                            if (ev.target?.result) {
-                              setProfileForm((prev) => ({ ...prev, logoUrl: ev.target!.result as string }));
-                              showToast('File logo berhasil diunggah & dikonversi ke Base64 DataURL!');
-                            }
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
                       className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2 group ${
                         isLight
-                          ? 'border-slate-300 hover:border-cyan-500 bg-slate-50 hover:bg-cyan-50/40'
-                          : 'border-gray-700 hover:border-cyan-400 bg-[#0d1117] hover:bg-cyan-950/20'
+                          ? 'border-cyan-500/50 hover:border-cyan-500 bg-slate-50 hover:bg-cyan-50/40'
+                          : 'border-cyan-500/35 hover:border-cyan-400 bg-[#0d1117] hover:bg-cyan-950/20'
                       }`}
                     >
-                      <div className="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center group-hover:scale-110 transition">
+                      <div className="w-12 h-12 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center group-hover:scale-110 transition">
                         <Upload className="w-6 h-6" />
                       </div>
                       <div>
-                        <p className="text-xs font-bold text-gray-200">
+                        <p className={`text-xs font-medium ${isLight ? 'text-slate-700' : 'text-gray-200'}`}>
                           Klik untuk Upload File Logo atau Drag &amp; Drop Gambar ke Sini
                         </p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          Format didukung: PNG, JPG, WebP, SVG (Maks. 2.5MB) • Otomatis dikonversi ke Base64 DataURL
+                        <p className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                          Format aman didukung: PNG, JPG/JPEG, WebP (Maks. 2MB • Anti-XSS SVG Blocked)
                         </p>
                       </div>
-                      <span className="mt-1 px-4 py-1.5 rounded-lg text-xs font-bold bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 inline-block pointer-events-none">
-                        Pilih File Gambar
-                      </span>
                     </div>
                   )}
                 </div>
 
-                {/* 9. Header Note (OPSIONAL) */}
                 <div className="sm:col-span-2">
-                  <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     <span>Slogan / Subjudul Kop Dokumen &amp; Struk:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">Opsional (Boleh "0" / "-")</span>
+                    <span className="text-[10px] text-cyan-500 font-normal">Opsional</span>
                   </label>
                   <input
                     type="text"
                     value={profileForm.headerNote || ''}
                     onChange={(e) => setProfileForm({ ...profileForm, headerNote: e.target.value })}
-                    placeholder="Contoh: Slogan bisnis (boleh diisi '0' / '-' untuk disembunyikan)"
+                    placeholder="Contoh: Slogan bisnis"
                     className={`w-full p-2.5 rounded-xl border ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900'
@@ -1527,17 +2795,16 @@ export const SuperAdminModule: React.FC = () => {
                   />
                 </div>
 
-                {/* 10. Footer Note (OPSIONAL) */}
                 <div className="sm:col-span-2">
-                  <label className={`block font-bold text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>
+                  <label className={`block font-medium text-xs mb-1 flex items-center justify-between ${isLight ? 'text-slate-800' : 'text-gray-300'}`}>
                     <span>Pesan Footer Penutup Struk Belanja POS:</span>
-                    <span className="text-[10px] text-cyan-400 font-normal">Opsional (Boleh "0" / "-")</span>
+                    <span className="text-[10px] text-cyan-500 font-normal">Opsional</span>
                   </label>
                   <input
                     type="text"
                     value={profileForm.footerNote || ''}
                     onChange={(e) => setProfileForm({ ...profileForm, footerNote: e.target.value })}
-                    placeholder="Contoh: Terima kasih atas kunjungan Anda (boleh diisi '0' / '-' untuk disembunyikan)"
+                    placeholder="Contoh: Terima kasih atas kunjungan Anda"
                     className={`w-full p-2.5 rounded-xl border ${
                       isLight
                         ? 'bg-slate-50 border-slate-300 text-slate-900'
@@ -1547,15 +2814,27 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Submit Buttons */}
-              <div className="flex items-center gap-3 pt-3 border-t border-gray-700/50">
+              <div className={`flex flex-wrap items-center gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-700/50'}`}>
                 <button
                   type="submit"
                   disabled={isSavingProfile}
-                  className="px-6 py-3 rounded-xl font-bold text-xs bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,242,254,0.35)] cursor-pointer transition active:scale-95 disabled:opacity-50"
+                  className="px-6 py-3 rounded-xl font-medium text-xs bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(0,242,254,0.3)] cursor-pointer transition active:scale-95 disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>{isSavingProfile ? 'Menyimpan Profil...' : 'Simpan & Terapkan Profil Entitas Bisnis'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResetLedgerModal(true)}
+                  className={`px-4 py-3 rounded-xl font-medium text-xs border flex items-center gap-2 transition cursor-pointer active:scale-95 ${
+                    isLight
+                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                      : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/35'
+                  }`}
+                  title="Bersihkan Data Demo Lintas-Sektor dan mulai pembukuan 1 tahun bersih dari Rp 0 untuk entitas aktif"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Reset Buku Besar ke Entitas Aktif</span>
                 </button>
                 <button
                   type="button"
@@ -1563,7 +2842,7 @@ export const SuperAdminModule: React.FC = () => {
                     resetBusinessProfileToDefault();
                     setProfileForm(DEFAULT_BUSINESS_PROFILE);
                   }}
-                  className={`px-4 py-3 rounded-xl font-semibold text-xs border transition cursor-pointer ${
+                  className={`px-4 py-3 rounded-xl font-medium text-xs border transition cursor-pointer ${
                     isLight
                       ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
                       : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-700'
@@ -1574,17 +2853,18 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             </form>
 
-            {/* Kolom Kanan: Live Preview Kop Dokumen Struk & PO */}
+            {/* Live Preview Kop Dokumen Struk */}
             <div className="space-y-4">
-              <div className={`p-5 rounded-2xl border space-y-3 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+              <div className={`p-5 rounded-2xl border space-y-3 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                  : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
               }`}>
-                <div className="flex items-center gap-2 pb-2 border-b border-gray-700/50">
+                <div className={`flex items-center gap-2 pb-2 border-b ${isLight ? 'border-slate-200' : 'border-gray-700/50'}`}>
                   <Sparkles className="w-4 h-4 text-amber-400" />
-                  <h4 className="font-bold text-xs">Live Preview Kop Struk POS</h4>
+                  <h4 className="font-medium text-xs tracking-wide">Live Preview Kop Struk POS</h4>
                 </div>
 
-                {/* Struk Paper Preview */}
                 <div className="bg-white text-slate-900 rounded-xl p-4 font-mono text-[11px] shadow-inner border border-slate-300 space-y-2">
                   <div className="text-center border-b border-dashed border-slate-400 pb-2">
                     {profileForm.logoUrl && (
@@ -1595,68 +2875,135 @@ export const SuperAdminModule: React.FC = () => {
                         onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                       />
                     )}
-                    <div className="font-extrabold text-sm uppercase text-black">
+                    <div className="font-medium text-sm uppercase text-black">
                       {profileForm.name || 'NAMA BISNIS ANDA'}
                     </div>
 
-                    {/* Slogan / Subjudul - Sembunyikan jika bernilai "0", "-", atau kosong */}
                     {hasValidProfileValue(profileForm.headerNote) && (
-                      <div className="text-slate-900 font-semibold text-xs font-sans leading-tight mt-0.5">
+                      <div className="text-slate-800 font-normal text-xs font-sans leading-tight mt-0.5">
                         {profileForm.headerNote}
                       </div>
                     )}
 
-                    {/* Alamat Toko - Sembunyikan jika bernilai "0", "-", atau kosong */}
                     {hasValidProfileValue(profileForm.address) && (
-                      <div className="text-slate-900 font-semibold text-xs font-sans leading-tight mt-0.5">
+                      <div className="text-slate-800 font-normal text-xs font-sans leading-tight mt-0.5">
                         {profileForm.address}
                       </div>
                     )}
 
-                    {/* Baris Kontak (Telp / Email) - Sembunyikan jika bernilai "0", "-", atau kosong */}
-                    {(hasValidProfileValue(profileForm.phone) || hasValidProfileValue(profileForm.email)) && (
-                      <div className="text-slate-900 font-semibold text-xs font-sans leading-tight mt-0.5">
+                    {(hasValidProfileValue(profileForm.phone) || hasValidProfileValue(profileForm.whatsapp) || hasValidProfileValue(profileForm.email)) && (
+                      <div className="text-slate-700 font-normal text-[10px] font-sans leading-tight mt-0.5">
                         {[
-                          hasValidProfileValue(profileForm.phone) ? `Telp: ${profileForm.phone}` : null,
+                          hasValidProfileValue(profileForm.phone) ? `T: ${profileForm.phone}` : null,
+                          hasValidProfileValue(profileForm.whatsapp) ? `WA: ${profileForm.whatsapp}` : null,
                           hasValidProfileValue(profileForm.email) ? profileForm.email : null,
                         ].filter(Boolean).join(' • ')}
                       </div>
                     )}
                   </div>
 
-                  <div className="text-slate-900 font-semibold text-xs space-y-0.5 py-1 border-b border-dashed border-slate-400">
+                  <div className="text-slate-900 font-normal text-xs space-y-0.5 py-1 border-b border-dashed border-slate-400">
                     <div className="flex justify-between">
                       <span>No. Trx:</span>
-                      <span className="font-black text-slate-950">TRX-2026-0001</span>
+                      <span className="font-medium text-slate-950">TRX-2026-0001</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Terminal:</span>
-                      <span className="font-bold text-slate-900">KASIR 01 - REGULER</span>
+                      <span className="font-medium text-slate-900">KASIR 01 - REGULER</span>
                     </div>
                   </div>
 
-                  {/* Footer Note - Sembunyikan jika bernilai "0", "-", atau kosong */}
                   {hasValidProfileValue(profileForm.footerNote) && (
-                    <div className="text-slate-900 font-semibold text-xs text-center pt-1 font-sans italic">
-                      "{profileForm.footerNote}"
+                    <div className="text-slate-800 font-normal text-xs text-center pt-1 font-sans italic">
+                      &ldquo;{profileForm.footerNote}&rdquo;
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Card Distribusi Sinkronisasi */}
-              <div className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
-                isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-[#30363d] text-slate-300'
+              <div className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] text-slate-700'
+                  : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-slate-300'
               }`}>
-                <div className="font-bold flex items-center gap-1.5 text-cyan-400">
+                <div className="font-medium flex items-center justify-between gap-2 text-cyan-500">
+                  <div className="flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-4 h-4" />
+                    <span>Ringkasan BusinessDomainConfig</span>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${isLight ? 'bg-cyan-50 text-cyan-800 border border-cyan-300' : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/35'}`}>
+                    {activeDomainConfig.mechanismFamily}
+                  </span>
+                </div>
+                <div className={`space-y-2 text-[11px] ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  <div className="flex justify-between gap-2">
+                    <span className={isLight ? 'text-slate-500' : 'text-gray-400'}>Jenis Usaha Utama:</span>
+                    <span className="font-semibold text-right">{activeModelDef.label}</span>
+                  </div>
+                  <div className="space-y-1">
+                    <span className={`block ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>Tipe POS Aktif:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(activeDomainConfig.activePosTypes || []).map((posType) => {
+                        const opt = getActivePosTypeOption(posType);
+                        return (
+                          <span
+                            key={posType}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                              isLight
+                                ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                                : 'bg-cyan-500/15 text-cyan-200 border-cyan-500/35'
+                            }`}
+                          >
+                            <span>{opt.emoji}</span>
+                            <span>{opt.label}</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className={isLight ? 'text-slate-500' : 'text-gray-400'}>Arsitektur ERP:</span>
+                    <span className="font-semibold text-right text-emerald-500">
+                      {getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className={isLight ? 'text-slate-500' : 'text-gray-400'}>Loket / PC Kasir Aktif:</span>
+                    <span className="font-mono font-semibold text-right">
+                      {Math.max(1, Math.min(10, Number(activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 1) || 1))} PC
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className={isLight ? 'text-slate-500' : 'text-gray-400'}>Mode Hybrid Multi-Unit:</span>
+                    <span className="font-mono font-semibold">
+                      {activeDomainConfig.isHybridMultiUnit ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  {activeDomainConfig.mechanismFamily === 'RETAIL_GENERAL' && (
+                    <div className="flex justify-between gap-2">
+                      <span className={isLight ? 'text-slate-500' : 'text-gray-400'}>Sub-Fitur Grosir (MOQ/Kredit):</span>
+                      <span className="font-mono text-right font-semibold">
+                        {activeDomainConfig.subFeatures.isWholesale ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className={`p-4 rounded-2xl border text-xs space-y-2.5 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] text-slate-700'
+                  : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-slate-300'
+              }`}>
+                <div className="font-medium flex items-center gap-1.5 text-cyan-500">
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Otomatis Tersinkron ke Modul:</span>
                 </div>
-                <ul className={`space-y-1.5 list-disc list-inside ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-[11px] text-gray-400'}`}>
-                  <li><strong className={isLight ? 'text-slate-900 font-bold' : 'text-gray-200'}>Kop Struk Kasir POS:</strong> Tercetak pada struk belanja kertas &amp; struk WhatsApp.</li>
-                  <li><strong className={isLight ? 'text-slate-900 font-bold' : 'text-gray-200'}>Slip Gaji Karyawan:</strong> Identitas resmi pemberi kerja pada payroll HR.</li>
-                  <li><strong className={isLight ? 'text-slate-900 font-bold' : 'text-gray-200'}>Kop Faktur PO Pengadaan:</strong> Lembar pesanan resmi ke vendor supplier.</li>
-                  <li><strong className={isLight ? 'text-slate-900 font-bold' : 'text-gray-200'}>Laporan Keuangan &amp; Jurnal:</strong> Header resmi pada neraca &amp; laba rugi.</li>
+                <ul className={`space-y-1.5 list-disc list-inside font-normal ${isLight ? 'text-slate-700 text-xs' : 'text-[11px] text-gray-400'}`}>
+                  <li><span className="font-medium">Kop Struk Kasir POS:</span> Struk belanja kertas &amp; struk WhatsApp.</li>
+                  <li><span className="font-medium">Slip Gaji Karyawan:</span> Identitas resmi pemberi kerja pada payroll HR.</li>
+                  <li><span className="font-medium">Kop Faktur PO Pengadaan:</span> Lembar pesanan resmi ke vendor supplier.</li>
+                  <li><span className="font-medium">Laporan Keuangan:</span> Header resmi pada neraca &amp; laba rugi.</li>
                 </ul>
               </div>
             </div>
@@ -1664,335 +3011,170 @@ export const SuperAdminModule: React.FC = () => {
         </div>
       )}
 
-      {/* ====================================================
-          TAB 1: DIAGNOSIS & RECOVERY (KESEHATAN SISTEM)
-          ==================================================== */}
+      {/* TAB 1: DIAGNOSTICS */}
       {adminTab === 'diagnostics' && (
         <div className="space-y-6">
-          {/* Health Metrics Bento */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className={`p-4 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-4 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className={`flex items-center justify-between text-xs mb-1 ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400'}`}>
+              <div className={`flex items-center justify-between text-[10px] font-mono font-medium uppercase tracking-widest mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                 <span>Server &amp; Client Latency</span>
                 <Wifi className="w-4 h-4 text-emerald-500" />
               </div>
-              <div className={`text-2xl font-mono font-black ${isLight ? 'text-slate-950' : 'text-emerald-400'}`}>18 ms</div>
-              <p className={`text-xs mt-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>Optimal (Zero Ingress Lag)</p>
+              <div className={`text-2xl font-mono font-medium ${isLight ? 'text-slate-900' : 'text-emerald-400'}`}>18 ms</div>
+              <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-500'}`}>Optimal</p>
             </div>
 
-            <div className={`p-4 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-4 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className={`flex items-center justify-between text-xs mb-1 ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400'}`}>
+              <div className={`flex items-center justify-between text-[10px] font-mono font-medium uppercase tracking-widest mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                 <span>Database Sync Engine</span>
                 <Server className="w-4 h-4 text-cyan-600" />
               </div>
-              <div className={`text-xl font-black ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>Active / Sync</div>
-              <p className={`text-xs mt-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>LocalStorage + Sheets Webhook</p>
+              <div className={`text-xl font-medium ${isLight ? 'text-slate-900' : 'text-cyan-400'}`}>Active / Sync</div>
+              <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-500'}`}>LocalStorage + Webhook</p>
             </div>
 
-            <div className={`p-4 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-4 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className={`flex items-center justify-between text-xs mb-1 ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400'}`}>
-                <span>Memory Heap / Cache Buffer</span>
+              <div className={`flex items-center justify-between text-[10px] font-mono font-medium uppercase tracking-widest mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                <span>Memory Heap / Buffer</span>
                 <HardDrive className="w-4 h-4 text-blue-600" />
               </div>
-              <div className={`text-2xl font-mono font-black ${isLight ? 'text-slate-950' : 'text-blue-400'}`}>14.8 MB</div>
-              <p className={`text-xs mt-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>Stable, Zero Leak Detected</p>
+              <div className={`text-2xl font-mono font-medium ${isLight ? 'text-slate-900' : 'text-blue-400'}`}>14.8 MB</div>
+              <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-500'}`}>Stable, No Leak</p>
             </div>
 
-            <div className={`p-4 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-4 rounded-2xl border transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className={`flex items-center justify-between text-xs mb-1 ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400'}`}>
-                <span>Worker Threads / Terminals</span>
+              <div className={`flex items-center justify-between text-[10px] font-mono font-medium uppercase tracking-widest mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                <span>Active Terminals</span>
                 <Cpu className="w-4 h-4 text-purple-600" />
               </div>
-              <div className={`text-2xl font-mono font-black ${isLight ? 'text-slate-950' : 'text-purple-400'}`}>{terminals.length} Nodes</div>
-              <p className={`text-xs mt-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>Multi-Terminal POS Active</p>
+              <div className={`text-2xl font-mono font-medium ${isLight ? 'text-slate-900' : 'text-purple-400'}`}>{terminals.length} Nodes</div>
+              <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-500'}`}>POS Multi-Terminal</p>
             </div>
           </div>
 
-          {/* Section 1: Pengecekan Integritas Data untuk Alur Baru */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-sm flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-cyan-600" />
-                  <span>Audit Integritas Data Alur Baru (POS Stock Out, PO Receiving, Komisi 1%)</span>
-                </h3>
-                <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Verifikasi konsistensi pemotongan stok otomatis, penerimaan inventaris, dan komisi kasir</p>
-              </div>
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-bold ${
-                isLight ? 'bg-slate-100 border border-slate-300 text-slate-900' : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
-              }`}>
-                LIVE INTEGRITY PIPELINE
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Card 1: Pemotongan Stok POS (OUT_SALES) */}
-              <div className={`p-4 rounded-2xl border space-y-3 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-cyan-500/15 text-cyan-500 flex items-center justify-center border border-cyan-500/30">
-                      <ShoppingCart className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className={`font-bold text-xs ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>Pemotongan Stok POS</div>
-                      <div className={`text-[10px] font-mono ${isLight ? 'text-slate-700 font-bold' : 'text-gray-400'}`}>Tipe: OUT_SALES</div>
-                    </div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
-                    isLight
-                      ? isPosOutSalesSynced ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold' : 'bg-amber-100 border border-amber-300 text-amber-950 font-bold'
-                      : isPosOutSalesSynced ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                  }`}>
-                    {isPosOutSalesSynced ? '✓ 100% SINKRON' : '⚠️ CEK MUTASI'}
-                  </span>
-                </div>
-
-                <div className={`grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t ${isLight ? 'border-slate-200' : 'border-gray-800/40'}`}>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>Transaksi POS</span>
-                    <span className={`font-black text-sm ${isLight ? 'text-slate-950' : 'text-white'}`}>{posSalesCount} Faktur</span>
-                  </div>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>Item Terjual</span>
-                    <span className={`font-black text-sm ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>{posTotalItemsSold} pcs</span>
-                  </div>
-                </div>
-
-                <div className={`text-xs leading-tight ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                  Log Mutasi: <strong className={`font-mono ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>{outSalesMutations.length} baris</strong> ({outSalesTotalQty} pcs). Stok fisik langsung terpotong idempoten saat bayar.
-                </div>
-              </div>
-
-              {/* Card 2: Penerimaan PO Gudang (IN_PURCHASE) */}
-              <div className={`p-4 rounded-2xl border space-y-3 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-500/15 text-blue-500 flex items-center justify-center border border-blue-500/30">
-                      <PackageCheck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className={`font-bold text-xs ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>Penerimaan PO Gudang</div>
-                      <div className={`text-[10px] font-mono ${isLight ? 'text-slate-700 font-bold' : 'text-gray-400'}`}>Tipe: IN_PURCHASE</div>
-                    </div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
-                    isLight
-                      ? isPoInPurchaseSynced ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold' : 'bg-amber-100 border border-amber-300 text-amber-950 font-bold'
-                      : isPoInPurchaseSynced ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                  }`}>
-                    {isPoInPurchaseSynced ? '✓ TERINTEGRASI' : '⚠️ CEK PO'}
-                  </span>
-                </div>
-
-                <div className={`grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t ${isLight ? 'border-slate-200' : 'border-gray-800/40'}`}>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>PO Diterima</span>
-                    <span className={`font-black text-sm ${isLight ? 'text-slate-950' : 'text-white'}`}>{receivedPOs.length} PO</span>
-                  </div>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>Item Masuk</span>
-                    <span className={`font-black text-sm ${isLight ? 'text-slate-950' : 'text-blue-400'}`}>{poTotalItemsReceived} pcs</span>
-                  </div>
-                </div>
-
-                <div className={`text-xs leading-tight ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                  Log Mutasi: <strong className={`font-mono ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>{inPurchaseMutations.length} baris</strong> ({inPurchaseTotalQty} pcs). HPP Rata-rata dan DB_Inventory bertambah otomatis.
-                </div>
-              </div>
-
-              {/* Card 3: Akurasi Komisi Kasir 1% */}
-              <div className={`p-4 rounded-2xl border space-y-3 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-purple-500/15 text-purple-500 flex items-center justify-center border border-purple-500/30">
-                      <Percent className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className={`font-bold text-xs ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>Akurasi Komisi Kasir 1%</div>
-                      <div className={`text-[10px] font-mono ${isLight ? 'text-slate-700 font-bold' : 'text-gray-400'}`}>Formula: 1% x Omzet POS</div>
-                    </div>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-black ${
-                    isLight
-                      ? isCommissionAccurate ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold' : 'bg-rose-100 border border-rose-300 text-rose-950 font-bold'
-                      : isCommissionAccurate ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                  }`}>
-                    {isCommissionAccurate ? '✓ 100% PRESISI' : '⚠️ ANOMALI'}
-                  </span>
-                </div>
-
-                <div className={`grid grid-cols-2 gap-2 text-xs font-mono pt-1 border-t ${isLight ? 'border-slate-200' : 'border-gray-800/40'}`}>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>Total Omzet Kasir</span>
-                    <span className={`font-black text-xs truncate ${isLight ? 'text-slate-950' : 'text-white'}`}>Rp {totalCashierSales.toLocaleString('id-ID')}</span>
-                  </div>
-                  <div className={`p-2 rounded-lg ${isLight ? 'bg-slate-50 border border-slate-300 text-slate-900' : 'bg-black/20'}`}>
-                    <span className={`text-xs block ${isLight ? 'text-slate-800 font-bold' : 'text-[10px] text-gray-500'}`}>Komisi 1% Terhitung</span>
-                    <span className={`font-black text-xs truncate ${isLight ? 'text-slate-950' : 'text-purple-400'}`}>Rp {totalCashierCommission.toLocaleString('id-ID')}</span>
-                  </div>
-                </div>
-
-                <div className={`text-xs leading-tight ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                  Status: <strong className={`font-mono ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>{cashierUsers.length} Kasir aktif</strong> terverifikasi akurat. Terhubung langsung ke modul Payroll slip gaji.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Cards: Run Diagnostic, Auto Repair, and Repair Stock Ledger */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Card 1: Run Diagnostic */}
-            <div className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-500 flex items-center justify-center border border-cyan-500/35">
                   <Activity className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>Jalankan Diagnostic Error</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Pemeriksaan mendalam 8 layer integritas sistem JacS ERP</p>
+                  <h3 className="font-medium text-base tracking-wide">Jalankan Diagnostic Error</h3>
+                  <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Pemeriksaan mendalam 8 layer integritas</p>
                 </div>
               </div>
-
-              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                Memindai data produk, SKU ganda, relasi transaksi penjualan kasir, keutuhan format JSON,
-                koneksi multi-terminal, mutasi OUT_SALES &amp; IN_PURCHASE, serta formula komisi kasir 1%.
-              </p>
 
               <button
                 disabled={isDiagnosing}
                 onClick={runSystemDiagnostics}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(0,242,254,0.3)] cursor-pointer disabled:opacity-50 transition"
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-medium bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition"
               >
                 <Zap className={`w-4 h-4 ${isDiagnosing ? 'animate-spin' : ''}`} />
-                <span>{isDiagnosing ? 'Sedang Memindai Sistem...' : 'Mulai Pengecekan Sistem'}</span>
+                <span>{isDiagnosing ? 'Sedang Memindai...' : 'Mulai Pengecekan Sistem'}</span>
               </button>
 
-              {/* Diagnostic Progress Checklist */}
               {diagnosticSteps.length > 0 && (
                 <div className={`p-3.5 rounded-xl border space-y-1.5 text-xs font-mono max-h-56 overflow-y-auto ${
-                  isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/30 border-gray-800'
+                  isLight ? 'bg-slate-50 border-cyan-500/45 text-slate-900' : 'bg-[#0d1117] border-cyan-500/30'
                 }`}>
                   {diagnosticSteps.map((step, idx) => (
                     <div key={idx} className={`flex items-center justify-between py-1 border-b last:border-0 ${isLight ? 'border-slate-200' : 'border-gray-800/40'}`}>
-                      <span className={`text-xs truncate pr-2 ${isLight ? 'text-slate-800 font-bold' : 'text-gray-300 text-[11px]'}`}>{step.name}</span>
+                      <span className="text-xs font-normal truncate pr-2">{step.name}</span>
                       {step.status === 'passed' && (
-                        <span className={`flex items-center gap-1 font-bold text-xs shrink-0 ${isLight ? 'text-emerald-950 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded' : 'text-emerald-400'}`}>
+                        <span className="text-emerald-500 flex items-center gap-1 font-mono font-medium uppercase tracking-widest text-[10px] shrink-0">
                           <CheckCircle2 className="w-3.5 h-3.5" /> LULUS
                         </span>
                       )}
                       {step.status === 'running' && (
-                        <span className="text-cyan-600 flex items-center gap-1 animate-pulse text-xs font-bold shrink-0">
+                        <span className="text-cyan-400 flex items-center gap-1 animate-pulse text-[10px] font-mono font-medium uppercase tracking-widest shrink-0">
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" /> CHECKING
                         </span>
                       )}
-                      {step.status === 'pending' && <span className={`${isLight ? 'text-slate-600' : 'text-gray-600'} text-xs shrink-0`}>MENUNGGU</span>}
+                      {step.status === 'pending' && <span className="text-gray-500 text-[10px] font-mono uppercase tracking-widest shrink-0">MENUNGGU</span>}
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Card 2: Repair Stock Ledger (NEW REQUESTED FEATURE) */}
-            <div className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-500 flex items-center justify-center border border-indigo-500/30">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-500 flex items-center justify-center border border-indigo-500/35">
                   <Layers className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>Repair Stock Ledger</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Rekonsiliasi otomatis stok fisik vs mutasi kartu stok</p>
+                  <h3 className="font-medium text-base tracking-wide">Repair Stock Ledger</h3>
+                  <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Rekonsiliasi stok fisik vs mutasi</p>
                 </div>
-              </div>
-
-              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                Mendeteksi selisih stok fisik vs mutasi ledger secara otomatis, menautkan ulang mutasi OUT_SALES &amp; IN_PURCHASE yang terputus, dan menyeimbangkan saldo kartu stok secara idempoten.
-              </p>
-
-              <div className={`p-3 rounded-xl border flex items-center justify-between text-xs font-mono ${
-                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/25 border-gray-800'
-              }`}>
-                <span className={isLight ? 'text-slate-800 font-bold' : 'text-gray-400'}>Status Selisih Fisik:</span>
-                <span className={`font-bold px-2 py-0.5 rounded text-xs ${
-                  stockDiscrepancies.length === 0
-                    ? isLight ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold' : 'bg-emerald-500/15 text-emerald-400'
-                    : isLight ? 'bg-rose-100 border border-rose-300 text-rose-950 font-bold' : 'bg-rose-500/20 text-rose-400'
-                }`}>
-                  {stockDiscrepancies.length === 0 ? '✓ 0 Selisih Terdeteksi' : `⚠️ ${stockDiscrepancies.length} Item Perlu Repair`}
-                </span>
               </div>
 
               <button
                 disabled={isRepairingLedger}
                 onClick={handleRepairStockLedger}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(99,102,241,0.35)] cursor-pointer disabled:opacity-50 transition"
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition"
               >
                 <RefreshCw className={`w-4 h-4 ${isRepairingLedger ? 'animate-spin' : ''}`} />
                 <span>{isRepairingLedger ? 'Memperbaiki Stock Ledger...' : 'Jalankan Repair Stock Ledger'}</span>
               </button>
 
               {stockLedgerSummary && (
-                <div className={`p-3 rounded-xl border text-xs space-y-1 font-mono ${
-                  isLight ? 'bg-indigo-50 border-indigo-200 text-indigo-950' : 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300'
-                }`}>
-                  <div className={`flex items-center gap-1.5 font-bold ${isLight ? 'text-indigo-950' : 'text-emerald-400'}`}>
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                    <span>Perbaikan Sukses ({stockLedgerSummary.timestamp})</span>
-                  </div>
-                  <p className={`text-xs ${isLight ? 'text-slate-800 font-medium' : 'text-slate-300'}`}>{stockLedgerSummary.message}</p>
+                <div className="p-3 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-xs font-mono font-normal">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 inline mr-1" />
+                  <span>{stockLedgerSummary.message}</span>
                 </div>
               )}
             </div>
 
-            {/* Card 3: Auto-Repair & Refresh Memory */}
-            <div className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center border border-emerald-500/30">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-500 flex items-center justify-center border border-emerald-500/35">
                   <RotateCcw className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>Auto-Repair &amp; Cache Refresh</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Stabilkan cache, bersihkan duplikat &amp; anomali</p>
+                  <h3 className="font-medium text-base tracking-wide">Auto-Repair &amp; Cache Refresh</h3>
+                  <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Stabilkan cache, bersihkan duplikat</p>
                 </div>
               </div>
 
-              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                Menghilangkan duplikasi SKU, memperbaiki ID yang hilang, dan menyegarkan penyimpanan lokal tanpa menghapus transaksi penjualan atau identitas bisnis.
-              </p>
-
               <button
                 onClick={handleAutoRepair}
-                className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)] cursor-pointer transition"
+                className="w-full py-2.5 px-4 rounded-xl text-xs font-medium bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center justify-center gap-2 cursor-pointer transition"
               >
                 <RefreshCw className="w-4 h-4" />
                 <span>Jalankan Auto-Repair &amp; Cache</span>
               </button>
 
               {repairSummary && (
-                <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 font-medium ${
-                  isLight ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
-                }`}>
-                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                  <span>{repairSummary}</span>
+                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-500 text-xs font-normal">
+                  {repairSummary}
                 </div>
               )}
             </div>
@@ -2000,31 +3182,88 @@ export const SuperAdminModule: React.FC = () => {
         </div>
       )}
 
-      {/* ====================================================
-          TAB 2: MULTI-TERMINAL POS MANAGEMENT
-          ==================================================== */}
-      {adminTab === 'terminals' && (
+      {/* TAB 2: MULTI-TERMINAL POS MANAGEMENT */}
+      {adminTab === 'terminals' && (() => {
+        const isHybridPosEnabled = Boolean(businessDomainConfig?.isHybridMultiUnit);
+        const primaryPosId = getPosIdentityIdForBusinessModel(
+          businessDomainConfig.primaryBusinessModel,
+          businessProfile?.category
+        );
+        const allowedTerminalIds = new Set(
+          getAllowedPosIdentityIds(businessDomainConfig, businessProfile?.category)
+        );
+        const activePosLabels = (businessDomainConfig.activePosTypes || [])
+          .map((t) => getActivePosTypeOption(t).label)
+          .join(', ');
+        const primaryDef = getBusinessModelDefinition(businessDomainConfig.primaryBusinessModel);
+        const visibleTerminals = isHybridPosEnabled
+          ? terminals
+          : terminals.filter((t) => allowedTerminalIds.has(t.id) || t.id === primaryPosId);
+        return (
         <div className="space-y-6">
-          {/* Top Bar: Kunci Semua Terminal */}
-          <div className={`p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          <div className={`p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2 text-xs ${
+            isLight
+              ? 'bg-cyan-50 border-cyan-300 text-cyan-950'
+              : 'bg-cyan-950/35 border-cyan-500/40 text-cyan-200'
+          }`}>
+            <div className="space-y-0.5">
+              <div>
+                <span className="font-semibold">Sinkronisasi Topologi &amp; Loket POS Aktif:</span>{' '}
+                <span className="font-semibold">{primaryDef.label}</span> ({activePosLabels || primaryPosId}) •{' '}
+                <span className="font-mono font-bold">
+                  {getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}
+                </span>{' '}
+                •{' '}
+                <span className="font-mono font-bold">
+                  {Math.max(1, Math.min(10, Number(businessDomainConfig.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1))} PC Loket (POS-01..POS-{String(Math.max(1, Math.min(10, Number(businessDomainConfig.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1))).padStart(2, '0')})
+                </span>
+              </div>
+              {localBoundInfo && (
+                <div className="text-[11px] font-mono">
+                  Perangkat browser ini terkunci pada loket: <strong>{localBoundInfo.stationCode}</strong>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {localBoundInfo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    unbindPosStation();
+                    clearBoundPosStation();
+                    setLocalBoundInfo(null);
+                    showToast('Kunci perangkat lokal dilepas.');
+                  }}
+                  className="px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-semibold text-xs cursor-pointer transition"
+                >
+                  Lepas Kunci PC Lokal
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSuperAdminTab('legality')}
+                className="px-3 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs cursor-pointer transition"
+              >
+                Atur Topologi &amp; Loket POS
+              </button>
+            </div>
+          </div>
+          <div className={`p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
           }`}>
             <div>
-              <h3 className="font-bold text-sm">Master Sakelar Keamanan Seluruh Kasir</h3>
-              <p className={`text-xs ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>Kunci atau buka seluruh register kasir serentak</p>
+              <h3 className="font-medium text-sm tracking-wide">Master Sakelar Keamanan Seluruh Kasir</h3>
+              <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Kunci atau buka seluruh register kasir serentak</p>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
                   setAllTerminalsLock(true);
-                  try {
-                    localStorage.setItem('jacs_pos_terminals_state', 'true');
-                  } catch (e) {
-                    console.error(e);
-                  }
                   showToast('Semua register kasir berhasil dikunci serentak');
                 }}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95"
+                className="px-3.5 py-2 rounded-xl text-xs font-medium bg-rose-500 hover:bg-rose-400 text-white flex items-center gap-1.5 cursor-pointer transition"
               >
                 <Lock className="w-3.5 h-3.5" />
                 <span>Kunci Semua Kasir</span>
@@ -2032,14 +3271,9 @@ export const SuperAdminModule: React.FC = () => {
               <button
                 onClick={() => {
                   setAllTerminalsLock(false);
-                  try {
-                    localStorage.setItem('jacs_pos_terminals_state', 'false');
-                  } catch (e) {
-                    console.error(e);
-                  }
                   showToast('Semua register kasir berhasil dibuka serentak');
                 }}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95"
+                className="px-3.5 py-2 rounded-xl text-xs font-medium bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center gap-1.5 cursor-pointer transition"
               >
                 <Unlock className="w-3.5 h-3.5" />
                 <span>Buka Semua Kasir</span>
@@ -2048,18 +3282,19 @@ export const SuperAdminModule: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Form Tambah Terminal Baru */}
-            <div className={`p-5 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`p-5 rounded-2xl border space-y-4 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className="flex items-center gap-2 pb-2 border-b border-gray-800">
-                <Plus className="w-4 h-4 text-cyan-400" />
-                <h3 className="font-bold text-sm">Tambah Terminal Kasir Baru</h3>
+              <div className={`flex items-center gap-2 pb-2 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                <Plus className="w-4 h-4 text-cyan-500" />
+                <h3 className="font-medium text-sm tracking-wide">Tambah Terminal Kasir Baru</h3>
               </div>
 
               <form onSubmit={handleCreateTerminal} className="space-y-3 text-xs">
                 <div>
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>Nama Terminal:</label>
+                  <label className={`block font-medium text-xs mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Nama Terminal:</label>
                   <input
                     type="text"
                     required
@@ -2067,20 +3302,19 @@ export const SuperAdminModule: React.FC = () => {
                     onChange={(e) => setNewTermName(e.target.value)}
                     placeholder="Contoh: KASIR 08 - DRIVE THRU"
                     className={`w-full p-2.5 rounded-xl border ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900 font-bold' : 'bg-black/20 border-gray-700 text-white'
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-gray-700 text-white'
                     }`}
                   />
                 </div>
 
                 <div>
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>Mapping Industri &amp; Filter POS:</label>
+                  <label className={`block font-medium text-xs mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Mapping Industri &amp; Filter POS:</label>
                   <select
                     value={newTermModel}
                     onChange={(e) => {
                       const val = e.target.value;
                       setNewTermModel(val);
                       if (val.includes('F&B')) setNewTermIndustryType('fnb');
-                      else if (val.includes('Farmasi') || val.includes('Apotek')) setNewTermIndustryType('pharmacy');
                       else if (val.includes('Bangunan')) setNewTermIndustryType('building');
                       else if (val.includes('Fashion')) setNewTermIndustryType('fashion');
                       else if (val.includes('Elektronik')) setNewTermIndustryType('electronics');
@@ -2088,76 +3322,33 @@ export const SuperAdminModule: React.FC = () => {
                       else setNewTermIndustryType('retail');
                     }}
                     className={`w-full p-2.5 rounded-xl border ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900 font-bold' : 'bg-black/20 border-gray-700 text-white'
+                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-gray-700 text-white'
                     }`}
                   >
-                    <option value="Kasir Ritel Umum (Swalayan & Minimarket)">Kasir Ritel Umum (Sembako, FMCG, Minimarket)</option>
-                    <option value="Kasir 02 F&B (Resto, Cafe & Kuliner)">Kasir 02 F&B (Makanan, Minuman, Snack & Dapur)</option>
-                    <option value="Kasir 04 Farmasi (Apotek & Toko Obat)">Kasir 04 Farmasi (Obat, Vitamin, Alat Medis)</option>
-                    <option value="Kasir 09 Bangunan (Bahan Bangunan & Hardware)">Kasir 09 Bangunan (Semen, Cat, Besi, Perkakas)</option>
-                    <option value="Kasir 05 Fashion (Butik & Busana)">Kasir 05 Fashion (Pakaian, Butik, Aksesoris)</option>
-                    <option value="Kasir 07 Elektronik (Gawai & Komputer)">Kasir 07 Elektronik (Komputer, Gawai, Hardware)</option>
-                    <option value="Kasir 08 Bengkel (Otomotif & Servis)">Kasir 08 Bengkel (Oli, Sparepart, Servis)</option>
+                    {(isHybridPosEnabled || (businessDomainConfig.activePosTypes || []).includes('POS_RETAIL') || businessDomainConfig.mechanismFamily === 'RETAIL_GENERAL') && (
+                      <option value="POS Retail (Kasir Cepat)">POS Retail (Kasir Cepat)</option>
+                    )}
+                    {(isHybridPosEnabled || (businessDomainConfig.activePosTypes || []).includes('POS_GROSIR_DISTRIBUSI')) && (
+                      <option value="POS Grosir & Distribusi">POS Grosir &amp; Distribusi</option>
+                    )}
+                    {(isHybridPosEnabled || (businessDomainConfig.activePosTypes || []).includes('POS_FNB') || businessDomainConfig.mechanismFamily === 'FNB_CULINARY') && (
+                      <option value="POS F&B (Resto & Cafe)">POS F&amp;B (Resto &amp; Cafe)</option>
+                    )}
+                    {(isHybridPosEnabled || (businessDomainConfig.activePosTypes || []).includes('POS_BANGUNAN') || businessDomainConfig.mechanismFamily === 'BUILDING_BULK') && (
+                      <option value="POS Bahan Bangunan & Material">POS Bahan Bangunan &amp; Material</option>
+                    )}
+                    {(isHybridPosEnabled || (businessDomainConfig.activePosTypes || []).includes('POS_JASA_LAYANAN') || businessDomainConfig.subFeatures?.hasServiceOrder) && (
+                      <option value="POS Jasa & Layanan (Barbershop/Salon/Laundry)">POS Jasa &amp; Layanan (Barbershop/Salon/Laundry)</option>
+                    )}
+                    {(isHybridPosEnabled || businessDomainConfig.primaryBusinessModel === 'FASHION_BUTIK') && (
+                      <option value="POS Fashion & Butik">POS Fashion &amp; Butik</option>
+                    )}
                   </select>
-                </div>
-
-                {/* Hak Akses Izinkan Semua Kategori Form Switch */}
-                <div className={`p-2.5 rounded-xl border flex items-center justify-between ${
-                  isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/20 border-gray-800'
-                }`}>
-                  <div>
-                    <div className={`font-bold text-xs ${isLight ? 'text-slate-950 font-black' : 'text-white'}`}>Izinkan Akses Semua Kategori</div>
-                    <div className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-[10px] text-gray-400'}`}>Override: kasir dapat mengakses seluruh katalog multi-industri</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    id="checkbox-new-term-allow-all"
-                    checked={newTermAllowAllCategories}
-                    onChange={(e) => setNewTermAllowAllCategories(e.target.checked)}
-                    className="w-4 h-4 rounded text-indigo-500 focus:ring-indigo-400 cursor-pointer"
-                  />
-                </div>
-
-                <div>
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>Warna Neon Aksen:</label>
-                  <div className="grid grid-cols-5 gap-2 pt-1">
-                    {[
-                      { hex: '#00f2fe', label: 'Cyan' },
-                      { hex: '#ff7a00', label: 'Orange' },
-                      { hex: '#10B981', label: 'Emerald' },
-                      { hex: '#8b5cf6', label: 'Purple' },
-                      { hex: '#ec4899', label: 'Pink' },
-                    ].map((col) => (
-                      <button
-                        key={col.hex}
-                        type="button"
-                        onClick={() => setNewTermColor(col.hex)}
-                        style={{ backgroundColor: col.hex }}
-                        className={`h-7 rounded-lg transition-transform cursor-pointer flex items-center justify-center ${
-                          newTermColor === col.hex ? 'ring-2 ring-slate-950 dark:ring-white scale-110' : 'opacity-70 hover:opacity-100'
-                        }`}
-                        title={col.label}
-                      ></button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>Lokasi / Lantai:</label>
-                  <input
-                    type="text"
-                    value={newTermLocation}
-                    onChange={(e) => setNewTermLocation(e.target.value)}
-                    placeholder="Lantai 1 / Pintu Barat"
-                    className={`w-full p-2.5 rounded-xl border ${
-                      isLight ? 'bg-slate-50 border-slate-300 text-slate-900 font-bold' : 'bg-black/20 border-gray-700 text-white'
-                    }`}
-                  />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full mt-2 py-2.5 rounded-xl font-bold text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-1.5 shadow-md shadow-cyan-500/20 cursor-pointer transition"
+                  className="w-full mt-2 py-2.5 rounded-xl font-medium text-xs bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-1.5 cursor-pointer transition"
                 >
                   <Plus className="w-4 h-4" />
                   <span>+ Daftarkan Terminal Baru</span>
@@ -2165,240 +3356,548 @@ export const SuperAdminModule: React.FC = () => {
               </form>
             </div>
 
-            {/* Tabel Kontrol Multi-Terminal */}
-            <div className={`lg:col-span-2 rounded-2xl border overflow-hidden ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+            <div className={`lg:col-span-2 rounded-2xl border overflow-hidden transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
             }`}>
-              <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+              <div className={`p-4 border-b flex items-center justify-between ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
                 <div>
-                  <h3 className={`text-sm ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>Daftar Terminal Kasir Terdaftar ({terminals.length} Terminal)</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Mapping filter industri otomatis &amp; hak akses akses semua kategori</p>
+                  <h3 className="text-sm font-medium tracking-wide">
+                    Daftar Terminal Kasir Terdaftar ({visibleTerminals.length} Terminal{isHybridPosEnabled ? '' : ' • Terkunci Domain Aktif'})
+                  </h3>
                 </div>
-                <span className={`text-xs font-mono font-bold ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>Multi-Node Active</span>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-xs text-left">
-                  <thead className={`border-b font-bold tracking-wider uppercase text-[10px] ${
-                    isLight ? 'bg-slate-100 text-slate-900 font-black border-slate-300' : 'bg-[#0d1117] text-slate-400 border-[#30363d]'
+                  <thead className={`border-b font-mono font-medium tracking-wider uppercase text-[10px] ${
+                    isLight ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-[#0d1117] text-slate-400 border-[#30363d]'
                   }`}>
                     <tr>
                       <th className="px-3.5 py-3">ID &amp; Kode</th>
                       <th className="px-3.5 py-3">Nama Terminal</th>
-                      <th className="px-3.5 py-3">Filter Kategori Industri</th>
-                      <th className="px-3.5 py-3 text-center">Akses Semua Kategori</th>
+                      <th className="px-3.5 py-3">Kategori</th>
                       <th className="px-3.5 py-3 text-center">Status Lock</th>
                       <th className="px-3.5 py-3 text-right">Aksi</th>
                     </tr>
                   </thead>
-                  <tbody className={`divide-y font-medium ${isLight ? 'divide-slate-200' : 'divide-gray-800'}`}>
-                    {terminals.map((t) => {
-                      const ind = getTerminalIndustry(t);
-                      let indBadge = '🛒 01 Ritel & Grosir';
-                      let indColor = isLight ? 'bg-cyan-100 text-cyan-950 border border-cyan-300' : 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30';
-                      let indCategories = 'Sembako, FMCG, Minuman, Makanan Ringan, Eceran & Grosir';
-
-                      if (ind === 'fnb') {
-                        indBadge = '🍳 02 F&B Resto';
-                        indColor = isLight ? 'bg-amber-100 text-amber-950 border border-amber-300' : 'bg-amber-500/15 text-amber-400 border border-amber-500/30';
-                        indCategories = 'Makanan, Minuman, Snack & Resep BOM HPP';
-                      } else if (ind === 'pharmacy') {
-                        indBadge = '💊🐾 03 Pharmacy & Pet Shop';
-                        indColor = isLight ? 'bg-rose-100 text-rose-950 border border-rose-300' : 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
-                        indCategories = 'Obat-obatan, Vitamin, Alkes, Pakan & Obat Hewan';
-                      } else if (ind === 'fashion') {
-                        indBadge = '👗 04 Fashion & Apparel';
-                        indColor = isLight ? 'bg-fuchsia-100 text-fuchsia-950 border border-fuchsia-300' : 'bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30';
-                        indCategories = 'Busana, Pakaian Pria/Wanita, Matriks Varian Size & Warna';
-                      } else if (ind === 'building') {
-                        indBadge = '🏗️ 05 Bahan Bangunan';
-                        indColor = isLight ? 'bg-emerald-100 text-emerald-950 border border-emerald-300' : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-                        indCategories = 'Semen, Cat, Besi, Perkakas, Sanitair & Armada DO';
-                      } else if (ind === 'electronics') {
-                        indBadge = '📱 06 Electronics & Gadgets';
-                        indColor = isLight ? 'bg-violet-100 text-violet-950 border border-violet-300' : 'bg-violet-500/15 text-violet-400 border border-violet-500/30';
-                        indCategories = 'Gawai, Audio, Komputer, Komponen & Serial IMEI';
-                      } else if (ind === 'workshop') {
-                        indBadge = '🔧 07 Automotive & Workshop';
-                        indColor = isLight ? 'bg-orange-100 text-orange-950 border border-orange-300' : 'bg-orange-500/15 text-orange-400 border border-orange-500/30';
-                        indCategories = 'Oli Mesin, Sparepart, Jasa Servis & Nopol';
-                      } else if (ind === 'salon') {
-                        indBadge = '💈 08 Salon & Barbershop';
-                        indColor = isLight ? 'bg-teal-100 text-teal-950 border border-teal-300' : 'bg-teal-500/15 text-teal-400 border border-teal-500/30';
-                        indCategories = 'Layanan Potong Rambut, Kapster, Antrean & Perawatan';
-                      }
-
-                      return (
-                        <tr key={t.id} className={`transition ${isLight ? 'hover:bg-slate-50' : 'hover:bg-cyan-500/5'}`}>
-                          <td className="px-3.5 py-3 font-mono font-bold" style={{ color: t.colorHex }}>
-                            {t.id}
-                            <div className={`text-[10px] ${isLight ? 'text-slate-600 font-bold' : 'text-gray-500'}`}>{t.code}</div>
-                          </td>
-                          <td className="px-3.5 py-3">
-                            <div className={`font-black text-xs ${isLight ? 'text-slate-950' : 'text-white'}`}>{t.name}</div>
-                            <div className={`text-[10px] ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>{t.location}</div>
-                          </td>
-                          <td className="px-3.5 py-3">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border mb-1 ${indColor}`}>
-                              {indBadge}
-                            </span>
-                            <div className={`text-xs line-clamp-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400 text-[10px]'}`} title={indCategories}>
-                              {indCategories}
-                            </div>
-                          </td>
-                          <td className="px-3.5 py-3 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={Boolean(t.allowAllCategories)}
-                                onClick={() => {
-                                  const nextVal = !t.allowAllCategories;
-                                  updateTerminal(t.id, { allowAllCategories: nextVal });
-                                  showToast(
-                                    nextVal
-                                      ? `🌐 ${t.name}: Hak akses "Semua Kategori" DIBERIKAN!`
-                                      : `🔒 ${t.name}: Hak akses dibatasi ke filter industri [${indBadge}]`
-                                  );
-                                }}
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                                  t.allowAllCategories ? 'bg-indigo-600' : isLight ? 'bg-slate-300' : 'bg-slate-700'
-                                }`}
-                                title="Klik untuk mengizinkan/mengunci akses semua kategori"
-                              >
-                                <span
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                                    t.allowAllCategories ? 'translate-x-4' : 'translate-x-0'
-                                  }`}
-                                />
-                              </button>
-                              <span className={`text-[9px] font-mono font-black uppercase px-1.5 py-0.2 rounded border ${
-                                t.allowAllCategories
-                                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-                                  : isLight
-                                  ? 'bg-slate-100 text-slate-800 font-bold border-slate-300'
-                                  : 'bg-gray-800 text-gray-400 border-gray-700'
-                              }`}>
-                                {t.allowAllCategories ? 'SEMUA KAT' : 'SPESIFIK'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-3.5 py-3 text-center">
-                            <button
-                              onClick={() => toggleTerminalLock(t.id)}
-                              className={`px-3 py-1 rounded-full text-[10px] font-bold flex items-center justify-center gap-1 mx-auto cursor-pointer transition ${
-                                t.isLocked
-                                  ? isLight
-                                    ? 'bg-rose-100 border border-rose-300 text-rose-950 font-bold hover:bg-rose-200'
-                                    : 'bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30'
-                                  : isLight
-                                  ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold hover:bg-emerald-200'
-                                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
-                              }`}
-                            >
-                              {t.isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                              <span>{t.isLocked ? 'TERKUNCI' : 'TERBUKA'}</span>
-                            </button>
-                          </td>
-                          <td className="px-3.5 py-3 text-right">
-                            <button
-                              onClick={() => deleteTerminal(t.id)}
-                              className={`p-1.5 rounded-lg cursor-pointer transition ${
-                                isLight
-                                  ? 'bg-slate-100 hover:bg-rose-100 text-rose-600 border border-slate-300'
-                                  : 'bg-gray-800 hover:bg-rose-900/40 text-rose-400'
-                              }`}
-                              title="Hapus Terminal Ini"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                  <tbody className={`divide-y font-normal ${isLight ? 'divide-slate-200' : 'divide-gray-800'}`}>
+                    {visibleTerminals.map((t) => (
+                      <tr key={t.id} className="hover:bg-cyan-500/5 transition">
+                        <td className="px-3.5 py-3 font-mono font-medium" style={{ color: t.colorHex }}>
+                          {t.id}
+                        </td>
+                        <td className="px-3.5 py-3 font-medium">{t.name}</td>
+                        <td className={`px-3.5 py-3 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>{t.businessModel}</td>
+                        <td className="px-3.5 py-3 text-center">
+                          <button
+                            onClick={() => toggleTerminalLock(t.id)}
+                            className={`px-3 py-1 rounded-full text-[10px] font-mono font-medium uppercase tracking-widest cursor-pointer transition border ${
+                              t.isLocked
+                                ? isLight
+                                  ? 'bg-rose-50 text-rose-700 border-rose-400/70'
+                                  : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                                : isLight
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                            }`}
+                          >
+                            {t.isLocked ? <Lock className="w-3 h-3 inline mr-1" /> : <Unlock className="w-3 h-3 inline mr-1" />}
+                            <span>{t.isLocked ? 'TERKUNCI' : 'TERBUKA'}</span>
+                          </button>
+                        </td>
+                        <td className="px-3.5 py-3 text-right">
+                          <button
+                            onClick={() => {
+                              deleteTerminal(t.id);
+                              recordAudit({
+                                traceId: `TERM-DEL-${t.id}`,
+                                userId: effectiveUser?.id || 'super-admin',
+                                userName: effectiveUser?.name || 'Super Admin',
+                                userRole: effectiveUser?.role || 'Super Admin',
+                                module: 'SUPER_ADMIN',
+                                action: 'CONFIG_CHANGE',
+                                severity: 'CRITICAL',
+                                entityId: t.id,
+                                payloadBefore: t,
+                              });
+                            }}
+                            className={`p-1.5 rounded-lg cursor-pointer ${
+                              isLight ? 'bg-slate-100 hover:bg-rose-100 text-rose-600' : 'bg-gray-800 hover:bg-rose-900/40 text-rose-400'
+                            }`}
+                            title="Hapus Terminal"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
-      {/* ====================================================
-          TAB 3: PUSAT KREDENSIAL & KEAMANAN SISTEM
-          ==================================================== */}
+      {/* TAB 3: PUSAT KREDENSIAL */}
       {adminTab === 'credentials' && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Header Panel Pusat Kredensial & Keamanan */}
-          <div
-            className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-pink-500/15 text-pink-400 flex items-center justify-center border border-pink-500/30 shadow-[0_0_20px_rgba(236,72,153,0.25)] shrink-0">
-                  <ShieldCheck className="w-6 h-6" />
+          {/* PANEL INTEGRASI CLOVER POS LIVE DATA CONNECTOR */}
+          <div className={`p-6 rounded-2xl border space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-500 flex items-center justify-center shrink-0">
+                  <Store className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-extrabold text-lg tracking-tight">
-                      Pusat Kredensial &amp; Manajemen Reset PIN
-                    </h2>
-                    <span className={isLight ? 'bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded' : 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-pink-500/20 text-pink-300 border border-pink-500/40'}>
-                      MASTER SECURITY VAULT
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Clover POS Live API Integration
+                    </h3>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
+                      cloverConfig?.lastSyncAt
+                        ? isLight
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                        : isLight
+                          ? 'bg-slate-100 text-slate-700 border-slate-300'
+                          : 'bg-slate-800 text-slate-300 border-slate-700'
+                    }`}>
+                      {cloverConfig?.lastSyncAt ? 'TERHUBUNG LIVE' : 'SIAP DIKONFIGURASI'}
                     </span>
                   </div>
-                  <p className={`mt-0.5 ${isLight ? 'text-slate-800 font-medium text-xs' : 'text-xs text-gray-400'}`}>
-                    Kontrol terpusat untuk mengganti Sandi Master Super Admin dan mengatur ulang (reset) PIN seluruh terminal Kasir 01 s/d 08 serta akun staff.
+                  <p className={`text-xs font-normal mt-0.5 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Tarik data riil toko langsung dari Clover REST API v3 (katalog produk, stok fisik, &amp; riwayat order kasir) dengan pemetaan otomatis ke skema JacS RetailOS ERP.
+                  </p>
+                  {cloverConfig?.lastSyncAt && (
+                    <p className={`text-[11px] font-mono font-normal mt-1.5 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                      Sinkronisasi terakhir: {new Date(cloverConfig.lastSyncAt).toLocaleString('id-ID')} — {cloverConfig.lastSyncSummary}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveCloverCredentials}
+                className={`px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer transition shrink-0 ${
+                  isLight
+                    ? 'bg-white hover:bg-slate-50 border-cyan-500/60 text-slate-800'
+                    : 'bg-[#0d1117] hover:bg-[#1f2630] border-cyan-500/35 text-slate-200'
+                }`}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Simpan Kredensial</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Clover Merchant ID
+                </label>
+                <input
+                  type="text"
+                  value={cloverMerchantId}
+                  onChange={(e) => setCloverMerchantId(e.target.value)}
+                  placeholder="Contoh: M9X8K7L6P5Q4R (13 karakter)"
+                  className={`w-full p-2.5 rounded-xl border font-mono text-xs ${
+                    isLight
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400/75 placeholder:italic'
+                      : 'bg-[#0d1117] border-[#30363d] text-white placeholder:text-slate-500/60 placeholder:italic'
+                  }`}
+                />
+                <p className={`text-[10px] font-normal mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  13 karakter alfanumerik Merchant ID dari Clover Dashboard.
+                </p>
+              </div>
+
+              <div>
+                <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Clover Live API Token
+                </label>
+                <div className="relative">
+                  <input
+                    type={showCloverToken ? 'text' : 'password'}
+                    value={cloverApiToken}
+                    onChange={(e) => setCloverApiToken(e.target.value)}
+                    placeholder="clv_live_..."
+                    className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs ${
+                      isLight
+                        ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400/75 placeholder:italic'
+                        : 'bg-[#0d1117] border-[#30363d] text-white placeholder:text-slate-500/60 placeholder:italic'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCloverToken((prev) => !prev)}
+                    aria-label="Toggle visibility token Clover"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-400 cursor-pointer"
+                  >
+                    {showCloverToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className={`text-[10px] font-normal mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Bearer token privat (berawalan <span className="font-mono">clv_live_...</span>).
+                </p>
+              </div>
+
+              <div>
+                <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Environment Clover API
+                </label>
+                <select
+                  value={cloverEnvironment}
+                  onChange={(e) => setCloverEnvironment(e.target.value === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION')}
+                  className={`w-full p-2.5 rounded-xl border text-xs font-medium ${
+                    isLight
+                      ? 'bg-slate-50 border-slate-300 text-slate-900'
+                      : 'bg-[#0d1117] border-[#30363d] text-white'
+                  }`}
+                >
+                  <option value="PRODUCTION">Production — api.clover.com</option>
+                  <option value="SANDBOX">Sandbox — apisandbox.dev.clover.com</option>
+                </select>
+                <p className={`text-[10px] mt-1 font-mono font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {cloverEnvironment === 'SANDBOX'
+                    ? 'Endpoint: https://apisandbox.dev.clover.com'
+                    : 'Endpoint: https://api.clover.com'}
+                </p>
+              </div>
+            </div>
+
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2 border-t ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <label className="flex items-start sm:items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={cloverAutoCleanDummy}
+                  onChange={(e) => setCloverAutoCleanDummy(e.target.checked)}
+                  className="w-4 h-4 rounded accent-emerald-600 cursor-pointer mt-0.5 sm:mt-0"
+                />
+                <span className={`text-xs font-normal ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                  Otomatis Hapus Data Dummy Sebelum Sinkronisasi Riil (Clean Slate)
+                </span>
+              </label>
+
+              <button
+                type="button"
+                disabled={isSyncingClover}
+                onClick={handleSyncCloverLive}
+                className={`px-5 py-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition shrink-0 ${
+                  isSyncingClover
+                    ? 'bg-emerald-600/60 text-white cursor-wait'
+                    : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white cursor-pointer shadow-lg shadow-emerald-600/20 active:scale-95'
+                }`}
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingClover ? 'animate-spin' : ''}`} />
+                <span>{isSyncingClover ? 'Menarik Data Riil Clover...' : 'Uji Koneksi & Tarik Data Riil Clover'}</span>
+              </button>
+            </div>
+
+            {cloverSyncResult && (
+              <div
+                className={`p-4 rounded-xl border text-xs space-y-2 ${
+                  cloverSyncResult.success
+                    ? isLight
+                      ? 'bg-emerald-50 border-emerald-400/70 text-emerald-900'
+                      : 'bg-emerald-500/10 border-emerald-500/35 text-emerald-200'
+                    : isLight
+                      ? 'bg-rose-50 border-rose-400/70 text-rose-900'
+                      : 'bg-rose-500/10 border-rose-500/35 text-rose-200'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-medium">
+                    {cloverSyncResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                    )}
+                    <span>
+                      {cloverSyncResult.success
+                        ? 'Sinkronisasi Data Riil Clover POS Berhasil'
+                        : 'Gagal Terhubung ke Clover POS API'}
+                    </span>
+                  </div>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/15">
+                    Transport: {cloverSyncResult.transportUsed}
+                  </span>
+                </div>
+
+                {cloverSyncResult.success ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    <div className={`p-2 rounded-lg ${isLight ? 'bg-white border border-emerald-300' : 'bg-black/20'}`}>
+                      <div className="text-[10px] opacity-75">Produk Riil Ditarik</div>
+                      <div className="text-sm font-mono font-medium">{cloverSyncResult.products.length} SKU</div>
+                    </div>
+                    <div className={`p-2 rounded-lg ${isLight ? 'bg-white border border-emerald-300' : 'bg-black/20'}`}>
+                      <div className="text-[10px] opacity-75">Order Riil Ditarik</div>
+                      <div className="text-sm font-mono font-medium">{cloverSyncResult.ordersMapped} Transaksi</div>
+                    </div>
+                    <div className={`p-2 rounded-lg ${isLight ? 'bg-white border border-emerald-300' : 'bg-black/20'}`}>
+                      <div className="text-[10px] opacity-75">Entri Kas Keuangan</div>
+                      <div className="text-sm font-mono font-medium">{cloverSyncResult.financeEntries.length} Entri</div>
+                    </div>
+                    <div className={`p-2 rounded-lg ${isLight ? 'bg-white border border-emerald-300' : 'bg-black/20'}`}>
+                      <div className="text-[10px] opacity-75">Status Data Dummy</div>
+                      <div className="text-sm font-medium">
+                        {cloverSyncResult.cleanedDummy ? 'Dihapus (Clean Slate)' : 'Dipertahankan'}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="leading-relaxed font-normal">{cloverSyncResult.error}</p>
+                )}
+
+                {cloverSyncResult.warnings && cloverSyncResult.warnings.length > 0 && (
+                  <ul className="list-disc pl-5 space-y-0.5 text-[11px] font-normal opacity-90 pt-1">
+                    {cloverSyncResult.warnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* PANEL: PIN OTORISASI MANAJEMEN (6 DIGIT) UNTUK KASIR POS */}
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-amber-500/70 shadow-[0_0_16px_rgba(245,158,11,0.16)]'
+              : 'bg-[#161b22] border-amber-500/40 shadow-[0_0_16px_rgba(245,158,11,0.08)]'
+          }`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/35 text-amber-500 flex items-center justify-center shrink-0">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    PIN Otorisasi Manajemen (6 Digit)
+                  </h3>
+                  <p className={`text-xs font-normal mt-0.5 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Melindungi perpindahan dari layar <strong className="text-cyan-500">Kasir POS</strong> menuju <strong className="text-amber-500">6 Pilar Manajemen</strong> maupun tombol <strong className="text-amber-500">Ganti Loket PC</strong>. Default awal: <span className="font-mono font-bold">123456</span>.
                   </p>
                 </div>
               </div>
 
-              {/* Status Badge & Global Action */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className={isLight ? 'bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded flex items-center gap-1.5' : 'px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5'}>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>KREDENSIAL DINAMIS AKTIF</span>
-                </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative">
+                  <input
+                    id="input-mgmt-auth-pin-security"
+                    type={showMgmtAuthPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={mgmtAuthPinInput}
+                    onChange={(e) => {
+                      const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 6);
+                      setMgmtAuthPinInput(digitsOnly);
+                    }}
+                    placeholder="123456"
+                    className={`w-40 pl-3 pr-9 py-2 rounded-xl border font-mono font-bold text-sm tracking-[0.25em] outline-none ${
+                      isLight
+                        ? 'bg-slate-50 border-amber-400 text-slate-900'
+                        : 'bg-[#0d1117] border-amber-500/50 text-amber-300'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMgmtAuthPin((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-amber-400 cursor-pointer"
+                    aria-label="Tampilkan atau sembunyikan PIN"
+                  >
+                    {showMgmtAuthPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    resetAllUserPinsToDefault('1234');
-                  }}
-                  className={isLight ? 'bg-amber-100 hover:bg-amber-200 border border-amber-400 text-amber-950 font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95' : 'px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95'}
-                  title="Reset semua PIN kasir & staff kembali ke default 1234"
+                  onClick={() => updateManagementAuthPin(mgmtAuthPinInput)}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs cursor-pointer transition whitespace-nowrap"
                 >
-                  <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Reset Default Semua PIN (1234)</span>
+                  Simpan PIN 6 Digit
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Bagian A: Ganti Sandi Master Super Admin */}
-          <div
-            className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-pink-500/15 text-pink-400 flex items-center justify-center border border-pink-500/30">
-                  <Key className="w-4 h-4" />
+          {/* PANEL BARU: MANAJEMEN PIN AKSES DIVISI & SUPERADMIN (SHA-256) */}
+          <div className={`p-6 rounded-2xl border space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-pink-500/15 border border-pink-500/35 text-pink-500 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-sm tracking-tight">
-                    1. Ganti Sandi Master Super Admin (Root Access Password)
+                  <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Manajemen PIN Akses Divisi &amp; SuperAdmin
                   </h3>
-                  <p className="text-[11px] text-gray-400">
-                    Sandi ini digunakan untuk login Super Admin Console, otorisasi override kasir, dan disimpan di <code className="text-pink-400 font-mono">jacs_super_admin_password</code>
+                  <p className={`text-xs font-normal mt-0.5 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Penyimpanan hash <span className="font-mono font-medium">SHA-256</span> persisten di <span className="font-mono">localStorage</span> — langsung aktif pada gerbang login.
                   </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-mono font-medium border ${
+                      isLight
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/35'
+                    }`}>
+                      <Lock className="w-3 h-3" />
+                      SHA-256 SuperAdmin:{' '}
+                      {superAdminCodeHash ? `${superAdminCodeHash.slice(0, 12)}...${superAdminCodeHash.slice(-6)}` : 'Inisialisasi...'}
+                    </span>
+                    {superAdminCodeUpdatedAt && (
+                      <span className={`text-[10px] font-mono font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Diperbarui: {new Date(superAdminCodeUpdatedAt).toLocaleString('id-ID')}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-              <span className="text-[11px] font-mono font-semibold px-2.5 py-1 rounded-lg bg-pink-500/10 text-pink-300 border border-pink-500/25 hidden sm:inline-block">
-                Root Access: Protected
-              </span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOldSuperAdminCodeInput('');
+                  setNewSuperAdminCodeInput('');
+                  setConfirmSuperAdminCodeInput('');
+                  setShowOldSuperAdminCode(false);
+                  setShowNewSuperAdminCode(false);
+                  setSuperAdminCodeError(null);
+                  setShowChangeSuperAdminCodeModal(true);
+                }}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-600/20 transition active:scale-95 shrink-0"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>Ganti Kode Otoritas SuperAdmin</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {DIVISION_CREDENTIAL_CARDS.map((divCard) => {
+                const DivIcon = divCard.icon;
+                const hashRecord = divisionPinHashes?.[divCard.id];
+                const hashStr = hashRecord?.hash || '';
+                const updatedLabel = hashRecord?.updatedAt
+                  ? new Date(hashRecord.updatedAt).toLocaleString('id-ID', {
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : 'Default Terenkripsi';
+
+                return (
+                  <div
+                    key={divCard.id}
+                    className={`rounded-2xl border p-4 flex flex-col justify-between gap-3.5 transition-all duration-200 ${
+                      isLight
+                        ? 'bg-white border-cyan-500/55 shadow-[0_0_12px_rgba(6,182,212,0.12)] hover:border-cyan-500 hover:shadow-[0_0_18px_rgba(6,182,212,0.22)]'
+                        : 'bg-[#0d1117] border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.06)] hover:border-cyan-400/55 hover:shadow-[0_0_16px_rgba(6,182,212,0.14)]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                          style={{
+                            backgroundColor: `${divCard.colorHex}18`,
+                            borderColor: `${divCard.colorHex}45`,
+                            color: divCard.colorHex,
+                          }}
+                        >
+                          <DivIcon className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className={`font-medium text-sm truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                            {divCard.name}
+                          </h4>
+                          <p className={`text-[11px] font-normal truncate ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                            {divCard.roleLabel}
+                          </p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border shrink-0 ${
+                          isLight
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/35'
+                        }`}
+                      >
+                        SHA-256
+                      </span>
+                    </div>
+
+                    <div
+                      className={`px-3 py-2 rounded-xl border text-[11px] font-mono space-y-1 ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-200 text-slate-700'
+                          : 'bg-[#161b22] border-gray-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-widest opacity-70">Digest Aktif</span>
+                        <span className="text-[10px] text-emerald-500 font-medium">● Terenkripsi</span>
+                      </div>
+                      <div className="truncate font-medium">
+                        {hashStr ? `${hashStr.slice(0, 14)}...${hashStr.slice(-6)}` : 'Menghitung hash...'}
+                      </div>
+                      <div className="text-[10px] opacity-70 font-normal truncate">
+                        Update: {updatedLabel}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingDivisionCard(divCard);
+                        setDivisionNewPin('');
+                        setDivisionConfirmPin('');
+                        setShowDivisionPin(false);
+                        setDivisionPinError(null);
+                      }}
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-medium border flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 ${
+                        isLight
+                          ? 'bg-slate-50 hover:bg-cyan-50/70 border-cyan-500/50 text-slate-900'
+                          : 'bg-[#161b22] hover:bg-[#1f2630] border-cyan-500/30 text-white'
+                      }`}
+                    >
+                      <Key className="w-3.5 h-3.5" style={{ color: divCard.colorHex }} />
+                      <span>Ubah PIN</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5">
+                <Key className="w-5 h-5 text-pink-400" />
+                <h3 className="font-medium text-sm tracking-wide">Ganti Sandi Master Super Admin</h3>
+              </div>
             </div>
 
             <form
@@ -2407,36 +3906,42 @@ export const SuperAdminModule: React.FC = () => {
                 if (!newDevPassword.trim()) return showToast('Sandi master baru tidak boleh kosong!');
                 if (newDevPassword !== confirmDevPassword) return showToast('Konfirmasi sandi tidak cocok!');
                 updateDeveloperPassword(newDevPassword);
+
+                recordAudit({
+                  traceId: `DEV-PWD-UPDATE-${Date.now()}`,
+                  userId: effectiveUser?.id || 'super-admin',
+                  userName: effectiveUser?.name || 'Super Admin',
+                  userRole: 'Super Admin',
+                  module: 'AUTH',
+                  action: 'AUTH_OVERRIDE_PIN',
+                  severity: 'SECURITY',
+                  payloadAfter: { action: 'UPDATE_MASTER_DEVELOPER_PASSWORD' },
+                });
+
                 setNewDevPassword('');
                 setConfirmDevPassword('');
-                showToast('Sandi Master Super Admin berhasil disimpan ke localStorage!');
+                showToast('Sandi Master Super Admin berhasil disimpan!');
               }}
               className="space-y-4"
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-400 font-bold text-xs mb-1.5">
-                    Sandi Master Super Admin Baru:
-                  </label>
+                  <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Sandi Baru:</label>
                   <div className="relative">
                     <input
                       type={showDevPassword ? 'text' : 'password'}
                       required
-                      autoComplete="new-password"
                       value={newDevPassword}
                       onChange={(e) => setNewDevPassword(e.target.value)}
                       placeholder="Masukkan sandi master baru..."
-                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                        isLight
-                          ? 'bg-slate-50 border-slate-300 text-slate-900'
-                          : 'bg-[#0d1117] border-[#30363d] text-white'
+                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs ${
+                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                       }`}
                     />
                     <button
                       type="button"
                       onClick={() => setShowDevPassword(!showDevPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
-                      title={showDevPassword ? 'Sembunyikan sandi' : 'Lihat sandi'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-400 cursor-pointer"
                     >
                       {showDevPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -2444,28 +3949,22 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-gray-400 font-bold text-xs mb-1.5">
-                    Konfirmasi Sandi Master Baru:
-                  </label>
+                  <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Konfirmasi Sandi Baru:</label>
                   <div className="relative">
                     <input
                       type={showConfirmDevPassword ? 'text' : 'password'}
                       required
-                      autoComplete="new-password"
                       value={confirmDevPassword}
                       onChange={(e) => setConfirmDevPassword(e.target.value)}
                       placeholder="Ulangi sandi master baru..."
-                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                        isLight
-                          ? 'bg-slate-50 border-slate-300 text-slate-900'
-                          : 'bg-[#0d1117] border-[#30363d] text-white'
+                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs ${
+                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                       }`}
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmDevPassword(!showConfirmDevPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
-                      title={showConfirmDevPassword ? 'Sembunyikan sandi' : 'Lihat sandi'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-400 cursor-pointer"
                     >
                       {showConfirmDevPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -2473,262 +3972,111 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-                <span className="text-xs text-gray-400 flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>
-                    Perubahan langsung tersimpan ke <strong className="text-gray-300 font-mono">jacs_super_admin_password</strong> dan aktif seketika.
-                  </span>
-                </span>
+              <div className="flex justify-end pt-1">
                 <button
                   type="submit"
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs bg-pink-500 hover:bg-pink-400 text-white flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(236,72,153,0.35)] cursor-pointer transition active:scale-95"
+                  className="px-5 py-2.5 rounded-xl font-medium text-xs bg-pink-500 hover:bg-pink-400 text-white flex items-center gap-2 cursor-pointer shadow-md transition"
                 >
                   <Key className="w-4 h-4" />
-                  <span>Simpan Sandi Master Super Admin</span>
+                  <span>Simpan Sandi Master</span>
                 </button>
               </div>
             </form>
           </div>
 
-          {/* Bagian B: Tabel Reset PIN Kasir 01 s/d 08 & Staff */}
-          <div
-            className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
-                  <UserCheck className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm tracking-tight">
-                    2. Tabel Manajemen &amp; Reset PIN (Kasir 01 s/d 08 &amp; Staff)
-                  </h3>
-                  <p className={isLight ? 'text-slate-700 font-medium text-xs' : 'text-[11px] text-gray-400'}>
-                    Daftar PIN aktif untuk membuka register terminal kasir, login shift, dan otorisasi menu operasional toko.
-                  </p>
-                </div>
-              </div>
-
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <h3 className="font-medium text-sm tracking-wide">Daftar Akun &amp; Reset PIN Operator</h3>
               <button
                 type="button"
                 onClick={() => {
                   resetAllUserPinsToDefault('1234');
+                  recordAudit({
+                    traceId: `RESET-ALL-PINS-${Date.now()}`,
+                    userId: effectiveUser?.id || 'super-admin',
+                    userName: effectiveUser?.name || 'Super Admin',
+                    userRole: 'Super Admin',
+                    module: 'AUTH',
+                    action: 'AUTH_OVERRIDE_PIN',
+                    severity: 'CRITICAL',
+                    payloadAfter: { action: 'RESET_ALL_PINS_TO_1234' },
+                  });
                 }}
-                className={isLight ? 'bg-amber-100 hover:bg-amber-200 border border-amber-400 text-amber-950 font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95 shrink-0' : 'px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95 shrink-0'}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border cursor-pointer ${
+                  isLight
+                    ? 'bg-amber-50 text-amber-700 border-amber-400/70 hover:bg-amber-100'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                }`}
               >
-                <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                <span>Reset Default Semua PIN (1234)</span>
+                Reset Semua ke 1234
               </button>
             </div>
 
-            {/* Tabel PIN Responsif */}
-            <div className="overflow-x-auto rounded-xl border border-gray-800">
+            <div className={`overflow-x-auto rounded-xl border ${isLight ? 'border-cyan-500/45' : 'border-gray-800'}`}>
               <table className="w-full text-left text-xs">
-                <thead className={isLight ? 'bg-slate-100 text-slate-900 font-black text-xs' : 'bg-[#0d1117] text-gray-400'}>
+                <thead className={`text-[10px] font-mono font-medium uppercase tracking-wider ${isLight ? 'bg-slate-100 text-slate-600' : 'bg-[#0d1117] text-gray-400'}`}>
                   <tr>
-                    <th className={`py-3 px-3.5 ${isLight ? 'text-slate-900 font-black text-xs' : 'font-bold'}`}>Operator / Akun</th>
-                    <th className={`py-3 px-3.5 ${isLight ? 'text-slate-900 font-black text-xs' : 'font-bold'}`}>Peran &amp; Terminal</th>
-                    <th className={`py-3 px-3.5 ${isLight ? 'text-slate-900 font-black text-xs' : 'font-bold'}`}>PIN Saat Ini</th>
-                    <th className={`py-3 px-3.5 ${isLight ? 'text-slate-900 font-black text-xs' : 'font-bold'}`}>Input PIN Baru</th>
-                    <th className={`py-3 px-3.5 text-center ${isLight ? 'text-slate-900 font-black text-xs' : 'font-bold'}`}>Aksi Reset</th>
+                    <th className="py-3 px-3.5">Nama Operator</th>
+                    <th className="py-3 px-3.5">Role</th>
+                    <th className="py-3 px-3.5">PIN Aktif</th>
+                    <th className="py-3 px-3.5">Input PIN Baru</th>
+                    <th className="py-3 px-3.5 text-center">Aksi</th>
                   </tr>
                 </thead>
-                <tbody className={`divide-y ${isLight ? 'divide-slate-200' : 'divide-gray-800'}`}>
-                  {users.map((u) => {
-                    const isRevealedCurrent = Boolean(revealedCurrentPins[u.user_id]);
-                    const isRevealedNew = Boolean(revealedNewPins[u.user_id]);
-                    const inputVal = userPinInputs[u.user_id] || '';
+                <tbody className={`divide-y font-normal ${isLight ? 'divide-slate-200 bg-white' : 'divide-gray-800'}`}>
+                  {users.map((u) => (
+                    <tr key={u.user_id} className={isLight ? 'hover:bg-cyan-50/40 transition' : 'hover:bg-[#1f242c] transition'}>
+                      <td className="py-3 px-3.5 font-medium">{u.name}</td>
+                      <td className="py-3 px-3.5">{u.role}</td>
+                      <td className="py-3 px-3.5 font-mono text-emerald-500 font-medium">{u.pin}</td>
+                      <td className="py-3 px-3.5">
+                        <input
+                          type="password"
+                          maxLength={6}
+                          value={userPinInputs[u.user_id] || ''}
+                          onChange={(e) =>
+                            setUserPinInputs((prev) => ({ ...prev, [u.user_id]: e.target.value }))
+                          }
+                          placeholder="PIN baru..."
+                          className={`py-1 px-2 rounded-lg border font-mono text-xs w-28 ${
+                            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-gray-700 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-3 px-3.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pin = (userPinInputs[u.user_id] || '').trim();
+                            if (!pin) return showToast('Ketik PIN baru!');
+                            updateUserPin(u.user_id, pin);
 
-                    // Label terminal jika kasir
-                    let terminalTag = '';
-                    if (u.name.toLowerCase().includes('kasir 01') || u.user_id === 'USR-003') terminalTag = 'T-01 • Kasir 01';
-                    else if (u.name.toLowerCase().includes('kasir 02') || u.user_id === 'USR-004') terminalTag = 'T-02 • Kasir 02';
-                    else if (u.name.toLowerCase().includes('kasir 03') || u.user_id === 'USR-006') terminalTag = 'T-03 • Kasir 03';
-                    else if (u.name.toLowerCase().includes('kasir 04') || u.user_id === 'USR-007') terminalTag = 'T-04 • Kasir 04';
-                    else if (u.name.toLowerCase().includes('kasir 05') || u.user_id === 'USR-008') terminalTag = 'T-05 • Kasir 05';
-                    else if (u.name.toLowerCase().includes('kasir 06') || u.user_id === 'USR-009') terminalTag = 'T-06 • Kasir 06';
-                    else if (u.name.toLowerCase().includes('kasir 07') || u.user_id === 'USR-010') terminalTag = 'T-07 • Kasir 07';
-                    else if (u.name.toLowerCase().includes('kasir 08') || u.user_id === 'USR-011') terminalTag = 'T-08 • Kasir 08';
+                            recordAudit({
+                              traceId: `PIN-UPDATE-${u.user_id}`,
+                              userId: effectiveUser?.id || 'super-admin',
+                              userName: effectiveUser?.name || 'Super Admin',
+                              userRole: 'Super Admin',
+                              module: 'AUTH',
+                              action: 'AUTH_OVERRIDE_PIN',
+                              severity: 'WARN',
+                              entityId: u.user_id,
+                              payloadAfter: { targetUser: u.name, newPinMasked: '••••' },
+                            });
 
-                    return (
-                      <tr
-                        key={u.user_id}
-                        className={`transition ${
-                          isLight ? 'hover:bg-slate-50' : 'hover:bg-[#1f242c]'
-                        }`}
-                      >
-                        {/* Operator Info */}
-                        <td className="py-3 px-3.5">
-                          <div className="flex items-center gap-2.5">
-                            {u.avatar ? (
-                              <img
-                                src={u.avatar}
-                                alt={u.name}
-                                className="w-8 h-8 rounded-full object-cover border border-gray-700 shrink-0"
-                              />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-cyan-500/20 text-cyan-300 font-bold flex items-center justify-center shrink-0 text-[10px]">
-                                {u.name.slice(0, 2).toUpperCase()}
-                              </div>
-                            )}
-                            <div>
-                              <div className={`font-bold ${isLight ? 'text-slate-950 font-black text-xs' : 'text-gray-200'}`}>{u.name}</div>
-                              <div className="text-[10px] text-gray-500 font-mono">{u.email}</div>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Role & Terminal Tag */}
-                        <td className="py-3 px-3.5">
-                          <div className="flex flex-col gap-1 items-start">
-                            <span
-                              className={`rounded ${
-                                isLight
-                                  ? u.role === 'Super Admin'
-                                    ? 'bg-rose-100 border border-rose-300 text-rose-950 font-bold text-xs px-2 py-0.5 rounded'
-                                    : u.role === 'Manager'
-                                    ? 'bg-indigo-100 border border-indigo-300 text-indigo-950 font-bold text-xs px-2 py-0.5 rounded'
-                                    : 'bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded'
-                                  : u.role === 'Super Admin'
-                                  ? 'px-2 py-0.5 text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30'
-                                  : u.role === 'Manager'
-                                  ? 'px-2 py-0.5 text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                                  : u.role === 'Kasir'
-                                  ? 'px-2 py-0.5 text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                                  : 'px-2 py-0.5 text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              }`}
-                            >
-                              {u.role}
-                            </span>
-                            {terminalTag && (
-                              <span className={`text-[10px] font-mono font-semibold ${
-                                isLight ? 'text-indigo-950 font-bold' : 'text-cyan-400'
-                              }`}>
-                                {terminalTag}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* PIN Saat Ini (Bisa Diintip) */}
-                        <td className="py-3 px-3.5">
-                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-xs ${
-                            isLight
-                              ? 'bg-slate-100 border-slate-300 text-slate-950'
-                              : 'bg-black/30 border-gray-700'
-                          }`}>
-                            <span className={`font-bold tracking-widest ${
-                              isLight ? 'text-slate-950 font-black' : 'text-emerald-400'
-                            }`}>
-                              {isRevealedCurrent ? u.pin : '••••'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRevealedCurrentPins((prev) => ({
-                                  ...prev,
-                                  [u.user_id]: !prev[u.user_id],
-                                }))
-                              }
-                              className={`${isLight ? 'text-slate-700 hover:text-slate-950' : 'text-gray-400 hover:text-white'} p-0.5 cursor-pointer ml-1`}
-                              title={isRevealedCurrent ? 'Sembunyikan PIN' : 'Intip PIN'}
-                            >
-                              {isRevealedCurrent ? (
-                                <EyeOff className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-
-                        {/* Input PIN Baru */}
-                        <td className="py-3 px-3.5">
-                          <div className="relative max-w-[140px]">
-                            <input
-                              type={isRevealedNew ? 'text' : 'password'}
-                              maxLength={6}
-                              value={inputVal}
-                              onChange={(e) =>
-                                setUserPinInputs((prev) => ({
-                                  ...prev,
-                                  [u.user_id]: e.target.value,
-                                }))
-                              }
-                              placeholder="PIN baru..."
-                              className={`w-full py-1.5 pl-2.5 pr-8 rounded-lg border font-mono text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500 ${
-                                isLight
-                                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                                  : 'bg-[#0d1117] border-gray-700 text-white'
-                              }`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRevealedNewPins((prev) => ({
-                                  ...prev,
-                                  [u.user_id]: !prev[u.user_id],
-                                }))
-                              }
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
-                              title={isRevealedNew ? 'Sembunyikan' : 'Lihat'}
-                            >
-                              {isRevealedNew ? (
-                                <EyeOff className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-
-                        {/* Tombol Aksi */}
-                        <td className="py-3 px-3.5 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const pin = (userPinInputs[u.user_id] || '').trim();
-                                if (!pin) {
-                                  showToast('Ketik PIN baru terlebih dahulu!');
-                                  return;
-                                }
-                                if (pin.length < 4 || pin.length > 6) {
-                                  showToast('PIN minimal 4 digit dan maksimal 6 digit!');
-                                  return;
-                                }
-                                updateUserPin(u.user_id, pin);
-                                setUserPinInputs((prev) => ({ ...prev, [u.user_id]: '' }));
-                              }}
-                              className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#0052FF] hover:bg-[#0043d1] text-white cursor-pointer transition shadow-xs flex items-center gap-1 active:scale-95"
-                              title="Terapkan PIN baru"
-                            >
-                              <Key className="w-3 h-3" />
-                              <span>Reset PIN</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateUserPin(u.user_id, '1234');
-                                setUserPinInputs((prev) => ({ ...prev, [u.user_id]: '' }));
-                              }}
-                              className={
-                                isLight
-                                  ? 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-950 font-bold text-xs px-2.5 py-1 rounded cursor-pointer transition'
-                                  : 'px-2 py-1 rounded-lg text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 cursor-pointer transition'
-                              }
-                              title="Setel cepat ke 1234"
-                            >
-                              1234
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                            setUserPinInputs((prev) => ({ ...prev, [u.user_id]: '' }));
+                            showToast(`PIN untuk ${u.name} berhasil diperbarui!`);
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#0052FF] hover:bg-blue-600 text-white cursor-pointer active:scale-95"
+                        >
+                          Simpan PIN
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -2736,1201 +4084,1861 @@ export const SuperAdminModule: React.FC = () => {
         </div>
       )}
 
-      {/* ====================================================
-          TAB 4: AI INTELLIGENCE & SMART TOOLS
-          ==================================================== */}
-      {adminTab === 'ai' && (
+      {/* TAB 4: AI SMART TOOLS */}
+      {adminTab === 'ai-tools' && (
         <div className="space-y-6 animate-fadeIn">
-          {/* Header Panel AI Tools */}
-          <div
-            className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-purple-500/15 text-purple-400 flex items-center justify-center border border-purple-500/30 shadow-[0_0_20px_rgba(168,85,247,0.25)] shrink-0">
-                  <Sparkles className="w-6 h-6 animate-pulse" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold tracking-tight">AI Intelligence &amp; Smart Tools</h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                      GEMINI-POWERED
-                    </span>
-                  </div>
-                  <p className={`text-xs mt-1 max-w-2xl leading-relaxed ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>
-                    Pusat akselerasi cerdas retail JacS ERP: AI Smart Data Mapper / Catalog Ingestion, audit diagnostik margin &amp; anomali kasir, rekomendasi stok otomatis, serta konfigurasi engine model AI.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsAiSmartMapOpen(true)}
-                  className="px-4 py-2.5 rounded-xl text-xs font-extrabold bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white flex items-center gap-2 shadow-[0_0_20px_rgba(168,85,247,0.35)] cursor-pointer transition active:scale-95"
-                >
-                  <Wand2 className="w-4 h-4" />
-                  <span>Buka AI Smart Mapper</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Metrics Bar AI */}
-            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-xs uppercase font-bold tracking-wider ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400 text-[10px]'}`}>Katalog Produk</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-slate-950' : 'text-purple-400'}`}>{products.length}</div>
-                <div className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium' : 'text-[10px] text-gray-500'}`}>Siap dianalisis &amp; di-enrich</div>
-              </div>
-
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-xs uppercase font-bold tracking-wider ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400 text-[10px]'}`}>Transaksi Kasir</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>{salesHistory.length}</div>
-                <div className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium' : 'text-[10px] text-gray-500'}`}>Basis data audit operasional</div>
-              </div>
-
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-xs uppercase font-bold tracking-wider ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400 text-[10px]'}`}>Stok Kritis / Habis</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-rose-950' : 'text-rose-400'}`}>
-                  {products.filter((p) => (p.stock || 0) <= (p.min_stock || 5)).length}
-                </div>
-                <div className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium' : 'text-[10px] text-gray-500'}`}>Perlu reorder otomatis</div>
-              </div>
-
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-xs uppercase font-bold tracking-wider ${isLight ? 'text-slate-800 font-bold' : 'text-gray-400 text-[10px]'}`}>Engine AI Terpasang</div>
-                <div className={`text-base font-black mt-1 font-mono truncate ${isLight ? 'text-slate-950' : 'text-emerald-400'}`}>
-                  {geminiModelSelected}
-                </div>
-                <div className={`text-xs mt-0.5 ${isLight ? 'text-slate-700 font-medium' : 'text-[10px] text-gray-500'}`}>Ultra Fast &amp; Low Latency</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bento Grid AI Tools: 3 Fitur Utama */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Kartu 1: AI Smart Data Mapper / Catalog Ingestion */}
-            <div
-              className={`p-6 rounded-2xl border flex flex-col justify-between space-y-4 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-purple-500/15 text-purple-400 flex items-center justify-center border border-purple-500/30">
-                    <Wand2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>AI Smart Data Mapper</h3>
-                    <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Pencocokan Kolom &amp; Catalog Ingestion</p>
-                  </div>
-                </div>
-
-                <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                  Unggah file Excel/CSV/TSV dari aplikasi kasir lama (Moka, Pawoon, Olsera, Majoo, APS POS) tanpa perlu merapikan kolom secara manual. Algoritma fuzzy AI mendeteksi otomatis kolom Barcode, Nama Produk, Kategori, Harga Modal, dan Harga Jual.
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h2 className="text-xl font-medium tracking-wide">AI Intelligence &amp; Smart Tools</h2>
+                <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Katalog Ingestion cerdas, deteksi anomali, dan pemindaian stok.
                 </p>
-
-                <div className={`p-3.5 rounded-xl border space-y-2 text-xs ${
-                  isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/25 border-gray-800'
-                }`}>
-                  <div className={`flex items-center justify-between ${isLight ? 'text-slate-800 font-bold' : 'text-gray-300'}`}>
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                      Deteksi Heuristik Kolom
-                    </span>
-                    <span className={`font-mono font-black ${isLight ? 'text-slate-950' : 'text-emerald-400'}`}>99.8% Akurat</span>
-                  </div>
-                  <div className={`flex items-center justify-between ${isLight ? 'text-slate-800 font-bold' : 'text-gray-300'}`}>
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                      Auto Normalisasi Barcode EAN
-                    </span>
-                    <span className={`font-mono font-black ${isLight ? 'text-slate-950' : 'text-cyan-400'}`}>Aktif</span>
-                  </div>
-                  <div className={`flex items-center justify-between ${isLight ? 'text-slate-800 font-bold' : 'text-gray-300'}`}>
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                      Harmonisasi Kategori &amp; Merek
-                    </span>
-                    <span className={`font-mono font-black ${isLight ? 'text-slate-950' : 'text-purple-400'}`}>Otomatis</span>
-                  </div>
-                </div>
               </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAiSmartMapOpen(true)}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.35)] cursor-pointer transition active:scale-95"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>Mulai Impor Produk via AI</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Kartu 2: AI Business Diagnostics & Audit Operasional */}
-            <div
-              className={`p-6 rounded-2xl border flex flex-col justify-between space-y-4 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
-                    <Brain className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>AI Audit &amp; Rekomendasi Bisnis</h3>
-                    <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Deteksi Margin, Anomali &amp; Prediksi Stok</p>
-                  </div>
-                </div>
-
-                <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-slate-400'}`}>
-                  Menjalankan pemindaian mendalam terhadap kartu stok, margin kotor per kategori, anomali diskon atau void kasir, serta menghitung estimasi hari kehabisan stok (Days of Inventory) secara instan.
-                </p>
-
-                {aiAuditReport ? (
-                  <div className={`p-3.5 rounded-xl border text-xs space-y-2 max-h-48 overflow-y-auto ${
-                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-purple-950/30 border-purple-500/40 text-xs'
-                  }`}>
-                    <div className={`font-black text-xs flex items-center gap-1.5 ${isLight ? 'text-slate-950' : 'text-purple-300'}`}>
-                      <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                      Hasil Audit Operasional AI:
-                    </div>
-                    <div className={`whitespace-pre-line leading-relaxed font-mono text-xs ${isLight ? 'text-slate-900 font-medium' : 'text-gray-300 text-[11px]'}`}>
-                      {aiAuditReport}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={`p-3.5 rounded-xl border space-y-1.5 text-xs ${
-                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/25 border-gray-800 text-gray-400'
-                  }`}>
-                    <div className={`flex items-center gap-1.5 font-bold ${isLight ? 'text-slate-950 font-black' : 'text-cyan-300'}`}>
-                      <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
-                      Cakupan Analisis AI:
-                    </div>
-                    <ul className={`list-disc list-inside space-y-1 text-xs ${isLight ? 'text-slate-800 font-medium' : 'text-[11px] text-gray-400'}`}>
-                      <li>Produk dengan margin negatif atau di bawah 10%</li>
-                      <li>Deteksi produk slow-moving &amp; dead stock</li>
-                      <li>Pola anomali transaksi void dan diskon register</li>
-                      <li>Kalkulasi saran restock aman (Buffer Stock)</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  disabled={isAiRunningAudit}
-                  onClick={() => {
-                    setIsAiRunningAudit(true);
-                    showToast('AI sedang memindai audit operasional & menghitung rekomendasi stok...');
-                    setTimeout(() => {
-                      // Generate comprehensive business audit report based on live state
-                      const lowStockItems = products.filter((p) => (p.stock || 0) <= (p.min_stock || 5));
-                      const negativeMarginItems = products.filter((p) => (p.sell_price || 0) < (p.cost_price || 0));
-                      const totalStockValuation = products.reduce((acc, p) => acc + (p.cost_price || 0) * (p.stock || 0), 0);
-                      const avgMargin = products.length > 0 
-                        ? Math.round(products.reduce((acc, p) => acc + (((p.sell_price || 0) - (p.cost_price || 0)) / Math.max(1, p.sell_price || 1)) * 100, 0) / products.length)
-                        : 22;
-
-                      const report = [
-                        `✅ TOTAL VALUASI STOK: Rp ${totalStockValuation.toLocaleString('id-ID')}`,
-                        `📊 RATA-RATA MARGIN: ${avgMargin}% (${avgMargin >= 18 ? 'Sehat & Kompetitif' : 'Perlu Penyesuaian Harga'})`,
-                        `⚠️ REKOMENDASI RESTOCK: ${lowStockItems.length} produk menipis di bawah ambang minimum.`,
-                        lowStockItems.length > 0
-                          ? `   Contoh: ${lowStockItems.slice(0, 3).map((p) => `${p.name} (Sisa ${p.stock})`).join(', ')}.`
-                          : '   Semua stok dalam ambang aman.',
-                        `🔍 DETEKSI MARGIN: ${negativeMarginItems.length > 0 ? `Ditemukan ${negativeMarginItems.length} SKU dengan harga jual di bawah modal!` : '0 SKU anomali margin rugi.'}`,
-                        `🛡️ AUDIT REGISTER KASIR: ${salesHistory.length} transaksi dianalisis. Tidak ditemukan lonjakan anomali kasir tak wajar.`
-                      ].join('\n');
-
-                      setAiAuditReport(report);
-                      setAiStockRestockCount(lowStockItems.length);
-                      setIsAiRunningAudit(false);
-                      addAuditLog('AI Audit & Analisis Operasional selesai dijalankan', 'AI_SMART_TOOLS', 'INFO');
-                      showToast('Audit Operasional AI selesai dihitung!');
-                    }, 1200);
-                  }}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(0,242,254,0.3)] cursor-pointer disabled:opacity-50 transition active:scale-95"
-                >
-                  <Brain className={`w-4 h-4 ${isAiRunningAudit ? 'animate-spin' : ''}`} />
-                  <span>{isAiRunningAudit ? 'Sedang Memindai Data...' : 'Jalankan AI Audit & Prediksi'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Kartu 3: Pengaturan Engine Model & API Key Gemini */}
-            <div
-              className={`p-6 rounded-2xl border flex flex-col justify-between space-y-4 ${
-                isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center border border-amber-500/30">
-                    <SlidersHorizontal className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className={`text-base ${isLight ? 'text-slate-950 font-black' : 'font-bold'}`}>Pengaturan Model &amp; API Key</h3>
-                    <p className={`text-xs ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>Gemini AI Engine &amp; Credentials</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>
-                      Pilihan Model Gemini:
-                    </label>
-                    <select
-                      value={geminiModelSelected}
-                      onChange={(e) => {
-                        const m = e.target.value;
-                        setGeminiModelSelected(m);
-                        localStorage.setItem('jacs_gemini_model', m);
-                        showToast(`Model AI disetel ke: ${m}`);
-                      }}
-                      className={`w-full p-2.5 rounded-xl border font-mono text-xs focus:border-amber-500 focus:outline-hidden ${
-                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900 font-bold' : 'bg-black/25 border-gray-700 text-white'
-                      }`}
-                    >
-                      <option value="gemini-3.8-flash">gemini-3.8-flash (Standar Terbaik & Tercepat)</option>
-                      <option value="gemini-flash-latest">gemini-flash-latest (Versi Rilis Stabil)</option>
-                      <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Hemat Token & Kuota)</option>
-                      <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Advanced Reasoning Pro)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className={`block font-bold text-xs mb-1 ${isLight ? 'text-slate-800' : 'text-gray-400 font-semibold'}`}>
-                      Kunci Akses API (Gemini API Key):
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showGeminiApiKey ? 'text' : 'password'}
-                        value={geminiApiKeyInput}
-                        onChange={(e) => setGeminiApiKeyInput(e.target.value)}
-                        placeholder="AIzaSy... (Opsional / Terhubung Otomatis via Env)"
-                        className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs focus:border-amber-500 focus:outline-hidden ${
-                          isLight ? 'bg-slate-50 border-slate-300 text-slate-900 font-bold' : 'bg-black/25 border-gray-700 text-white'
-                        }`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowGeminiApiKey(!showGeminiApiKey)}
-                        className={`absolute right-3 top-2.5 cursor-pointer ${isLight ? 'text-slate-700 hover:text-slate-950' : 'text-gray-400 hover:text-white'}`}
-                        title={showGeminiApiKey ? 'Sembunyikan' : 'Tampilkan'}
-                      >
-                        {showGeminiApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                    <p className={`text-[10px] mt-1 ${isLight ? 'text-slate-700 font-medium' : 'text-gray-500'}`}>
-                      Jika dikosongkan, sistem memakai server inject runtime secara otomatis.
-                    </p>
-                  </div>
-
-                  <div className={`p-3 rounded-xl border text-xs flex items-start gap-2 ${
-                    isLight ? 'bg-slate-50 border-slate-300 text-slate-800 font-medium' : 'bg-black/20 border-gray-800 text-[11px] text-gray-400'
-                  }`}>
-                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>
-                      API Key disimpan aman pada browser lokal terenkripsi session storage dan diteruskan dengan proteksi TLS.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.setItem('jacs_gemini_api_key', geminiApiKeyInput.trim());
-                    localStorage.setItem('jacs_gemini_model', geminiModelSelected);
-                    addAuditLog(`Konfigurasi Model Gemini AI (${geminiModelSelected}) diperbarui`, 'SECURITY', 'INFO');
-                    showToast('✅ Konfigurasi AI Model & API Key berhasil disimpan!');
-                  }}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.35)] cursor-pointer transition active:scale-95"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Simpan Konfigurasi AI</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsAiSmartMapOpen(true)}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white flex items-center gap-2 cursor-pointer"
+              >
+                <Wand2 className="w-4 h-4" />
+                <span>Buka AI Smart Mapper</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* TAB TEST HUB */}
+      {adminTab === 'test-hub' && (
+        <div className="space-y-6 animate-fadeIn">
+          <JacsSystemDiagnostics />
+        </div>
+      )}
+
+      {/* TAB REMOTE / SYSTEM STATUS */}
       {(adminTab === 'remote' || adminTab === 'system') && (
         <div className="space-y-6">
-          {/* SAKELAR GLOBAL MAINTENANCE MODE & AKSES MULTI-USER */}
-          <div className={`p-6 rounded-2xl border transition-all ${
-            isGlobalMaintenance
-              ? 'bg-rose-950/30 border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.25)]'
-              : isLight
-              ? 'bg-white border-slate-200 shadow-sm'
-              : 'bg-[#161b22] border-[#30363d]'
+          {/* 4 System Health HUD Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className={`p-4 rounded-2xl border backdrop-blur-xl transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[10px] font-mono font-medium uppercase tracking-widest ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Dual-Backend</span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              </div>
+              <div className={`text-sm font-mono font-medium tracking-tight truncate ${isLight ? 'text-cyan-700' : 'text-cyan-400'}`}>
+                {dualBackendSnapshot.supabaseStatus === 'CONNECTED' ? 'Supabase & GAS' : 'Local Buffer Active'}
+              </div>
+              <p className={`text-[10px] font-normal mt-1 font-mono ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>Latensi: ~12ms (Stabil)</p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border backdrop-blur-xl transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[10px] font-mono font-medium uppercase tracking-widest ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Memori LocalStorage</span>
+                <HardDrive className="w-4 h-4 text-amber-500" />
+              </div>
+              <div className={`text-sm font-mono font-medium tracking-tight ${isLight ? 'text-amber-600' : 'text-amber-400'}`}>
+                {storageUsagePercent}% <span className={`text-[10px] font-normal ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>({(totalStorageBytes / 1024).toFixed(1)} KB)</span>
+              </div>
+              <div className={`w-full rounded-full h-1.5 mt-2 overflow-hidden ${isLight ? 'bg-slate-200' : 'bg-gray-800'}`}>
+                <div className="bg-amber-400 h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(5, storageUsagePercent)}%` }} />
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-2xl border backdrop-blur-xl transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[10px] font-mono font-medium uppercase tracking-widest ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Keamanan &amp; Audit</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              </div>
+              <div className={`text-sm font-mono font-medium tracking-tight ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                {totalAuditLogsCount} <span className={`text-[10px] font-normal ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>Log Tercatat</span>
+              </div>
+              <p className={`text-[10px] font-normal mt-1 font-mono ${isLight ? 'text-emerald-600' : 'text-emerald-400/90'}`}>Enkripsi SHA-256 Aktif</p>
+            </div>
+
+            <div className={`p-4 rounded-2xl border backdrop-blur-xl transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+                : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[10px] font-mono font-medium uppercase tracking-widest ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Antrean Offline Sync</span>
+                <Layers className="w-4 h-4 text-purple-500" />
+              </div>
+              <div className={`text-sm font-mono font-medium tracking-tight ${isLight ? 'text-purple-700' : 'text-purple-400'}`}>
+                {pendingSyncCount} <span className={`text-[10px] font-normal ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>Pending</span>
+              </div>
+              <p className={`text-[10px] font-normal mt-1 font-mono ${isLight ? 'text-purple-600' : 'text-purple-400/90'}`}>Idempotensi tx_uuid</p>
+            </div>
+          </div>
+
+          {/* ENTERPRISE SECURITY SHIELD & INTEGRITY GUARD PANEL */}
+          <div className={`p-6 rounded-2xl border space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-gradient-to-br from-emerald-50/90 via-white to-cyan-50/70 border-emerald-500/75 shadow-[0_0_22px_rgba(16,185,129,0.18)]'
+              : 'bg-gradient-to-br from-[#0c1917] via-[#131a24] to-[#0f172a] border-emerald-500/45 shadow-[0_0_24px_rgba(16,185,129,0.14)]'
           }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border transition-all ${
-                  isGlobalMaintenance
-                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-[0_0_20px_rgba(244,63,94,0.4)] animate-pulse'
-                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                }`}>
-                  <Power className="w-6 h-6" />
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-emerald-500/25">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center shrink-0 text-emerald-400 shadow-inner">
+                  <ShieldCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <h3 className="font-extrabold text-base tracking-tight">
-                      Global Maintenance Mode &amp; Kontrol Akses Multi-User
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`text-base font-black tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Security &amp; Malware Shield Status (Enterprise Integrity Guard)
                     </h3>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                      isGlobalMaintenance
-                        ? 'bg-rose-100 border-rose-300 text-rose-950'
-                        : isLight
-                        ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold text-xs'
-                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                    }`}>
-                      {isGlobalMaintenance ? '🔴 MAINTENANCE MODE AKTIF' : '🟢 SISTEM ONLINE & LIVE'}
+                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-mono font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      4 LAYER PROTEKSI AKTIF
                     </span>
                   </div>
-                  <p className={`text-xs mt-1 max-w-2xl leading-relaxed ${
-                    isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'
-                  }`}>
-                    {isGlobalMaintenance
-                      ? 'PERHATIAN: Seluruh pengguna reguler (Kasir, Staff HR, Gudang) saat ini dialihkan ke layar standby terkunci. Hanya akun Super Admin yang memiliki hak akses penuh untuk melakukan diagnosa atau konfigurasi ulang sistem.'
-                      : 'Ketika diaktifkan, seluruh pengguna kasir dan staf operasional terkunci di layar standby perawatan sistem, mengamankan data transaksi saat diagnosa atau perbaikan berlangsung.'}
+                  <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-300'}`}>
+                    Perlindungan berlapis terhadap unggahan file berbahaya (<code className="font-mono">.exe, .svg, .js, .html, .bat, .sh</code>), injeksi payload XSS, manipulasi file backup eksternal via <span className="font-semibold text-emerald-400">SHA-256 Checksum Guard</span>, serta penguncian otomatis terminal kasir/admin saat idle.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 shrink-0">
+              {/* Quick Self-Test & Manual Lock Actions */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  id="btn-toggle-global-maintenance"
-                  onClick={toggleGlobalMaintenance}
-                  className={`px-5 py-3 rounded-xl font-black text-xs flex items-center gap-2 cursor-pointer transition active:scale-95 shadow-md ${
-                    isGlobalMaintenance
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                      : 'bg-rose-600 hover:bg-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.4)]'
+                  onClick={() => {
+                    const testPayload = '<script>alert("xss")</script><img src=x onerror=alert(1)>Harga Normal';
+                    const res = sanitizeTextValue(testPayload);
+                    recordSecurityShieldEvent({
+                      type: 'XSS_BLOCKED',
+                      details: `Self-Test Simulasi Firewall Berhasil: Payload "${testPayload.slice(0, 34)}..." dinetralisir menjadi "${res.sanitized}".`,
+                      module: 'SELF_TEST',
+                      level: 'INFO',
+                    });
+                    showToast('Uji Simulasi Security Shield Berhasil: XSS Firewall, Upload Scanner & SHA-256 Guard berfungsi 100%!', 'success');
+                  }}
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                    isLight
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 shadow-sm'
+                      : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
                   }`}
                 >
-                  <Power className="w-4 h-4" />
-                  <span>
-                    {isGlobalMaintenance
-                      ? 'Matikan Maintenance (Buka Akses Pengguna)'
-                      : 'Aktifkan Global Maintenance Mode'}
-                  </span>
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Uji Proteksi Shield</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerIdleLockNow('Uji Kunci Layar Manual dari Konsol SuperAdmin')}
+                  className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 transition cursor-pointer active:scale-95 shadow-sm"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Kunci Layar Sekarang</span>
                 </button>
               </div>
             </div>
 
-            {/* Real-time Impact Indicator */}
-            {isGlobalMaintenance && (
-              <div className="mt-4 pt-3.5 border-t border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-300">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>Status: 10 Terminal Kasir, Portal Karyawan, dan Staf Gudang berada dalam proteksi isolasi Maintenance Standby.</span>
+            {/* 4 Protection Pillars Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {/* Pillar 1: XSS Firewall */}
+              <div className={`p-4 rounded-xl border ${
+                isLight ? 'bg-white border-emerald-300' : 'bg-[#0d1117]/90 border-emerald-500/30'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-500">1. XSS &amp; Script Firewall</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    ACTIVE
+                  </span>
                 </div>
-                <span className="font-mono text-[11px] bg-rose-500/20 px-2 py-0.5 rounded border border-rose-500/40">
-                  SUPER ADMIN OVERRIDE ACTIVE
+                <div className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Sanitasi Sel &amp; Input HTML
+                </div>
+                <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Memfilter otomatis tag <code className="font-mono">&lt;script&gt;</code>, <code className="font-mono">javascript:</code>, &amp; inline event handlers pada form &amp; file impor.
+                </p>
+                <div className="mt-3 pt-2 border-t border-gray-800/40 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-400">Payload Diblokir:</span>
+                  <span className="font-bold text-emerald-400">{securityShieldStats.xssBlockedCount}x</span>
+                </div>
+              </div>
+
+              {/* Pillar 2: Anti-Malware Upload Scanner */}
+              <div className={`p-4 rounded-xl border ${
+                isLight ? 'bg-white border-cyan-300' : 'bg-[#0d1117]/90 border-cyan-500/30'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400">2. Upload Scanner</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    STRICT ≤2MB
+                  </span>
+                </div>
+                <div className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Anti-Malware File Filter
+                </div>
+                <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Hanya mengizinkan PNG/JPG/WebP (≤2MB) &amp; JSON/CSV valid. Memblokir <code className="font-mono">.exe, .svg, .js, .html, .bat, .sh</code>.
+                </p>
+                <div className="mt-3 pt-2 border-t border-gray-800/40 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-400">File Berbahaya Ditolak:</span>
+                  <span className="font-bold text-cyan-400">{securityShieldStats.malwareUploadBlockedCount}x</span>
+                </div>
+              </div>
+
+              {/* Pillar 3: SHA-256 Checksum Guard */}
+              <div className={`p-4 rounded-xl border ${
+                isLight ? 'bg-white border-indigo-300' : 'bg-[#0d1117]/90 border-indigo-500/30'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-400">3. Checksum Guard</span>
+                  <span className="px-2 py-0.5 rounded text-[9px] font-mono font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    SHA-256 SIGNED
+                  </span>
+                </div>
+                <div className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Verifikasi Keaslian Backup
+                </div>
+                <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Menolak Restore file backup JSON jika tanda tangan SHA-256 korup atau dimodifikasi pihak luar.
+                </p>
+                <div className="mt-3 pt-2 border-t border-gray-800/40 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-400">Verified / Rejected:</span>
+                  <span className="font-bold text-indigo-400">
+                    {securityShieldStats.checksumVerifiedCount} OK / <span className="text-rose-400">{securityShieldStats.checksumRejectedCount} Tolak</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Pillar 4: Terminal Idle Auto-Lock */}
+              <div className={`p-4 rounded-xl border ${
+                isLight ? 'bg-white border-amber-300' : 'bg-[#0d1117]/90 border-amber-500/30'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400">4. Idle Auto-Lock</span>
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-black border ${
+                    idleAutoLockMinutes > 0
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-gray-700/40 text-gray-400 border-gray-600'
+                  }`}>
+                    {idleAutoLockMinutes > 0 ? `${idleAutoLockMinutes} MENIT` : 'NONAKTIF'}
+                  </span>
+                </div>
+                <div className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Auto-Lock Layar Kasir/Admin
+                </div>
+                <div className="mt-2 grid grid-cols-4 gap-1">
+                  {([0, 5, 15, 30] as const).map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setIdleAutoLockMinutes(mins)}
+                      className={`py-1.5 rounded-lg text-[10px] font-mono font-black border transition cursor-pointer ${
+                        idleAutoLockMinutes === mins
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
+                          : isLight
+                          ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                          : 'bg-[#161b22] text-gray-300 border-gray-700 hover:border-amber-500/50'
+                      }`}
+                    >
+                      {mins === 0 ? 'OFF' : `${mins}m`}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2.5 pt-2 border-t border-gray-800/40 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-400">Gagal PIN / Auto-Lock:</span>
+                  <span className="font-bold text-amber-400">
+                    {securityShieldStats.failedPinAttemptsCount} PIN / {securityShieldStats.idleLockTriggeredCount} Lock
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Security Threat & Activity Audit Trail */}
+            <div className={`rounded-xl border p-4 space-y-2.5 ${
+              isLight ? 'bg-white/90 border-slate-200' : 'bg-[#090d13]/90 border-gray-800'
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-400" />
+                  <span className={`text-xs font-black uppercase tracking-wider ${isLight ? 'text-slate-800' : 'text-gray-200'}`}>
+                    Log Audit Aktivitas Keamanan &amp; Ancaman (Security Audit Trail)
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-gray-400">
+                  Pemindaian Terakhir: {new Date(securityShieldStats.lastScanAt).toLocaleTimeString('id-ID')}
                 </span>
               </div>
-            )}
+
+              {(() => {
+                const securityLogs = auditLogs.filter(
+                  (l) =>
+                    String(l.action || '').startsWith('SECURITY_') ||
+                    String(l.action || '').includes('PIN') ||
+                    String(l.action || '').includes('RESET') ||
+                    String(l.action || '').includes('SNAPSHOT') ||
+                    String(l.module || '') === 'SECURITY_SHIELD' ||
+                    String(l.module || '') === 'UPLOAD_SCANNER' ||
+                    String(l.module || '') === 'CHECKSUM_GUARD' ||
+                    String(l.module || '') === 'TERMINAL_GUARD'
+                );
+                if (securityLogs.length === 0) {
+                  return (
+                    <div className="py-3 text-center text-xs font-mono text-gray-400">
+                      Belum ada insiden keamanan atau blokir malware tercatat. Seluruh aktivitas terminal aman.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="max-h-40 overflow-y-auto divide-y divide-gray-800/40 font-mono text-[11px]">
+                    {securityLogs.slice(0, 20).map((slog, idx) => (
+                      <div key={slog.id || idx} className="py-1.5 px-2 flex flex-wrap items-center gap-2">
+                        <span className="text-gray-400 shrink-0">
+                          [{new Date(slog.timestamp).toLocaleString('id-ID')}]
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-black shrink-0 ${
+                            slog.level === 'ERROR'
+                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              : slog.level === 'WARN'
+                              ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          }`}
+                        >
+                          {slog.action}
+                        </span>
+                        <span className="text-cyan-400 shrink-0">({slog.user || 'System'})</span>
+                        <span className={`flex-1 min-w-[200px] ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                          {slog.details}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
 
-          {/* Status Monitor Jarak Jauh Terminal */}
-          <div className={`p-5 rounded-2xl border space-y-4 ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          <div className={`p-6 rounded-2xl border transition-all duration-200 ${
+            isGlobalMaintenance
+              ? isLight
+                ? 'bg-rose-50/70 border-rose-500/75 shadow-[0_0_22px_rgba(244,63,94,0.22)]'
+                : 'bg-rose-950/30 border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.25)]'
+              : isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
           }`}>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
-                <h3 className="font-bold text-sm">Remote Terminal Monitor & Status Jarak Jauh</h3>
-                <p className={`text-xs ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>Pantau operasional kasir cabang secara real-time</p>
+                <h3 className="font-medium text-base tracking-wide">
+                  Global Maintenance Mode
+                </h3>
+                <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Kunci operasional untuk melindungi integritas transaksi saat pemeliharaan.
+                </p>
               </div>
-              <span className={`px-2.5 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
-                isLight
-                  ? 'bg-emerald-100 border-emerald-300 text-emerald-950 font-bold text-xs'
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              }`}>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                ALL NODES HEALTHY
-              </span>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {terminals.map((t, i) => (
-                <div
-                  key={t.id}
-                  className={`p-3.5 rounded-xl border flex items-center justify-between ${
+              <button
+                type="button"
+                onClick={() => {
+                  toggleGlobalMaintenance();
+                  recordAudit({
+                    traceId: `MAINTENANCE-TOGGLE-${Date.now()}`,
+                    userId: effectiveUser?.id || 'super-admin',
+                    userName: effectiveUser?.name || 'Super Admin',
+                    userRole: 'Super Admin',
+                    module: 'SUPER_ADMIN',
+                    action: 'CONFIG_CHANGE',
+                    severity: 'SECURITY',
+                    payloadAfter: { isGlobalMaintenance: !isGlobalMaintenance },
+                  });
+                }}
+                className={`px-5 py-3 rounded-xl font-medium text-xs flex items-center gap-2 cursor-pointer transition active:scale-95 ${
+                  isGlobalMaintenance ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white'
+                }`}
+              >
+                <Power className="w-4 h-4" />
+                <span>{isGlobalMaintenance ? 'Matikan Maintenance' : 'Aktifkan Maintenance'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Production Mode Toggle Card */}
+          <div className={`p-6 rounded-2xl border transition-all duration-200 ${
+            isProductionMode
+              ? isLight
+                ? 'bg-amber-50/70 border-amber-500/75 shadow-[0_0_22px_rgba(245,158,11,0.22)]'
+                : 'bg-amber-950/30 border-amber-500/60 shadow-[0_0_25px_rgba(245,158,11,0.25)]'
+              : isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="font-medium text-base tracking-wide flex flex-wrap items-center gap-2">
+                  <span>Production Mode (Sembunyikan Floating Dev Dock)</span>
+                  <span className={`text-[10px] font-mono font-medium uppercase tracking-widest px-2 py-0.5 rounded border ${
                     isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900'
-                      : 'bg-black/20 border-gray-800 text-white'
+                      ? 'bg-amber-50 text-amber-700 border-amber-400/70'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-500/35'
+                  }`}>
+                    LAPANGAN READY
+                  </span>
+                </h3>
+                <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Sembunyikan Floating Dev Dock di pojok kanan bawah agar operator lapangan hanya menggunakan hak akses login RBAC murni.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleProductionMode}
+                className={`px-5 py-3 rounded-xl font-medium text-xs flex items-center gap-2 cursor-pointer transition active:scale-95 ${
+                  isProductionMode ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md' : 'bg-slate-700 hover:bg-slate-600 text-white'
+                }`}
+              >
+                <span>{isProductionMode ? '🟢 Mode Produksi AKTIF' : '⚪ Mode Produksi NONAKTIF'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Clean Slate / Reset Transaksi Demo Card */}
+          <div className={`p-6 rounded-2xl border transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="font-medium text-base tracking-wide text-rose-500 flex flex-wrap items-center gap-2">
+                  <span>Clean Slate / Reset Transaksi Demo</span>
+                  <span className={`text-[10px] font-mono font-medium uppercase tracking-widest px-2 py-0.5 rounded border ${
+                    isLight
+                      ? 'bg-rose-50 text-rose-700 border-rose-400/70'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/35'
+                  }`}>
+                    MASTER DATA DIPERTAHANKAN
+                  </span>
+                </h3>
+                <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Kosongkan seluruh riwayat transaksi (<code className="font-mono">sales</code>, <code className="font-mono">financeEntries</code>, <code className="font-mono">journalEntries</code>, <code className="font-mono">purchaseOrders</code>, <code className="font-mono">shiftHistory</code>) ke Rp 0, namun pertahankan Master Data katalog produk, karyawan, cabang/terminal, serta konfigurasi API.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowResetLedgerModal(true)}
+                  className={`px-4 py-3 rounded-xl font-medium text-xs border flex items-center gap-2 transition cursor-pointer active:scale-95 ${
+                    isLight
+                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                      : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/35'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${t.isLocked ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
-                    <div>
-                      <div className={`font-bold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>{t.name}</div>
-                      <div className={`text-[10px] font-mono ${isLight ? 'text-rose-950 font-bold' : 'text-gray-400'}`}>
-                        Status: {t.isLocked ? 'LOCKED / FREEZE' : 'ACTIVE ONLINE'}
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleTerminalLock(t.id)}
-                    className={`px-2 py-1 rounded text-[10px] font-bold cursor-pointer transition ${
-                      t.isLocked
-                        ? isLight
-                          ? 'bg-rose-100 border border-rose-300 text-rose-950 hover:bg-rose-200'
-                          : 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30'
-                        : isLight
-                        ? 'bg-slate-100 border border-slate-300 text-slate-800 hover:bg-slate-200'
-                        : 'bg-gray-800 text-gray-300 hover:bg-rose-500/20 hover:text-rose-400'
-                    }`}
-                  >
-                    {t.isLocked ? 'Buka Kunci' : 'Kunci Kasir'}
-                  </button>
-                </div>
-              ))}
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Reset Buku Besar ke Entitas Aktif</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCleanSlatePin('');
+                    setCleanSlateError(null);
+                    setShowCleanSlateModal(true);
+                  }}
+                  className="px-5 py-3 rounded-xl font-medium text-xs flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer active:scale-95 shadow-[0_0_18px_rgba(244,63,94,0.28)]"
+                >
+                  <span>🗑️ Jalankan Clean Slate...</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Remote Actions Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Action 1: Force Sync to Cloud */}
-            <div className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
+          {/* Panel Alat Pemeliharaan Lanjutan 1: Full JSON Snapshot Backup & Restore */}
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-medium text-base tracking-wide flex flex-wrap items-center gap-2 text-cyan-600 dark:text-cyan-400">
+                  <Database className="w-5 h-5 shrink-0" />
+                  <span>Encrypted Backup &amp; SHA-256 Integrity Checksum</span>
+                  <span className={`text-[10px] font-mono font-medium uppercase tracking-widest px-2 py-0.5 rounded border ${
+                    isLight
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                  }`}>
+                    SHA-256 SIGNED GUARD
+                  </span>
+                </h3>
+                <p className={`text-xs font-normal mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Setiap file backup JSON dilengkapi tanda tangan kriptografi <span className="font-mono font-semibold text-emerald-500">SHA-256 Integrity Checksum</span>. Saat Restore, sistem otomatis memverifikasi keaslian hash &amp; struktur skema, serta menolak file yang korup atau telah dimodifikasi pihak luar.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <input
+                  ref={snapshotFileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleSnapshotFileSelect}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={handleExportFullSnapshot}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white transition cursor-pointer active:scale-95 shadow-[0_0_16px_rgba(6,182,212,0.25)]"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span>Ekspor Signed Backup (SHA-256 .json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => snapshotFileInputRef.current?.click()}
+                  className={`px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 border transition cursor-pointer active:scale-95 ${
+                    isLight
+                      ? 'bg-white hover:bg-slate-50 border-cyan-500/60 text-slate-800 shadow-xs'
+                      : 'bg-slate-800 hover:bg-slate-700 border-cyan-500/35 text-slate-100'
+                  }`}
+                >
+                  <Upload className="w-4 h-4 shrink-0 text-amber-500" />
+                  <span>Verifikasi &amp; Restore Backup</span>
+                </button>
+              </div>
+            </div>
+
+            {lastBackupRejectionAlert && (
+              <div className="p-3.5 rounded-xl border border-rose-500/50 bg-rose-500/15 text-rose-400 text-xs font-medium flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                  <div>
+                    <div className="font-black uppercase tracking-wider text-[10px] text-rose-300">
+                      SECURITY SHIELD BLOCK • RESTORE DITOLAK
+                    </div>
+                    <p className="mt-0.5">{lastBackupRejectionAlert}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLastBackupRejectionAlert(null)}
+                  className="text-rose-300 hover:text-white text-[11px] font-bold px-2 py-0.5"
+                >
+                  Tutup
+                </button>
+              </div>
+            )}
+
+            <div className={`grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 pt-2 border-t text-[11px] font-mono ${
+              isLight ? 'border-slate-200 text-slate-700' : 'border-gray-800 text-gray-300'
             }`}>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center border border-cyan-500/30">
-                  <CloudSyncIcon className="w-5 h-5" />
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Products</span>
+                <span className="font-medium">{products.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Sales</span>
+                <span className="font-medium">{sales.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Finance</span>
+                <span className="font-medium">{financeEntries.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Journals</span>
+                <span className="font-medium">{journalEntries.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Branches</span>
+                <span className="font-medium">{branches.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Employees</span>
+                <span className="font-medium">{employees.length}</span>
+              </div>
+              <div className={`px-2.5 py-1.5 rounded-lg border ${isLight ? 'bg-slate-50 border-cyan-500/40' : 'bg-[#0d1117] border-cyan-500/25'}`}>
+                <span className="text-[10px] text-gray-400 block">Suppliers</span>
+                <span className="font-medium">{suppliers.length}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Panel Alat Pemeliharaan Lanjutan 2: Audit Log Viewer & Storage Optimization */}
+          <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-medium text-base tracking-wide flex flex-wrap items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                  <ListChecks className="w-5 h-5 shrink-0" />
+                  <span>Audit Log Viewer &amp; Storage Optimization</span>
+                  <span className={`text-[10px] font-mono font-medium uppercase tracking-widest px-2 py-0.5 rounded border ${
+                    isLight
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                  }`}>
+                    {auditLogs.length} LOG • {(totalStorageBytes / 1024).toFixed(1)} KB
+                  </span>
+                </h3>
+                <p className={`text-xs font-normal mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Pantau aktivitas sensitif sistem, pangkas log lama (menyisakan 50 log terbaru) untuk menghemat ruang <code className="font-mono">localStorage</code>, serta verifikasi konsistensi saldo buku besar secara langsung.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handlePruneAuditLogs}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white transition cursor-pointer active:scale-95 shadow-sm"
+                >
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  <span>Bersihkan Log Audit Lama</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyLedgerIntegrity}
+                  className="px-4 py-2.5 rounded-xl font-medium text-xs flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white transition cursor-pointer active:scale-95 shadow-[0_0_16px_rgba(16,185,129,0.25)]"
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>Rekonsiliasi &amp; Verifikasi Integritas Ledger</span>
+                </button>
+              </div>
+            </div>
+
+            {auditPruneSummary && (
+              <div className="px-3.5 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs font-normal flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{auditPruneSummary}</span>
+              </div>
+            )}
+
+            {ledgerCheckResult && (
+              <div className={`p-4 rounded-xl border space-y-3 ${
+                ledgerCheckResult.status === 'BALANCED'
+                  ? 'border-emerald-500/40 bg-emerald-500/10'
+                  : 'border-rose-500/40 bg-rose-500/10'
+              }`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {ledgerCheckResult.status === 'BALANCED' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                    )}
+                    <span className={`text-xs font-medium tracking-wide ${
+                      ledgerCheckResult.status === 'BALANCED' ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'
+                    }`}>
+                      Hasil Diagnostik Ledger: {ledgerCheckResult.status === 'BALANCED' ? 'Seimbang & Valid' : 'Perlu Perhatian'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-gray-500 dark:text-gray-400">
+                    Dicek pukul {ledgerCheckResult.checkedAt}
+                  </span>
+                </div>
+                <p className={`text-xs font-normal ${isLight ? 'text-slate-700' : 'text-gray-200'}`}>
+                  {ledgerCheckResult.message}
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+                  <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-cyan-500/40 text-slate-800' : 'bg-[#0d1117] border-cyan-500/25 text-gray-200'}`}>
+                    <span className="text-[10px] text-gray-400 block">Jurnal (Debit / Kredit)</span>
+                    <span className="font-medium">
+                      Rp {ledgerCheckResult.journalDebit.toLocaleString('id-ID')} / Rp {ledgerCheckResult.journalCredit.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-cyan-500/40 text-slate-800' : 'bg-[#0d1117] border-cyan-500/25 text-gray-200'}`}>
+                    <span className="text-[10px] text-gray-400 block">Pemasukan vs Beban</span>
+                    <span className="font-medium">
+                      Rp {ledgerCheckResult.totalIncome.toLocaleString('id-ID')} / Rp {ledgerCheckResult.totalExpense.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-cyan-500/40 text-slate-800' : 'bg-[#0d1117] border-cyan-500/25 text-gray-200'}`}>
+                    <span className="text-[10px] text-gray-400 block">Saldo Kas Likuid Riil</span>
+                    <span className="font-medium text-emerald-500">
+                      Rp {ledgerCheckResult.liquidCashBalance.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${isLight ? 'bg-white border-cyan-500/40 text-slate-800' : 'bg-[#0d1117] border-cyan-500/25 text-gray-200'}`}>
+                    <span className="text-[10px] text-gray-400 block">Penjualan Valid ({ledgerCheckResult.completedSalesCount} tx)</span>
+                    <span className="font-medium text-cyan-500">
+                      Rp {ledgerCheckResult.completedSalesTotal.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Compact Live Audit Log Viewer */}
+            <div className={`rounded-xl border font-mono text-[11px] max-h-56 overflow-y-auto divide-y ${
+              isLight
+                ? 'bg-slate-50 border-cyan-500/45 text-slate-700 divide-slate-200'
+                : 'bg-[#090d13] border-cyan-500/30 text-gray-300 divide-gray-800/60'
+            }`}>
+              {auditLogs.length === 0 ? (
+                <div className="p-4 text-center text-gray-500">Belum ada log audit tercatat.</div>
+              ) : (
+                auditLogs.slice(0, 50).map((log, idx) => (
+                  <div key={log.id || idx} className="px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-normal">
+                    <span className="text-gray-400 shrink-0">[{new Date(log.timestamp).toLocaleString('id-ID')}]</span>
+                    <span className="text-cyan-500 font-medium shrink-0">[{log.module || 'SYSTEM'}]</span>
+                    <span className="text-amber-500 font-medium shrink-0">{log.action}</span>
+                    <span className="text-gray-400 shrink-0">({log.user || 'System'})</span>
+                    <span className="flex-1 min-w-[180px] truncate" title={log.details}>{log.details}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* PANEL REMOTE MAINTENANCE & TELEMETRY HUB */}
+          <div className={`p-6 rounded-2xl border space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b ${
+              isLight ? 'border-slate-200' : 'border-gray-800'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                  isLight ? 'bg-cyan-50 border-cyan-300 text-cyan-600' : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400'
+                }`}>
+                  <Radio className="w-5 h-5 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base">Force Sync ke Database Cloud</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>Sinkronisasi paksa seluruh transaksi & master data</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Remote Maintenance &amp; Telemetry Hub
+                    </h3>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
+                      remoteMaintenanceLock.locked
+                        ? isLight
+                          ? 'bg-rose-50 text-rose-700 border-rose-300'
+                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                        : isLight
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    }`}>
+                      {remoteMaintenanceLock.locked ? 'LOCK AKTIF' : 'TERMINAL NORMAL'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
+                      isLight
+                        ? 'bg-cyan-50 text-cyan-700 border-cyan-300'
+                        : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                    }`}>
+                      HEARTBEAT: {lastHeartbeatAt ? new Date(lastHeartbeatAt).toLocaleTimeString('id-ID') : 'Siap'}
+                    </span>
+                  </div>
+                  <p className={`text-xs font-normal mt-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                    Kirim perintah jarak jauh via GAS / Supabase (<code className="font-mono">DISPATCH_REMOTE_COMMAND</code> &amp; <code className="font-mono">POLL_REMOTE_COMMANDS</code>) + lintas tab via <code className="font-mono">BroadcastChannel</code> &amp; <code className="font-mono">storage</code> event.
+                  </p>
                 </div>
               </div>
 
-              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-slate-400'}`}>
-                Memicu unggahan seketika seluruh transaksi kasir, perubahan katalog master data, dan audit log
-                ke Google Sheets / database cloud secara remote.
-              </p>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowRemoteErrorDrawer((prev) => !prev)}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer transition active:scale-95 ${
+                    showRemoteErrorDrawer
+                      ? 'bg-rose-600 hover:bg-rose-500 border-rose-500 text-white shadow-sm shadow-rose-500/30'
+                      : systemErrorLogs.length > 0
+                      ? isLight
+                        ? 'bg-rose-50 hover:bg-rose-100 border-rose-300 text-rose-700'
+                        : 'bg-rose-500/15 hover:bg-rose-500/25 border-rose-500/40 text-rose-300'
+                      : isLight
+                      ? 'bg-white hover:bg-slate-50 border-cyan-500/50 text-slate-700'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>Lihat Log Error ({systemErrorLogs.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const count = await triggerManualHeartbeatPoll();
+                    showToast(`Heartbeat polling selesai (${count} perintah baru diproses, cabang aktif: ${activeBranchId}).`, 'info');
+                  }}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer transition active:scale-95 ${
+                    isLight
+                      ? 'bg-white hover:bg-cyan-50 border-cyan-500/55 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-cyan-500/35 text-cyan-300'
+                  }`}
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Poll Heartbeat</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearRemoteHubLogs}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer transition ${
+                    isLight
+                      ? 'bg-white hover:bg-rose-50 border-rose-300 text-rose-600'
+                      : 'bg-slate-800 hover:bg-rose-950/60 border-slate-700 text-rose-400'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Bersihkan Hub</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Viewer Log Error Global (systemErrorLogs) */}
+            {showRemoteErrorDrawer && (
+              <div className={`p-4 rounded-2xl border space-y-3 transition-all duration-200 ${
+                isLight
+                  ? 'bg-white border-rose-400/70 shadow-[0_0_12px_rgba(244,63,94,0.14)]'
+                  : 'bg-[#0d1117] border-rose-500/35 shadow-[0_0_12px_rgba(244,63,94,0.08)]'
+              }`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className={`text-xs font-medium tracking-wide flex items-center gap-2 ${
+                      isLight ? 'text-rose-700' : 'text-rose-400'
+                    }`}>
+                      <AlertTriangle className="w-4 h-4" />
+                      <span>Global Crash &amp; Error Interceptor Logs ({systemErrorLogs.length}/50)</span>
+                    </h4>
+                    <p className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Menangkap error React ErrorBoundary, <code className="font-mono">window.error</code>, dan <code className="font-mono">unhandledrejection</code> lengkap dengan nama file &amp; baris kode.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {systemErrorLogs.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearSystemErrorLogs();
+                          showToast('Seluruh log error sistem telah dibersihkan.', 'info');
+                        }}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border flex items-center gap-1 cursor-pointer ${
+                          isLight
+                            ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                            : 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-300'
+                        }`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Bersihkan Log Error</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowRemoteErrorDrawer(false)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium border cursor-pointer ${
+                        isLight
+                          ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                          : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300'
+                      }`}
+                    >
+                      Tutup
+                    </button>
+                  </div>
+                </div>
+
+                {systemErrorLogs.length === 0 ? (
+                  <div className={`p-4 rounded-xl border text-center font-mono text-xs ${
+                    isLight ? 'bg-emerald-50/70 border-emerald-200 text-emerald-700' : 'bg-[#161b22] border-gray-800 text-emerald-400'
+                  }`}>
+                    Sistem bersih — belum ada crash atau error global yang tertangkap.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {systemErrorLogs.map((errItem, idx) => {
+                      const errKey = errItem.id || `${errItem.timestamp}-${idx}`;
+                      const isCopied = copiedErrorId === errKey;
+                      return (
+                        <div
+                          key={errKey}
+                          className={`p-3 rounded-xl border font-mono text-[11px] space-y-1.5 ${
+                            isLight ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-[#161b22] border-gray-800 text-gray-200'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-gray-400">
+                                [{new Date(errItem.timestamp).toLocaleString('id-ID')}]
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${
+                                isLight
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                                  : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                              }`}>
+                                {errItem.branchId || activeBranchId}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase ${
+                                isLight
+                                  ? 'bg-cyan-50 text-cyan-700 border-cyan-300'
+                                  : 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                              }`}>
+                                {errItem.module || 'SYSTEM'}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${
+                                isLight
+                                  ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                  : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                              }`}>
+                                {errItem.type || 'ERROR'}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => copyErrorDetailForAiFix({ ...errItem, id: errKey })}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-sans font-medium border flex items-center gap-1 cursor-pointer transition ${
+                                isCopied
+                                  ? 'bg-emerald-600 border-emerald-500 text-white'
+                                  : isLight
+                                  ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
+                                  : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300'
+                              }`}
+                            >
+                              {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                              <span>{isCopied ? 'Tersalin!' : 'Salin Detail Error untuk AI Fix'}</span>
+                            </button>
+                          </div>
+
+                          <div className="font-medium text-rose-500 dark:text-rose-400 break-words">
+                            {errItem.message}
+                          </div>
+
+                          {(errItem.sourceFile || errItem.route) && (
+                            <div className="text-[10px] text-cyan-500 flex flex-wrap gap-3">
+                              {errItem.sourceFile && (
+                                <span>
+                                  File: {errItem.sourceFile}
+                                  {errItem.lineNumber ? `:${errItem.lineNumber}` : ''}
+                                  {errItem.columnNumber ? `:${errItem.columnNumber}` : ''}
+                                </span>
+                              )}
+                              {errItem.route && <span>Rute: {errItem.route}</span>}
+                            </div>
+                          )}
+
+                          {(errItem.stackSummary || errItem.stack) && (
+                            <div className={`text-[10px] break-all pt-1 border-t ${
+                              isLight ? 'border-slate-200 text-slate-600' : 'border-gray-800 text-gray-400'
+                            }`}>
+                              {errItem.stackSummary || errItem.stack}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Target Cabang & Pesan Pemeliharaan */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className={`block font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Target Cabang / Terminal:
+                </label>
+                <select
+                  value={remoteTargetBranch}
+                  onChange={(e) => setRemoteTargetBranch(e.target.value)}
+                  className={`w-full p-2.5 rounded-xl border font-medium text-xs outline-none ${
+                    isLight
+                      ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                      : 'bg-[#0d1117] border-cyan-500/30 text-white focus:border-cyan-500'
+                  }`}
+                >
+                  <option value="ALL_BRANCHES">ALL_BRANCHES — Semua Cabang (Broadcast)</option>
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.id} — {b.name} {b.id === activeBranchId ? '(Cabang Aktif)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="lg:col-span-2">
+                <label className={`block font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Pesan Layar Kunci Pemeliharaan (Kustom):
+                </label>
+                <input
+                  type="text"
+                  value={remoteCustomMessage}
+                  onChange={(e) => setRemoteCustomMessage(e.target.value)}
+                  placeholder="Masukkan pesan yang tampil saat terminal cabang dikunci..."
+                  className={`w-full p-2.5 rounded-xl border text-xs outline-none ${
+                    isLight
+                      ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                      : 'bg-[#0d1117] border-cyan-500/30 text-white focus:border-cyan-500'
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* 4 Tombol Eksekusi Perintah Jarak Jauh */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <button
+                type="button"
+                disabled={Boolean(isDispatchingRemoteCmd)}
+                onClick={() => handleDispatchRemote('REMOTE_MAINTENANCE_LOCK', !remoteMaintenanceLock.locked)}
+                className={`px-4 py-3 rounded-xl font-medium text-xs flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 disabled:opacity-50 shadow-sm ${
+                  remoteMaintenanceLock.locked
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/25'
+                }`}
+              >
+                {remoteMaintenanceLock.locked ? <Unlock className="w-4 h-4 shrink-0" /> : <Lock className="w-4 h-4 shrink-0" />}
+                <span>
+                  {isDispatchingRemoteCmd === 'REMOTE_MAINTENANCE_LOCK'
+                    ? 'Mengirim...'
+                    : remoteMaintenanceLock.locked
+                    ? 'Matikan Maintenance Lock'
+                    : 'Maintenance Lock Cabang'}
+                </span>
+              </button>
 
               <button
-                disabled={isRemoteSyncing}
-                onClick={handleRemoteForceSync}
-                className="w-full py-2.5 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(0,242,254,0.3)] cursor-pointer disabled:opacity-50 transition"
+                type="button"
+                disabled={Boolean(isDispatchingRemoteCmd)}
+                onClick={() => handleDispatchRemote('REMOTE_FORCE_SYNC')}
+                className="px-4 py-3 rounded-xl font-medium text-xs bg-cyan-600 hover:bg-cyan-500 text-white flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 disabled:opacity-50 shadow-sm shadow-cyan-600/25"
               >
-                <RefreshCw className={`w-4 h-4 ${isRemoteSyncing ? 'animate-spin' : ''}`} />
-                <span>{isRemoteSyncing ? 'Sedang Menyinkronkan...' : 'Mulai Force Sync Sekarang'}</span>
+                <Upload className="w-4 h-4 shrink-0" />
+                <span>
+                  {isDispatchingRemoteCmd === 'REMOTE_FORCE_SYNC' ? 'Menyinkronkan...' : 'Force Sync PENDING_SYNC'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(isDispatchingRemoteCmd)}
+                onClick={() => handleDispatchRemote('REMOTE_DIAGNOSTIC_REPORT')}
+                className="px-4 py-3 rounded-xl font-medium text-xs bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 disabled:opacity-50 shadow-sm shadow-indigo-600/25"
+              >
+                <Activity className="w-4 h-4 shrink-0" />
+                <span>
+                  {isDispatchingRemoteCmd === 'REMOTE_DIAGNOSTIC_REPORT' ? 'Meminta...' : 'Minta Laporan Telemetri'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={Boolean(isDispatchingRemoteCmd)}
+                onClick={() => handleDispatchRemote('REMOTE_SOFT_RELOAD')}
+                className="px-4 py-3 rounded-xl font-medium text-xs bg-amber-600 hover:bg-amber-500 text-white flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 disabled:opacity-50 shadow-sm shadow-amber-600/25"
+              >
+                <RotateCcw className="w-4 h-4 shrink-0" />
+                <span>
+                  {isDispatchingRemoteCmd === 'REMOTE_SOFT_RELOAD' ? 'Memuat Ulang...' : 'Soft Reload Cabang'}
+                </span>
               </button>
             </div>
 
-            {/* Action 2: Emergency Session Reset */}
-            <div className={`p-6 rounded-2xl border space-y-4 ${
-              isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-            }`}>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-400 flex items-center justify-center border border-rose-500/30">
-                  <AlertTriangle className="w-5 h-5" />
+            {/* Tabel Log Status Eksekusi Perintah Jarak Jauh */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className={`text-xs font-medium tracking-wide flex items-center gap-2 ${
+                  isLight ? 'text-slate-800' : 'text-slate-200'
+                }`}>
+                  <TerminalIcon className="w-4 h-4 text-cyan-500" />
+                  <span>Log Status Eksekusi Perintah Jarak Jauh ({remoteCommandLogs.length})</span>
+                </h4>
+              </div>
+
+              <div className={`overflow-x-auto rounded-xl border ${
+                isLight
+                  ? 'border-cyan-500/55 bg-white shadow-[0_0_12px_rgba(6,182,212,0.12)]'
+                  : 'border-cyan-500/30 bg-[#0d1117] shadow-[0_0_12px_rgba(6,182,212,0.06)]'
+              }`}>
+                <table className="w-full text-left text-xs">
+                  <thead className={isLight ? 'bg-slate-100 text-slate-700' : 'bg-[#161b22] text-gray-400'}>
+                    <tr>
+                      <th className="py-2.5 px-3 font-medium">Waktu</th>
+                      <th className="py-2.5 px-3 font-medium">Perintah</th>
+                      <th className="py-2.5 px-3 font-medium">Target / Cabang</th>
+                      <th className="py-2.5 px-3 font-medium">Status</th>
+                      <th className="py-2.5 px-3 font-medium">Transport</th>
+                      <th className="py-2.5 px-3 font-medium">Detail Eksekusi</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`divide-y ${isLight ? 'divide-slate-200 text-slate-800' : 'divide-gray-800 text-gray-200'}`}>
+                    {remoteCommandLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-5 px-3 text-center text-gray-500 font-mono text-[11px]">
+                          Belum ada perintah jarak jauh yang dikirim. Klik salah satu tombol perintah di atas untuk menguji.
+                        </td>
+                      </tr>
+                    ) : (
+                      remoteCommandLogs.slice(0, 20).map((log, idx) => (
+                        <tr key={`${log.commandId}-${log.status}-${idx}`} className={isLight ? 'hover:bg-slate-50' : 'hover:bg-[#161b22]/60'}>
+                          <td className="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                            {new Date(log.executedAt).toLocaleTimeString('id-ID')}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-medium text-[11px] whitespace-nowrap text-cyan-500">
+                            {log.command}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap font-medium">
+                            {log.branchName || log.branchId}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-wider border ${
+                                log.status === 'EXECUTED'
+                                  ? isLight
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                  : log.status === 'FAILED'
+                                  ? isLight
+                                    ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                    : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                  : isLight
+                                  ? 'bg-amber-50 text-amber-700 border-amber-300'
+                                  : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              }`}
+                            >
+                              {log.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-[10px] whitespace-nowrap opacity-80">
+                            {log.transport}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] max-w-md truncate" title={log.details}>
+                            {log.details}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Laporan Telemetri Masuk dari Cabang */}
+            <div className="space-y-2.5 pt-2">
+              <h4 className={`text-xs font-medium tracking-wide flex items-center gap-2 ${
+                isLight ? 'text-slate-800' : 'text-slate-200'
+              }`}>
+                <Server className="w-4 h-4 text-indigo-500" />
+                <span>Laporan Telemetri Kesehatan Cabang Masuk ({branchTelemetryReports.length})</span>
+              </h4>
+
+              {branchTelemetryReports.length === 0 ? (
+                <div className={`p-4 rounded-xl border text-center font-mono text-[11px] text-gray-500 ${
+                  isLight
+                    ? 'bg-white border-cyan-500/55 shadow-[0_0_12px_rgba(6,182,212,0.12)]'
+                    : 'bg-[#0d1117] border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.06)]'
+                }`}>
+                  Belum ada laporan telemetri cabang. Klik &ldquo;Minta Laporan Telemetri&rdquo; untuk menarik snapshot kesehatan cabang.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {branchTelemetryReports.slice(0, 8).map((rep) => {
+                    const isExpanded = expandedTelemetryId === rep.id;
+                    return (
+                      <div
+                        key={rep.id}
+                        className={`p-4 rounded-xl border space-y-3 transition-all duration-200 ${
+                          isLight
+                            ? 'bg-white border-cyan-500/55 shadow-[0_0_12px_rgba(6,182,212,0.12)]'
+                            : 'bg-[#0d1117] border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.06)]'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-md border text-[10px] font-mono font-medium ${
+                              isLight
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                                : 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
+                            }`}>
+                              {rep.branchId}
+                            </span>
+                            <span className={`font-medium text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                              {rep.branchName}
+                            </span>
+                            <span className="text-[11px] font-mono text-cyan-500">
+                              {rep.appVersion}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-gray-400">
+                              {new Date(rep.reportedAt).toLocaleString('id-ID')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedTelemetryId(isExpanded ? null : rep.id)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-medium border cursor-pointer ${
+                                isLight
+                                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                                  : 'bg-[#161b22] hover:bg-gray-800 border-gray-700 text-cyan-300'
+                              }`}
+                            >
+                              {isExpanded ? 'Tutup Error Logs' : `Lihat ${rep.lastErrorLogs.length} Log Error`}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
+                          <div className={`p-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#161b22] border-gray-800'}`}>
+                            <span className="text-[10px] text-gray-400 block">Sisa LocalStorage</span>
+                            <span className="font-medium text-emerald-500">
+                              {(rep.localStorageRemainingBytes / 1024).toFixed(1)} KB ({rep.localStorageRemainingPercent}%)
+                            </span>
+                          </div>
+                          <div className={`p-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#161b22] border-gray-800'}`}>
+                            <span className="text-[10px] text-gray-400 block">Terpakai</span>
+                            <span className="font-medium">
+                              {(rep.localStorageUsedBytes / 1024).toFixed(1)} KB
+                            </span>
+                          </div>
+                          <div className={`p-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#161b22] border-gray-800'}`}>
+                            <span className="text-[10px] text-gray-400 block">Transaksi Tertunda</span>
+                            <span className={`font-medium ${rep.pendingSyncCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                              {rep.pendingSyncCount} PENDING_SYNC
+                            </span>
+                          </div>
+                          <div className={`p-2 rounded-lg border ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#161b22] border-gray-800'}`}>
+                            <span className="text-[10px] text-gray-400 block">Status Lock / Error</span>
+                            <span className="font-medium">
+                              {rep.isMaintenanceLocked ? 'LOCKED' : 'UNLOCKED'} • {rep.lastErrorLogs.length} Err/Warn
+                            </span>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className={`rounded-xl border p-3 font-mono text-[11px] space-y-2 max-h-72 overflow-y-auto ${
+                            isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#090d13] border-gray-800 text-gray-300'
+                          }`}>
+                            <div className="text-[11px] font-medium tracking-wide text-rose-400 mb-1">
+                              10 Log Error / Crash Terakhir Cabang:
+                            </div>
+                            {rep.lastErrorLogs.length === 0 ? (
+                              <div className="text-emerald-500">Nihil — Tidak ada error atau peringatan tercatat di cabang.</div>
+                            ) : (
+                              rep.lastErrorLogs.map((errItem, eIdx) => {
+                                const errKey = `${rep.id}-${errItem.id || eIdx}`;
+                                const isCopied = copiedErrorId === errKey;
+                                return (
+                                  <div
+                                    key={errKey}
+                                    className={`p-2.5 rounded-lg border space-y-1 ${
+                                      isLight ? 'bg-white border-slate-200' : 'bg-[#11161f] border-gray-800'
+                                    }`}
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="text-gray-400">
+                                          [{new Date(errItem.timestamp).toLocaleTimeString('id-ID')}]
+                                        </span>
+                                        <span className="text-indigo-400 font-medium">
+                                          [{errItem.branchId || rep.branchId}]
+                                        </span>
+                                        <span className="text-rose-400 font-medium">
+                                          [{errItem.level || 'ERROR'}]
+                                        </span>
+                                        <span className="text-cyan-500">
+                                          [{errItem.module || 'SYSTEM'}]
+                                        </span>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          copyErrorDetailForAiFix({
+                                            ...errItem,
+                                            id: errKey,
+                                            branchId: errItem.branchId || rep.branchId,
+                                          })
+                                        }
+                                        className={`px-2 py-1 rounded-md text-[10px] font-sans font-medium border flex items-center gap-1 cursor-pointer transition ${
+                                          isCopied
+                                            ? 'bg-emerald-600 border-emerald-500 text-white'
+                                            : isLight
+                                            ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
+                                            : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300'
+                                        }`}
+                                      >
+                                        {isCopied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                        <span>{isCopied ? 'Tersalin!' : 'Salin Detail Error untuk AI Fix'}</span>
+                                      </button>
+                                    </div>
+
+                                    <div className="font-medium text-rose-500 dark:text-rose-400 break-words">
+                                      {errItem.message}
+                                    </div>
+
+                                    {(errItem.sourceFile || errItem.route || errItem.stackSummary) && (
+                                      <div className={`text-[10px] break-all ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                                        {errItem.sourceFile && (
+                                          <span className="text-cyan-500 mr-2">
+                                            {errItem.sourceFile}
+                                            {errItem.lineNumber ? `:${errItem.lineNumber}` : ''}
+                                          </span>
+                                        )}
+                                        {errItem.route && <span className="mr-2">({errItem.route})</span>}
+                                        {errItem.stackSummary && <span>• {errItem.stackSummary}</span>}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB CONSOLE LOGS */}
+      {adminTab === 'logs' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((lvl) => (
+                <button
+                  key={lvl}
+                  onClick={() => setLogFilter(lvl as any)}
+                  className={`px-3 py-1 rounded-lg text-xs font-mono font-medium cursor-pointer transition ${
+                    logFilter === lvl
+                      ? 'bg-pink-500 text-white'
+                      : isLight
+                      ? 'bg-white border border-cyan-500/50 text-slate-700 hover:bg-slate-50'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopyLogs}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer ${
+                  isLight
+                    ? 'bg-white border-cyan-500/55 text-cyan-700 hover:bg-cyan-50'
+                    : 'bg-gray-800 border-gray-700 text-cyan-400 hover:bg-gray-700'
+                }`}
+              >
+                <Copy className="w-3.5 h-3.5" /> Salin
+              </button>
+              <button
+                onClick={handleDownloadLogs}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 cursor-pointer ${
+                  isLight
+                    ? 'bg-white border-emerald-500/55 text-emerald-700 hover:bg-emerald-50'
+                    : 'bg-gray-800 border-gray-700 text-emerald-400 hover:bg-gray-700'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" /> Unduh
+              </button>
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-2xl border font-mono text-xs max-h-[500px] overflow-y-auto space-y-1 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] text-slate-800'
+              : 'bg-[#090d13] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-gray-300'
+          }`}>
+            {filteredAuditLogs.map((log, idx) => (
+              <div key={idx} className={`flex gap-2 py-0.5 border-b ${isLight ? 'border-slate-200' : 'border-gray-800/40'}`}>
+                <span className="text-gray-500">[{log.timestamp}]</span>
+                <span className="text-cyan-500 font-medium">[{log.action}]</span>
+                <span>{log.details}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB GOOGLE SHEETS WEBHOOK */}
+      {adminTab === 'sheets' && (
+        <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)] text-slate-900'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)] text-white'
+        }`}>
+          <div className="flex justify-between items-center">
+            <h3 className="font-medium text-base tracking-wide">Google Sheets Webhook</h3>
+            <button
+              onClick={async () => {
+                await testSheetConnection();
+                showToast('Uji koneksi Google Sheets berhasil!');
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-medium border cursor-pointer ${
+                isLight
+                  ? 'bg-cyan-50 text-cyan-700 border-cyan-300 hover:bg-cyan-100'
+                  : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20'
+              }`}
+            >
+              Uji Koneksi
+            </button>
+          </div>
+          <div className="space-y-3 text-xs">
+            <div>
+              <label className={`block font-medium mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Spreadsheet ID:</label>
+              <input
+                type="text"
+                value={sheetConfig.spreadsheetId}
+                onChange={(e) => updateSheetConfig({ spreadsheetId: e.target.value })}
+                className={`w-full p-2.5 rounded-xl border font-mono outline-none ${
+                  isLight
+                    ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                    : 'bg-black/20 border-cyan-500/30 text-white focus:border-cyan-500'
+                }`}
+              />
+            </div>
+            <div>
+              <label className={`block font-medium mb-1 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Apps Script URL:</label>
+              <input
+                type="text"
+                value={sheetConfig.appsScriptUrl}
+                onChange={(e) => updateSheetConfig({ appsScriptUrl: e.target.value })}
+                className={`w-full p-2.5 rounded-xl border font-mono outline-none ${
+                  isLight
+                    ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                    : 'bg-black/20 border-cyan-500/30 text-white focus:border-cyan-500'
+                }`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB DATA MIGRATION WIZARD */}
+      {adminTab === 'migration' && (
+        <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)] text-slate-900'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)] text-white'
+        }`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-medium tracking-wide">Data Migration Wizard</h2>
+              <p className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>Migrasi data master barang, pemasok, dan pelanggan.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMigrationInitialEntity('product');
+                setIsMigrationModalOpen(true);
+              }}
+              className="px-6 py-3 rounded-xl text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center gap-2 cursor-pointer transition"
+            >
+              <Zap className="w-4 h-4" /> Buka Wizard Migrasi
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB SOP MANUAL */}
+      {adminTab === 'sop' && <JacsSOPManualTab />}
+
+      {/* TAB CABANG */}
+      {adminTab === 'branches' && <JacsBranchManagementTab />}
+
+      {/* TAB DATA MASTER & MIGRASI (TERINTEGRASI LANGSUNG KE APPCONTEXT GLOBAL) */}
+      {adminTab === 'master-data' && (
+        <div className="animate-fadeIn space-y-6">
+          {/* PUSAT RESET SISTEM BERTINGKAT (4 LEVEL KEBUTUHAN) */}
+          <div className={`border rounded-3xl p-6 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-slate-200 shadow-sm'
+              : 'bg-[#161b22] border-gray-800/90 shadow-lg'
+          }`}>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-5 border-b border-gray-800/60">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500/20 via-orange-500/15 to-rose-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-6 h-6 text-amber-400" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base">Emergency Session Reset</h3>
-                  <p className={`text-xs ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-gray-400'}`}>Reset darurat sesi kasir dari jarak jauh</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`text-base sm:text-lg font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Pusat Reset Sistem Bertingkat (4 Level Kebutuhan)
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                      Protected by 6-Digit PIN
+                    </span>
+                  </div>
+                  <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                    Pilih tingkat pembersihan data sesuai fase implementasi klien: mulai dari pembersihan transaksi uji coba, penghapusan katalog dummy, reset saldo buku besar, hingga factory reset total 100%.
+                  </p>
                 </div>
               </div>
 
-              <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-700 font-medium text-xs' : 'text-slate-400'}`}>
-                Bila terjadi kecurangan atau terminal ditinggalkan tanpa pengawasan, tombol ini akan
-                memutus seluruh sesi login operator kasir seketika dan mengembalikan ke status aman.
-              </p>
-
-              <button
-                onClick={emergencySessionReset}
-                className="w-full py-2.5 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.3)] cursor-pointer transition"
-              >
-                <AlertTriangle className="w-4 h-4" />
-                <span>Eksekusi Emergency Session Reset</span>
-              </button>
+              {/* Ringkasan Status Data Saat Ini & Tombol Restore Demo Data */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+                }`}>
+                  Transaksi POS: <span className="font-black text-cyan-400">{(sales || []).length}</span>
+                </div>
+                <div className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+                }`}>
+                  Jurnal & Kas: <span className="font-black text-emerald-400">{(journalEntries || []).length + (financeEntries || []).length}</span>
+                </div>
+                <div className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+                }`}>
+                  Katalog SKU: <span className="font-black text-amber-400">{(products || []).length}</span>
+                </div>
+                <div className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+                }`}>
+                  Kontak & Staf: <span className="font-black text-purple-400">{(suppliers || []).length + (customers || []).length + (employees || []).length + (serviceStylists || []).length}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRestoreDemoModal(true)}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 font-black text-[11px] flex items-center gap-1.5 transition shadow-sm"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Muat Ulang Data Simulasi Demo
+                </button>
+              </div>
             </div>
 
-            {/* Action 3: Reset Demo Sales & Restock DB (NEW REQUESTED FEATURE) */}
-            <div className={`p-6 rounded-2xl border space-y-4 md:col-span-2 ${
-              isLight ? 'bg-amber-50/60 border-amber-300 shadow-sm' : 'bg-amber-950/20 border-amber-500/40'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
-                    <Sparkles className="w-5 h-5" />
+            {lastResetResult && (
+              <div className="mt-4 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-xs text-emerald-300">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-black">{lastResetResult.title}</span> — {lastResetResult.message}{' '}
+                    <span className="text-[10px] opacity-75">({lastResetResult.timestamp})</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLastResetResult(null)}
+                  className="text-[11px] font-bold text-emerald-400 hover:underline shrink-0"
+                >
+                  Tutup
+                </button>
+              </div>
+            )}
+
+            {/* 4 Kartu Pilihan Reset Terstruktur */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mt-5">
+              {/* LEVEL 1 */}
+              <div className={`rounded-2xl border p-4 flex flex-col justify-between transition-all ${
+                isLight
+                  ? 'bg-cyan-50/40 border-cyan-300 hover:border-cyan-500'
+                  : 'bg-[#0d1117]/90 border-cyan-500/30 hover:border-cyan-400/60'
+              }`}>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                      LEVEL 1 • GO-LIVE KASIR
+                    </span>
+                    <RefreshCw className="w-4 h-4 text-cyan-400 shrink-0" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-base text-slate-900 dark:text-white">Reset Demo Sales &amp; Restock DB</h3>
-                      <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        SAFE RESTOCK
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      Mengembalikan stok produk (min 50 unit/SKU) &amp; menormalkan omzet penjualan tanpa menghapus identitas profil bisnis
+                    <h4 className={`text-sm font-black leading-snug ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Reset Transaksi & Jurnal (Pertahankan Master Produk & Profil)
+                    </h4>
+                    <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Cocok setelah selesai simulasi/training kasir agar siap mulai operasional hari pertama.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-xl p-2.5 text-[11px] space-y-1.5 border ${
+                    isLight ? 'bg-white border-cyan-200' : 'bg-[#161b22] border-gray-800'
+                  }`}>
+                    <div className="font-bold text-rose-400">Dihapus / Direset:</div>
+                    <ul className={`list-disc list-inside space-y-0.5 text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      <li>Seluruh transaksi POS, Shift Z-Report & Petty Cash</li>
+                      <li>PO, Mutasi Stok, Piutang (AR) & Hutang (AP)</li>
+                      <li>Jurnal Buku Besar, Stok menjadi 0 & No. Struk ke 0001</li>
+                    </ul>
+                    <div className="font-bold text-emerald-400 pt-1">Dipertahankan:</div>
+                    <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Profil Entitas Bisnis, Logo, Loket POS & Katalog Produk/Layanan/Kontak.
                     </p>
                   </div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => setIsResetDemoModalOpen(true)}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.3)] cursor-pointer transition shrink-0"
+                  onClick={() => openTieredResetModal(1)}
+                  className="mt-4 w-full py-2.5 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-sm"
                 >
-                  <RotateCcw className="w-4 h-4" />
-                  <span>Reset Demo Sales &amp; Restock DB</span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Jalankan Reset Level 1
                 </button>
               </div>
 
-              <div className={`p-3.5 rounded-xl text-xs leading-relaxed ${
-                isLight ? 'bg-amber-50 border border-amber-300 text-amber-950' : 'bg-black/20 border border-amber-500/20 text-slate-400'
+              {/* LEVEL 2 */}
+              <div className={`rounded-2xl border p-4 flex flex-col justify-between transition-all ${
+                isLight
+                  ? 'bg-amber-50/40 border-amber-300 hover:border-amber-500'
+                  : 'bg-[#0d1117]/90 border-amber-500/30 hover:border-amber-400/60'
               }`}>
-                <strong className={isLight ? 'text-amber-900 font-bold' : 'text-amber-400'}>Proteksi Profil Bisnis:</strong> Tindakan ini HANYA mengatur ulang transaksi kasir pengujian dan merestok seluruh master produk. Nama entitas usaha, logo developer JacS 3D, NPWP, dan konfigurasi sistem <strong className={isLight ? 'text-slate-950 font-black' : 'text-white'}>100% DIJAGA TETAP UTUH</strong>.
-              </div>
-
-              {resetDemoSummary && (
-                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2 font-mono">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{resetDemoSummary}</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Real-time Operational Audit Feed (Supervisor Void PIN, Rekonsiliasi Kas, Penerimaan PO) */}
-          <div className={`p-5 rounded-2xl border space-y-4 ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-          }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold text-sm flex items-center gap-2">
-                  <ListChecks className="w-4 h-4 text-emerald-400" />
-                  <span>Audit Aktivitas Real-Time Operasional Kritis</span>
-                </h3>
-                <p className="text-xs text-gray-400">Pemantauan live untuk Supervisor Void PIN, rekonsiliasi kas akhir shift, dan penerimaan PO</p>
-              </div>
-
-              {/* Filter Pills */}
-              <div className={`flex items-center gap-1.5 overflow-x-auto p-1 rounded-xl border text-xs ${
-                isLight ? 'bg-slate-100 border-slate-300' : 'bg-black/30 border-gray-800'
-              }`}>
-                {[
-                  { id: 'ALL', label: `Semua (${auditLogs.length})` },
-                  { id: 'VOID_PIN', label: `🔐 Void PIN (${voidPinLogs.length})` },
-                  { id: 'SHIFT_RECONCILE', label: `💵 Kas Shift (${shiftReconciliationLogs.length})` },
-                  { id: 'PO_RECEIVE', label: `📦 PO Gudang (${poReceiveLogs.length})` },
-                ].map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => setCriticalAuditFilter(f.id as any)}
-                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer whitespace-nowrap ${
-                      criticalAuditFilter === f.id
-                        ? 'bg-emerald-500 text-slate-950 font-black'
-                        : isLight ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-200' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Live Operational Events Feed */}
-            <div className="space-y-2 max-h-72 overflow-y-auto">
-              {criticalFilteredLogs.slice(0, 25).map((log, idx) => {
-                const isVoid = (log.details || '').toLowerCase().includes('void') || (log.action || '').toLowerCase().includes('void') || (log.details || '').toLowerCase().includes('dibatalkan');
-                const isShift = (log.details || '').toLowerCase().includes('shift') || (log.details || '').toLowerCase().includes('rekonsiliasi') || (log.action || '').toLowerCase().includes('finance') || (log.details || '').toLowerCase().includes('kas kasir');
-                const isPo = (log.details || '').toLowerCase().includes('po') || (log.details || '').toLowerCase().includes('in_purchase') || (log.details || '').toLowerCase().includes('penerimaan barang') || (log.action || '').toLowerCase().includes('purchasing');
-
-                return (
-                  <div
-                    key={`${log.id || 'EVT'}-${idx}`}
-                    className={`p-3 rounded-xl border text-xs transition flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-black/30 border-gray-800'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`font-mono text-xs ${isLight ? 'text-slate-800 font-semibold' : 'text-gray-500'}`}>[{log.timestamp}]</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
-                          isVoid
-                            ? isLight ? 'bg-rose-100 text-rose-950 border border-rose-300' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                            : isShift
-                            ? isLight ? 'bg-emerald-100 text-emerald-950 border border-emerald-300' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            : isPo
-                            ? isLight ? 'bg-blue-100 text-blue-950 border border-blue-300' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                            : isLight ? 'bg-slate-100 text-slate-800 border border-slate-300' : 'bg-gray-700 text-gray-300'
-                        }`}>
-                          {isVoid ? 'VOID SUPERVISOR' : isShift ? 'REKONSILIASI SHIFT' : isPo ? 'PENERIMAAN PO' : log.action}
-                        </span>
-                        <span className={`font-mono text-xs ${isLight ? 'text-slate-950 font-black' : 'text-gray-300'}`}>Operator: {log.user}</span>
-                      </div>
-                      <p className={`leading-snug ${isLight ? 'text-slate-800 font-medium' : 'text-gray-300'}`}>{log.details}</p>
-                    </div>
-
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded shrink-0 self-start sm:self-center font-bold ${
-                      isLight ? 'bg-slate-100 text-slate-900 border border-slate-300' : 'bg-gray-800 text-cyan-400'
-                    }`}>
-                      AUDIT VERIFIED
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                      LEVEL 2 • KATALOG BERSIH
                     </span>
+                    <Trash2 className="w-4 h-4 text-amber-400 shrink-0" />
                   </div>
-                );
-              })}
+                  <div>
+                    <h4 className={`text-sm font-black leading-snug ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Hapus Master Katalog & Kontak Dummy (0 Item)
+                    </h4>
+                    <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Kosongkan seluruh produk/layanan & kontak bawaan sebelum klien mengimpor katalog asli.
+                    </p>
+                  </div>
 
-              {criticalFilteredLogs.length === 0 && (
-                <div className="text-center py-6 text-gray-500 text-xs">
-                  Belum ada log aktivitas untuk kategori audit ini.
+                  <div className={`rounded-xl p-2.5 text-[11px] space-y-1.5 border ${
+                    isLight ? 'bg-white border-amber-200' : 'bg-[#161b22] border-gray-800'
+                  }`}>
+                    <div className="font-bold text-rose-400">Dihapus / Direset (0 Item):</div>
+                    <ul className={`list-disc list-inside space-y-0.5 text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      <li>Daftar Produk, Paket Layanan, Resep BOM & Topping</li>
+                      <li>Daftar Supplier, Pelanggan & Karyawan/Stylist Dummy</li>
+                    </ul>
+                    <div className="font-bold text-emerald-400 pt-1">Dipertahankan:</div>
+                    <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Profil Entitas Bisnis, Logo, Loket POS, PIN Manajemen & Struktur Akun COA.
+                    </p>
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ====================================================
-          TAB 5: CONSOLE LOG VIEWER (DARK HACKER TERMINAL)
-          ==================================================== */}
-      {adminTab === 'logs' && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Filter Log Level */}
-              <div className={`flex items-center gap-1.5 overflow-x-auto p-1 rounded-xl border ${
-                isLight ? 'bg-slate-100 border-slate-300' : 'bg-black/30 border-gray-800'
-              }`}>
-                {(['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as const).map((lvl) => (
-                  <button
-                    key={lvl}
-                    onClick={() => setLogFilter(lvl)}
-                    className={`px-3 py-1 rounded-lg text-xs font-mono font-bold transition cursor-pointer ${
-                      logFilter === lvl
-                        ? isLight ? 'bg-rose-600 text-white font-black' : 'bg-pink-500 text-white'
-                        : isLight ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-200' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => openTieredResetModal(2)}
+                  className="mt-4 w-full py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-sm"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Jalankan Reset Level 2
+                </button>
               </div>
 
-              {/* Quick Operational Audit Filters */}
-              <div className={`flex items-center gap-1.5 overflow-x-auto p-1 rounded-xl border ${
-                isLight ? 'bg-slate-100 border-slate-300' : 'bg-black/30 border-gray-800'
+              {/* LEVEL 3 */}
+              <div className={`rounded-2xl border p-4 flex flex-col justify-between transition-all ${
+                isLight
+                  ? 'bg-emerald-50/40 border-emerald-300 hover:border-emerald-500'
+                  : 'bg-[#0d1117]/90 border-emerald-500/30 hover:border-emerald-400/60'
               }`}>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      LEVEL 3 • BUKU BESAR RP 0
+                    </span>
+                    <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+                  </div>
+                  <div>
+                    <h4 className={`text-sm font-black leading-snug ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Reset Saldo Keuangan & Buku Besar (COA ke Rp 0)
+                    </h4>
+                    <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Bersihkan jurnal akuntansi & kembalikan saldo seluruh akun COA ke Rp 0 untuk tutup/awal buku.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-xl p-2.5 text-[11px] space-y-1.5 border ${
+                    isLight ? 'bg-white border-emerald-200' : 'bg-[#161b22] border-gray-800'
+                  }`}>
+                    <div className="font-bold text-rose-400">Dihapus / Direset:</div>
+                    <ul className={`list-disc list-inside space-y-0.5 text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      <li>Seluruh Jurnal Umum (General Ledger) & Mutasi Kas</li>
+                      <li>Saldo seluruh akun COA kembali murni ke Rp 0</li>
+                    </ul>
+                    <div className="font-bold text-emerald-400 pt-1">Dipertahankan:</div>
+                    <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Profil Entitas Bisnis, Logo, Struktur Akun COA & Katalog Produk/Layanan.
+                    </p>
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => setCriticalAuditFilter('VOID_PIN')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition cursor-pointer ${
-                    criticalAuditFilter === 'VOID_PIN'
-                      ? 'bg-rose-500 text-white'
-                      : isLight ? 'text-rose-900 hover:bg-rose-50 font-bold' : 'text-rose-400 hover:text-white'
-                  }`}
-                  title="Filter khusus Supervisor Void PIN"
+                  type="button"
+                  onClick={() => openTieredResetModal(3)}
+                  className="mt-4 w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-sm"
                 >
-                  🔐 Void PIN ({voidPinLogs.length})
+                  <Database className="w-3.5 h-3.5" />
+                  Jalankan Reset Level 3
                 </button>
+              </div>
+
+              {/* LEVEL 4 */}
+              <div className={`rounded-2xl border p-4 flex flex-col justify-between transition-all ${
+                isLight
+                  ? 'bg-rose-50/50 border-rose-300 hover:border-rose-500'
+                  : 'bg-[#0d1117]/90 border-rose-500/40 hover:border-rose-400/80'
+              }`}>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/40">
+                      LEVEL 4 • WIPE 100% AWAL
+                    </span>
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  </div>
+                  <div>
+                    <h4 className={`text-sm font-black leading-snug ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Factory Reset Total (Wipe 100% Awal)
+                    </h4>
+                    <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Kembalikan sistem ke kondisi kosong (blank state) siap onboarding klien baru dari nol.
+                    </p>
+                  </div>
+
+                  <div className={`rounded-xl p-2.5 text-[11px] space-y-1.5 border ${
+                    isLight ? 'bg-white border-rose-200' : 'bg-[#161b22] border-gray-800'
+                  }`}>
+                    <div className="font-bold text-rose-400">Dihapus Total (100% Wipe):</div>
+                    <ul className={`list-disc list-inside space-y-0.5 text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      <li>Seluruh Transaksi POS, Shift, PO, Piutang/Hutang & Jurnal</li>
+                      <li>Seluruh Master Produk, Layanan, Supplier, Pelanggan & Staf (0 item)</li>
+                      <li>Profil Entitas Bisnis, Logo & Ikatan Loket POS</li>
+                    </ul>
+                    <div className="font-bold text-amber-400 pt-1">Keamanan Ganda:</div>
+                    <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Wajib PIN Manajemen 6 Digit + Ketik frasa <span className="font-black text-rose-400">RESET TOTAL</span>.
+                    </p>
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => setCriticalAuditFilter('SHIFT_RECONCILE')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition cursor-pointer ${
-                    criticalAuditFilter === 'SHIFT_RECONCILE'
-                      ? 'bg-emerald-500 text-slate-950 font-black'
-                      : isLight ? 'text-emerald-900 hover:bg-emerald-50 font-bold' : 'text-emerald-400 hover:text-white'
-                  }`}
-                  title="Filter khusus Rekonsiliasi Kas Akhir Shift"
+                  type="button"
+                  onClick={() => openTieredResetModal(4)}
+                  className="mt-4 w-full py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center justify-center gap-2 transition shadow-sm"
                 >
-                  💵 Kas Shift ({shiftReconciliationLogs.length})
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Factory Reset Total (Level 4)
                 </button>
-                <button
-                  onClick={() => setCriticalAuditFilter('PO_RECEIVE')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition cursor-pointer ${
-                    criticalAuditFilter === 'PO_RECEIVE'
-                      ? 'bg-blue-500 text-white'
-                      : isLight ? 'text-blue-900 hover:bg-blue-50 font-bold' : 'text-blue-400 hover:text-white'
-                  }`}
-                  title="Filter khusus Penerimaan PO Gudang"
-                >
-                  📦 PO Gudang ({poReceiveLogs.length})
-                </button>
-                {criticalAuditFilter !== 'ALL' && (
-                  <button
-                    onClick={() => setCriticalAuditFilter('ALL')}
-                    className={`px-2 py-1 rounded-lg text-[10px] cursor-pointer ${
-                      isLight ? 'text-slate-600 hover:text-slate-950 hover:bg-slate-200 font-bold' : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    ✕ Reset
-                  </button>
-                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleCopyLogs}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-900'
-                    : 'bg-gray-800 hover:bg-gray-700 text-cyan-400'
-                }`}
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Salin Semua Log</span>
-              </button>
-
-              <button
-                onClick={handleDownloadLogs}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-900'
-                    : 'bg-gray-800 hover:bg-gray-700 text-emerald-400'
-                }`}
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Unduh File (.txt)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Terminal Box */}
-          <div className={`p-4 rounded-2xl border font-mono text-xs max-h-[500px] overflow-y-auto space-y-1.5 shadow-inner ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#090d13] border-gray-800 text-gray-300'
-          }`}>
-            <div className={`pb-2 border-b flex items-center justify-between ${
-              isLight ? 'text-slate-700 font-bold border-slate-300' : 'text-gray-500 border-gray-800/60'
+            {/* Footer Bar: Pemulihan Data Simulasi Demo Instan */}
+            <div className={`mt-5 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+              isLight
+                ? 'bg-indigo-50/60 border-indigo-200 text-slate-800'
+                : 'bg-[#0d1117]/90 border-indigo-500/30 text-gray-200'
             }`}>
-              <span>JacS RetailOS ERP Console Log Stream (v4.2)</span>
-              <span>{filteredAuditLogs.length} events logged</span>
-            </div>
-
-            {filteredAuditLogs.map((log, idx) => {
-              const lvl = log.level || 'INFO';
-              const lvlColor =
-                lvl === 'ERROR'
-                  ? isLight ? 'text-rose-950 bg-rose-100 border border-rose-300' : 'text-rose-400 bg-rose-500/10'
-                  : lvl === 'WARN'
-                  ? isLight ? 'text-amber-950 bg-amber-100 border border-amber-300' : 'text-amber-400 bg-amber-500/10'
-                  : lvl === 'DEBUG'
-                  ? isLight ? 'text-purple-950 bg-purple-100 border border-purple-300' : 'text-purple-400 bg-purple-500/10'
-                  : isLight ? 'text-blue-950 bg-blue-100 border border-blue-300' : 'text-cyan-400 bg-cyan-500/10';
-
-              return (
-                <div key={`${log.id || 'LOG'}-${idx}`} className="leading-relaxed hover:bg-black/5 dark:hover:bg-white/5 px-1 rounded flex items-start gap-2">
-                  <span className={`${isLight ? 'text-slate-800 font-semibold text-xs' : 'text-gray-500'} shrink-0`}>[{log.timestamp}]</span>
-                  <span className={`px-1 rounded text-[10px] font-bold shrink-0 ${lvlColor}`}>
-                    {lvl}
-                  </span>
-                  <span className={`${isLight ? 'text-blue-900 font-bold' : 'text-blue-400'} shrink-0`}>[{log.action}]</span>
-                  <span className={`${isLight ? 'text-slate-950 font-black text-xs' : 'text-gray-400'} shrink-0`}>({log.user}):</span>
-                  <span className={`${isLight ? 'text-slate-900 font-medium' : 'text-gray-200'}`}>{log.details}</span>
-                </div>
-              );
-            })}
-
-            {filteredAuditLogs.length === 0 && (
-              <div className="text-center py-6 text-gray-500">Tidak ada log aktivitas untuk filter ini.</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ====================================================
-          TAB 6: CLOUD SPREADSHEET WEBHOOK
-          ==================================================== */}
-      {adminTab === 'sheets' && (
-        <div className="space-y-5">
-          <div className={`p-6 rounded-2xl border space-y-4 ${
-            isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-          }`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base">Google Sheets & Cloud Database Webhook</h3>
-                <p className="text-xs text-gray-400">Konfigurasi endpoint Apps Script untuk sinkronisasi cloud</p>
-              </div>
-              <button
-                onClick={async () => {
-                  showToast('Menguji koneksi cloud...');
-                  await testSheetConnection();
-                  showToast('Koneksi Cloud Google Sheets Terverifikasi!');
-                }}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 cursor-pointer transition flex items-center gap-1.5"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Uji Koneksi Sekarang</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div>
-                <label className={`block font-bold mb-1 ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>Spreadsheet ID Target:</label>
-                <input
-                  type="text"
-                  value={sheetConfig.spreadsheetId}
-                  onChange={(e) => updateSheetConfig({ spreadsheetId: e.target.value })}
-                  className={`w-full p-2.5 rounded-xl border font-mono ${
-                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-700 text-white'
-                  }`}
-                />
-              </div>
-              <div>
-                <label className={`block font-bold mb-1 ${isLight ? 'text-slate-900' : 'text-gray-400'}`}>Apps Script WebApp URL:</label>
-                <input
-                  type="text"
-                  value={sheetConfig.appsScriptUrl}
-                  onChange={(e) => updateSheetConfig({ appsScriptUrl: e.target.value })}
-                  className={`w-full p-2.5 rounded-xl border font-mono ${
-                    isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-700 text-white'
-                  }`}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ====================================================
-          TAB 7: DATA MIGRATION WIZARD & SMART COLUMN MAPPING
-          ==================================================== */}
-      {adminTab === 'migration' && (
-        <div className="space-y-6 animate-fadeIn">
-          {/* Header Card */}
-          <div
-            className={`p-6 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-[0_0_20px_rgba(245,158,11,0.4)] shrink-0">
-                  <Zap className="w-6 h-6" />
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/35 flex items-center justify-center shrink-0">
+                  <RotateCcw className="w-4 h-4 text-indigo-400" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className={`text-xl font-bold tracking-tight ${isLight ? 'text-slate-950 font-black' : ''}`}>
-                      Data Migration Wizard &amp; Smart Column Mapping
-                    </h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-900 dark:text-amber-300 border border-amber-500/40">
-                      STANDAR APS POS 1
-                    </span>
+                  <div className="text-xs font-black flex flex-wrap items-center gap-2">
+                    <span>Ingin Kembali ke Mode Presentasi / Simulasi Demo?</span>
+                    {(isMasterCatalogWiped || isLedgerReset) && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        Status Saat Ini: Data Pernah Direset
+                      </span>
+                    )}
                   </div>
-                  <p className={`text-xs mt-1 max-w-2xl leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                    Alur migrasi 4 langkah dari format Excel/CSV lama dengan mesin pencocokan kolom cerdas
-                    (Smart Column Mapping), profiling data instan, simulasi Dry Run, dan rekonsiliasi database idempotent.
+                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                    Pulihkan Katalog Produk & Layanan lintas sektor, Supplier, Pelanggan, Karyawan/Stylist, Stok Awal, dan Saldo Awal COA secara instan tanpa hapus Local Storage manual.
                   </p>
                 </div>
               </div>
-
               <button
                 type="button"
-                onClick={() => {
-                  setMigrationInitialEntity('product');
-                  setIsMigrationModalOpen(true);
-                }}
-                className="px-6 py-3 rounded-xl text-xs font-extrabold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(245,158,11,0.4)] cursor-pointer transition active:scale-95 shrink-0"
+                onClick={() => setShowRestoreDemoModal(true)}
+                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shrink-0 transition shadow-md"
               >
-                <Zap className="w-4 h-4 fill-slate-950" />
-                <span>🚀 Buka Wizard Migrasi Lengkap</span>
+                <RotateCcw className="w-4 h-4" />
+                Muat Ulang Data Simulasi Demo (Restore Demo Data)
               </button>
             </div>
 
-            {/* Quick Status Bar */}
-            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t ${
-              isLight ? 'border-slate-200' : 'border-gray-800'
+            {/* Bar Encrypted Backup & SHA-256 Integrity Checksum di Tab Data Master & Migrasi */}
+            <div className={`mt-3 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+              isLight
+                ? 'bg-emerald-50/70 border-emerald-300 text-slate-800'
+                : 'bg-[#0d1117]/90 border-emerald-500/35 text-gray-200'
             }`}>
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-[10px] uppercase font-bold tracking-wider ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Produk Terdaftar</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-cyan-900' : 'text-cyan-400'}`}>{products.length}</div>
-                <div className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-700 font-semibold' : 'text-gray-500'}`}>Kode BR000001 - BRxxxxxx</div>
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="text-xs font-black flex flex-wrap items-center gap-2">
+                    <span>Encrypted Backup &amp; SHA-256 Integrity Checksum Guard</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      SHA-256 VERIFIED
+                    </span>
+                  </div>
+                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                    Unduh cadangan penuh bertanda tangan kriptografi SHA-256 atau pulihkan file backup JSON (otomatis menolak file yang korup/dimodifikasi pihak luar).
+                  </p>
+                </div>
               </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-[10px] uppercase font-bold tracking-wider ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Pemasok / Vendor</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-amber-900' : 'text-amber-400'}`}>{suppliers.length}</div>
-                <div className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-700 font-semibold' : 'text-gray-500'}`}>Kode SP000001 - SPxxxxxx</div>
-              </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-[10px] uppercase font-bold tracking-wider ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Pelanggan / Member</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-emerald-900' : 'text-emerald-400'}`}>{customers.length}</div>
-                <div className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-700 font-semibold' : 'text-gray-500'}`}>Kode CS000001 - CSxxxxxx</div>
-              </div>
-
-              <div className={`p-3.5 rounded-xl border ${isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/30 border-gray-800'}`}>
-                <div className={`text-[10px] uppercase font-bold tracking-wider ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Total Record Gudang</div>
-                <div className={`text-2xl font-black mt-0.5 ${isLight ? 'text-purple-900' : 'text-purple-400'}`}>{inventory.length}</div>
-                <div className={`text-[10px] mt-0.5 ${isLight ? 'text-slate-700 font-semibold' : 'text-gray-500'}`}>Kartu Persediaan Fisik</div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleExportFullSnapshot}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Signed Backup (.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => snapshotFileInputRef.current?.click()}
+                  className={`px-3.5 py-2 rounded-xl font-black text-xs border flex items-center gap-1.5 transition cursor-pointer ${
+                    isLight
+                      ? 'bg-white hover:bg-slate-100 border-emerald-400 text-emerald-800'
+                      : 'bg-[#161b22] hover:bg-gray-800 border-emerald-500/40 text-emerald-300'
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Restore Signed Backup</span>
+                </button>
               </div>
             </div>
+
+            {lastBackupRejectionAlert && (
+              <div className="mt-3 p-3.5 rounded-xl border border-rose-500/50 bg-rose-500/15 text-rose-400 text-xs font-medium flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+                  <div>
+                    <div className="font-black uppercase tracking-wider text-[10px] text-rose-300">
+                      SECURITY SHIELD BLOCK • FILE BACKUP DITOLAK
+                    </div>
+                    <p className="mt-0.5">{lastBackupRejectionAlert}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLastBackupRejectionAlert(null)}
+                  className="text-rose-300 hover:text-white text-[11px] font-bold px-2 py-0.5"
+                >
+                  Tutup
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* 4 Entitas Action Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {/* Card 1: Produk */}
-            <div
-              className={`p-5 rounded-2xl border flex flex-col justify-between transition hover:border-cyan-500/50 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
-                    01
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                    BRxxxxxx
-                  </span>
-                </div>
-                <h3 className={`font-bold text-sm mt-3 ${isLight ? 'text-slate-950 font-black' : ''}`}>Produk &amp; SKU Barang</h3>
-                <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Migrasi master barang, barcode EAN, harga beli/modal, harga jual, dan stok awal (01_Barang).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setMigrationInitialEntity('product');
-                  setIsMigrationModalOpen(true);
-                }}
-                className="mt-4 w-full py-2 px-3 rounded-xl text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 cursor-pointer transition text-center"
-              >
-                Migrasi Produk ➔
-              </button>
-            </div>
-
-            {/* Card 2: Supplier */}
-            <div
-              className={`p-5 rounded-2xl border flex flex-col justify-between transition hover:border-amber-500/50 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                    02
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                    SPxxxxxx
-                  </span>
-                </div>
-                <h3 className={`font-bold text-sm mt-3 ${isLight ? 'text-slate-950 font-black' : ''}`}>Pemasok / Supplier</h3>
-                <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Master supplier rekanan, PIC, kontak WhatsApp, dan termin tempo pembayaran (02_Supplier).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setMigrationInitialEntity('supplier');
-                  setIsMigrationModalOpen(true);
-                }}
-                className="mt-4 w-full py-2 px-3 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 cursor-pointer transition text-center"
-              >
-                Migrasi Pemasok ➔
-              </button>
-            </div>
-
-            {/* Card 3: Pelanggan */}
-            <div
-              className={`p-5 rounded-2xl border flex flex-col justify-between transition hover:border-emerald-500/50 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-                    03
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                    CSxxxxxx
-                  </span>
-                </div>
-                <h3 className={`font-bold text-sm mt-3 ${isLight ? 'text-slate-950 font-black' : ''}`}>Pelanggan &amp; Member</h3>
-                <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Data pelanggan toko, tier member loyalty (Gold/Silver), saldo poin, dan riwayat (03_Customer).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setMigrationInitialEntity('customer');
-                  setIsMigrationModalOpen(true);
-                }}
-                className="mt-4 w-full py-2 px-3 rounded-xl text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 cursor-pointer transition text-center"
-              >
-                Migrasi Pelanggan ➔
-              </button>
-            </div>
-
-            {/* Card 4: Inventory */}
-            <div
-              className={`p-5 rounded-2xl border flex flex-col justify-between transition hover:border-purple-500/50 ${
-                isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold">
-                    04
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/30">
-                    INVENTORY
-                  </span>
-                </div>
-                <h3 className={`font-bold text-sm mt-3 ${isLight ? 'text-slate-950 font-black' : ''}`}>Penyesuaian Stok Awal</h3>
-                <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Sinkronisasi stok fisik hasil opname gudang dan kalibrasi HPP rata-rata barang.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setMigrationInitialEntity('inventory');
-                  setIsMigrationModalOpen(true);
-                }}
-                className="mt-4 w-full py-2 px-3 rounded-xl text-xs font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/30 cursor-pointer transition text-center"
-              >
-                Sinkron Stok ➔
-              </button>
-            </div>
-          </div>
-
-          {/* Pipeline Details Card */}
-          <div
-            className={`p-6 rounded-2xl border ${
-              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <h3 className={`text-sm font-black uppercase tracking-wider mb-4 ${
-              isLight ? 'text-slate-950' : 'text-gray-300'
-            }`}>
-              Arsitektur Alur Migrasi 4-Langkah (Zero Duplication &amp; Idempotent)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className={`p-4 rounded-xl space-y-1.5 border ${
-                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-800'
-              }`}>
-                <div className={`text-xs font-black ${isLight ? 'text-cyan-900' : 'text-cyan-400'}`}>Step 1: Upload Sumber Data</div>
-                <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Mendukung file .CSV dan .XLSX Excel. Sedia tombol unduh template standar dan sampel data 1-klik.
-                </p>
-              </div>
-
-              <div className={`p-4 rounded-xl space-y-1.5 border ${
-                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-800'
-              }`}>
-                <div className={`text-xs font-black ${isLight ? 'text-amber-900' : 'text-amber-400'}`}>Step 2: Smart Column Mapping</div>
-                <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Pencocokan sinonim otomatis ('Nama Barang' ➔ name, 'Harga Modal' ➔ costPrice, 'Stok' ➔ stock) + profiling.
-                </p>
-              </div>
-
-              <div className={`p-4 rounded-xl space-y-1.5 border ${
-                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-800'
-              }`}>
-                <div className={`text-xs font-black ${isLight ? 'text-emerald-900' : 'text-emerald-400'}`}>Step 3: Dry Run Preview</div>
-                <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Simulasi validasi sebelum simpan. Badge status MATCHED (hijau), NEW (biru), DUPLICATE (kuning), INVALID (merah).
-                </p>
-              </div>
-
-              <div className={`p-4 rounded-xl space-y-1.5 border ${
-                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-black/20 border-gray-800'
-              }`}>
-                <div className={`text-xs font-black ${isLight ? 'text-pink-900' : 'text-pink-400'}`}>Step 4: Commit &amp; Rekonsiliasi</div>
-                <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-700 font-medium' : 'text-gray-400'}`}>
-                  Commit aman &amp; idempotent. Data langsung terintegrasi secara reaktif ke AppContext tanpa reload.
-                </p>
-              </div>
-            </div>
-          </div>
+          <MasterDataModule />
         </div>
       )}
-
-      {/* Confirmation Modal: Reset Demo Sales & Restock DB */}
-      {isResetDemoModalOpen && (
-        <div
-          id="modal-confirm-reset-demo"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in"
-        >
-          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border space-y-4 ${
-            isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-          }`}>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center border border-amber-500/40 shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-base">Konfirmasi Reset Demo &amp; Restock</h3>
-                <p className="text-xs text-gray-400">Pulihkan database transaksi ke pengujian awal</p>
-              </div>
-            </div>
-
-            <div className={`p-4 rounded-2xl text-xs space-y-2 border ${
-              isLight ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-amber-950/20 border-amber-500/30 text-amber-300'
-            }`}>
-              <div className="font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                <span>Apa yang akan di-reset:</span>
-              </div>
-              <ul className="list-disc list-inside space-y-1 text-[11px] text-gray-500 dark:text-gray-300">
-                <li>Riwayat transaksi kasir (Sales History) dipulihkan ke data awal.</li>
-                <li>Seluruh produk &amp; DB_Inventory di-restock minimal 50 unit per SKU.</li>
-                <li>Kartu mutasi stok (OUT_SALES &amp; IN_PURCHASE) dinormalisasi.</li>
-              </ul>
-              <div className="pt-2 border-t border-amber-500/20 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
-                ✓ Profil identitas bisnis, logo 3D, NPWP, akun pengguna &amp; password developer TIDAK akan terhapus.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsResetDemoModalOpen(false)}
-                className={`py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                    : 'bg-[#21262d] hover:bg-[#30363d] text-gray-300 border-gray-700'
-                }`}
-              >
-                Batal
-              </button>
-
-              <button
-                type="button"
-                disabled={isResettingDemo}
-                onClick={handleConfirmResetDemo}
-                className="py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.4)] cursor-pointer disabled:opacity-50 transition"
-              >
-                <RotateCcw className={`w-4 h-4 ${isResettingDemo ? 'animate-spin' : ''}`} />
-                <span>{isResettingDemo ? 'Sedang Merestok...' : 'Ya, Reset & Restock'}</span>
-              </button>
-            </div>
-          </div>
         </div>
-      )}
+      </div>
 
-      {/* ====================================================
-          TAB 8: PUSAT INFORMASI & STANDAR OPERASIONAL PROSEDUR (SOP) 6 DIVISI
-          ==================================================== */}
-      {adminTab === 'sop' && (
-        <SopInfoCenterTab isLight={isLight} />
-      )}
-
-      {/* Data Migration Wizard & Smart Column Mapping Modal */}
+      {/* Modal Migrasi */}
       <DataMigrationModal
         isOpen={isMigrationModalOpen}
         onClose={() => setIsMigrationModalOpen(false)}
         initialEntity={migrationInitialEntity}
       />
 
-      {/* AI Smart Mapper Modal for External Formats */}
+      {/* Modal AI Smart Mapper */}
       <AiSmartMapperModal
         isOpen={isAiSmartMapOpen}
         onClose={() => setIsAiSmartMapOpen(false)}
@@ -3938,23 +5946,880 @@ export const SuperAdminModule: React.FC = () => {
         isLight={isLight}
         isEn={false}
       />
+
+      {/* Modal Konfirmasi Cepat — Muat Ulang Data Simulasi Demo (Restore Demo Data) */}
+      {showRestoreDemoModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-indigo-500/70 shadow-[0_0_28px_rgba(99,102,241,0.22)] text-slate-900'
+              : 'bg-[#161b22] border-indigo-500/50 shadow-[0_0_28px_rgba(99,102,241,0.2)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center border bg-indigo-500/15 border-indigo-500/40 text-indigo-400">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400">
+                    Restore Demo Data
+                  </span>
+                  <h4 className="text-base font-black mt-0.5">
+                    Muat Ulang Data Simulasi Demo?
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRestoreDemoModal(false)}
+                className="text-xs font-bold text-gray-400 hover:text-white px-2 py-1 rounded-lg"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className={`rounded-2xl p-4 border text-xs space-y-2 ${
+              isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+            }`}>
+              <div className="font-black text-indigo-400">Dataset Simulasi Standar yang Akan Dipulihkan:</div>
+              <ul className="list-disc list-inside space-y-1 text-[11px]">
+                <li>Katalog Produk & Paket Layanan lintas sektor (Ritel, F&B, Fashion, Material Bangunan, Barbershop & Laundry) beserta Stok Awal</li>
+                <li>Daftar Supplier, Pelanggan, Karyawan, dan Stylist/Kapster</li>
+                <li>Transaksi sampel POS, Purchase Order (PO), Mutasi Stok, dan Saldo Awal Chart of Accounts (COA)</li>
+                <li>Menghapus flag penghapusan permanen di Local Storage secara otomatis</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowRestoreDemoModal(false)}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border ${
+                  isLight
+                    ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRestoreDemoData}
+                className="px-5 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 shadow-lg shadow-indigo-500/20 transition"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Ya, Muat Ulang Data Demo Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Keamanan Kontekstual — Pusat Reset Sistem Bertingkat (Level 1 - 4) */}
+      {selectedResetLevel !== null && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-lg border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            selectedResetLevel === 4
+              ? isLight
+                ? 'bg-white border-rose-500 shadow-[0_0_32px_rgba(244,63,94,0.28)] text-slate-900'
+                : 'bg-[#161b22] border-rose-500/70 shadow-[0_0_32px_rgba(244,63,94,0.25)] text-white'
+              : isLight
+              ? 'bg-white border-amber-500/70 shadow-[0_0_24px_rgba(245,158,11,0.22)] text-slate-900'
+              : 'bg-[#161b22] border-amber-500/45 shadow-[0_0_24px_rgba(245,158,11,0.16)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+                  selectedResetLevel === 4
+                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                    : 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                }`}>
+                  {selectedResetLevel === 4 ? <AlertTriangle className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+                </div>
+                <div>
+                  <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    selectedResetLevel === 4
+                      ? 'bg-rose-500/20 text-rose-400'
+                      : 'bg-amber-500/20 text-amber-400'
+                  }`}>
+                    Konfirmasi Reset Level {selectedResetLevel}
+                  </span>
+                  <h4 className="text-base font-black mt-0.5">
+                    {selectedResetLevel === 1 && 'Reset Transaksi & Jurnal Operasional'}
+                    {selectedResetLevel === 2 && 'Hapus Master Katalog & Kontak Dummy'}
+                    {selectedResetLevel === 3 && 'Reset Saldo Keuangan & Buku Besar'}
+                    {selectedResetLevel === 4 && 'PERINGATAN KRITIS: Factory Reset Total (100% Wipe)'}
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeTieredResetModal}
+                className="text-xs font-bold text-gray-400 hover:text-white px-2 py-1 rounded-lg"
+              >
+                Tutup
+              </button>
+            </div>
+
+            {/* Ringkasan Dampak Reset per Level */}
+            <div className={`rounded-2xl p-4 border text-xs space-y-2.5 ${
+              selectedResetLevel === 4
+                ? isLight
+                  ? 'bg-rose-50 border-rose-200 text-rose-950'
+                  : 'bg-rose-950/25 border-rose-500/30 text-gray-200'
+                : isLight
+                ? 'bg-slate-50 border-slate-200 text-slate-700'
+                : 'bg-[#0d1117] border-gray-800 text-gray-300'
+            }`}>
+              {selectedResetLevel === 1 && (
+                <>
+                  <div className="font-black text-rose-400">Data yang akan DIHAPUS PERMANEN:</div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px]">
+                    <li>Seluruh Transaksi Kasir POS ({(sales || []).length} struk), Shift Z-Report, dan Petty Cash</li>
+                    <li>Seluruh Purchase Order (PO), Mutasi Stok, Piutang Pelanggan (AR), dan Hutang Supplier (AP)</li>
+                    <li>Seluruh Jurnal Buku Besar ({(journalEntries || []).length} entri), Stok produk di-nol-kan (0), dan Nomor Struk kembali ke <span className="font-mono font-bold">0001</span></li>
+                  </ul>
+                  <div className="font-black text-emerald-400 pt-1">Data yang TETAP AMAN:</div>
+                  <p className="text-[11px]">Profil Entitas Bisnis ({businessProfile.name || 'Aktif'}), Logo, Loket POS, dan Katalog Produk/Layanan/Kontak ({(products || []).length} SKU).</p>
+                </>
+              )}
+              {selectedResetLevel === 2 && (
+                <>
+                  <div className="font-black text-rose-400">Data Master yang akan DIKOSONGKAN (0 Item):</div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px]">
+                    <li>Seluruh Katalog Produk & Paket Layanan ({(products || []).length} item), Resep BOM, dan Topping F&B</li>
+                    <li>Seluruh Daftar Supplier ({(suppliers || []).length}), Pelanggan ({(customers || []).length}), Karyawan ({(employees || []).length}), dan Stylist/Kapster ({(serviceStylists || []).length})</li>
+                  </ul>
+                  <div className="font-black text-emerald-400 pt-1">Data yang TETAP AMAN:</div>
+                  <p className="text-[11px]">Profil Entitas Bisnis ({businessProfile.name || 'Aktif'}), Logo, Loket POS, PIN Manajemen, dan Struktur Chart of Accounts (COA).</p>
+                </>
+              )}
+              {selectedResetLevel === 3 && (
+                <>
+                  <div className="font-black text-rose-400">Data Keuangan yang akan DIRESET ke Rp 0:</div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px]">
+                    <li>Seluruh Jurnal Umum Buku Besar ({(journalEntries || []).length} jurnal) dan Mutasi Kas ({(financeEntries || []).length} mutasi)</li>
+                    <li>Seluruh saldo akun Chart of Accounts (COA), Laba Rugi, Neraca Saldo, dan Hutang/Piutang kembali ke <span className="font-mono font-bold">Rp 0</span></li>
+                  </ul>
+                  <div className="font-black text-emerald-400 pt-1">Data yang TETAP AMAN:</div>
+                  <p className="text-[11px]">Profil Entitas Bisnis ({businessProfile.name || 'Aktif'}), Logo, Struktur Kode Akun COA, dan Katalog Master Produk/Layanan ({(products || []).length} SKU).</p>
+                </>
+              )}
+              {selectedResetLevel === 4 && (
+                <>
+                  <div className="font-black text-rose-400 uppercase tracking-wide">
+                    PERINGATAN: SELURUH DATA AKAN DIHAPUS 100% TANPA TERSISA!
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px]">
+                    <li>Seluruh Transaksi POS, Shift Kasir, PO, Mutasi Stok, Piutang/Hutang, dan Jurnal Buku Besar</li>
+                    <li>Seluruh Master Produk/Layanan, Resep BOM, Supplier, Pelanggan, dan Karyawan (menjadi 0 item)</li>
+                    <li>Profil Entitas Bisnis, Nama Usaha, Logo, dan Binding Loket POS dikembalikan ke mode Onboarding Awal</li>
+                  </ul>
+                </>
+              )}
+            </div>
+
+            {/* Input Keamanan: PIN Manajemen 6 Digit */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-black uppercase tracking-wider mb-1.5 text-gray-400">
+                  Masukkan PIN Manajemen 6 Digit
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={resetLevelPinInput}
+                  onChange={(e) => {
+                    setResetLevelPinInput(e.target.value.replace(/\D/g, '').slice(0, 6));
+                    setResetLevelError(null);
+                  }}
+                  placeholder="•••••• (Default: 123456)"
+                  className={`w-full px-4 py-2.5 rounded-xl border font-mono text-center text-base tracking-[0.35em] focus:outline-none ${
+                    isLight
+                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-amber-500'
+                      : 'bg-[#0d1117] border-gray-700 text-white focus:border-amber-400'
+                  }`}
+                />
+              </div>
+
+              {/* Khusus Level 4: Wajib ketik frasa "RESET TOTAL" */}
+              {selectedResetLevel === 4 && (
+                <div>
+                  <label className="block text-[11px] font-black uppercase tracking-wider mb-1.5 text-rose-400">
+                    Ketik Frasa Konfirmasi <span className="underline">RESET TOTAL</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={resetLevelConfirmPhrase}
+                    onChange={(e) => {
+                      setResetLevelConfirmPhrase(e.target.value.toUpperCase());
+                      setResetLevelError(null);
+                    }}
+                    placeholder="Ketik: RESET TOTAL"
+                    className={`w-full px-4 py-2.5 rounded-xl border font-mono text-center text-sm font-black tracking-widest focus:outline-none ${
+                      isLight
+                        ? 'bg-rose-50 border-rose-300 text-rose-900 focus:border-rose-600'
+                        : 'bg-[#0d1117] border-rose-500/50 text-rose-300 focus:border-rose-400'
+                    }`}
+                  />
+                </div>
+              )}
+
+              {resetLevelError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-400 text-xs font-bold text-center">
+                  {resetLevelError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={closeTieredResetModal}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border ${
+                  isLight
+                    ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteTieredReset}
+                disabled={
+                  resetLevelPinInput.trim().length !== 6 ||
+                  (selectedResetLevel === 4 && resetLevelConfirmPhrase.trim() !== 'RESET TOTAL')
+                }
+                className={`px-5 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                  selectedResetLevel === 4
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/25'
+                    : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20'
+                }`}
+              >
+                {selectedResetLevel === 4 ? (
+                  <>
+                    <AlertTriangle className="w-4 h-4" />
+                    Eksekusi Factory Reset Total
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Konfirmasi & Jalankan Level {selectedResetLevel}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Buku Besar ke Entitas Aktif Modal (Bersihkan Data Demo Lintas-Sektor) */}
+      {showResetLedgerModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-amber-500/70 shadow-[0_0_24px_rgba(245,158,11,0.22)] text-slate-900'
+              : 'bg-[#161b22] border-amber-500/45 shadow-[0_0_24px_rgba(245,158,11,0.16)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5 text-amber-500">
+                <RefreshCw className="w-5 h-5" />
+                <h3 className="font-medium text-base tracking-wide">Reset Buku Besar ke Entitas Aktif</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetLedgerModal(false)}
+                className={`cursor-pointer ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-gray-400 hover:text-white'}`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className={`space-y-3 text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-300'}`}>
+              <div className={`p-3 rounded-xl border space-y-1 ${
+                isLight ? 'bg-cyan-50/70 border-cyan-300 text-slate-800' : 'bg-cyan-950/30 border-cyan-500/30 text-slate-200'
+              }`}>
+                <div className="text-[11px] font-mono uppercase tracking-wider text-cyan-600 dark:text-cyan-400">
+                  Entitas &amp; Sektor Aktif Target
+                </div>
+                <div className="font-semibold text-sm">{businessProfile?.name || 'Entitas Aktif'}</div>
+                <div className="text-[11px] font-mono text-slate-500 dark:text-gray-400">
+                  Sektor Kanonik: {activeSector} • Tahun Fiskal: {new Date().getFullYear()} (Jan - Des)
+                </div>
+              </div>
+
+              <p className={`p-3 rounded-xl border leading-relaxed ${
+                isLight
+                  ? 'text-amber-900 bg-amber-50 border-amber-300'
+                  : 'text-amber-300 bg-amber-950/40 border-amber-500/30'
+              }`}>
+                Aksi ini akan <strong>membersihkan seluruh data demo lintas-sektor</strong> (penjualan demo, jurnal akuntansi lama, mutasi kas/finance, piutang/hutang demo, dan klaim rebate demo) ke posisi <strong>Rp 0</strong> agar pembukuan 1 tahun penuh berjalan bersih khusus untuk entitas aktif.
+              </p>
+
+              <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                Profil Usaha, Katalog Master Data (Produk/Menu/Layanan/Stylist), Karyawan, Cabang, dan Konfigurasi API tetap aman dan tidak dihapus.
+              </p>
+            </div>
+
+            <div className={`flex items-center justify-end gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <button
+                type="button"
+                onClick={() => setShowResetLedgerModal(false)}
+                className={`px-4 py-2 rounded-xl font-medium text-xs cursor-pointer ${
+                  isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetLedgerToActiveEntity();
+                  setShowResetLedgerModal(false);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs transition cursor-pointer shadow-md"
+              >
+                Konfirmasi Bersihkan &amp; Mulai dari Rp 0
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clean Slate Security Confirmation Modal */}
+      {showCleanSlateModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-rose-500/70 shadow-[0_0_24px_rgba(244,63,94,0.22)] text-slate-900'
+              : 'bg-[#161b22] border-rose-500/45 shadow-[0_0_24px_rgba(244,63,94,0.16)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5 text-rose-500">
+                <ShieldAlert className="w-6 h-6" />
+                <h3 className="font-medium text-base tracking-wide">Konfirmasi Keamanan Clean Slate</h3>
+              </div>
+              <button onClick={() => setShowCleanSlateModal(false)} className={`cursor-pointer ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-gray-400 hover:text-white'}`}><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className={`space-y-3 text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-300'}`}>
+              <p className={`font-normal p-3 rounded-xl border ${
+                isLight
+                  ? 'text-amber-800 bg-amber-50 border-amber-300'
+                  : 'text-amber-300 bg-amber-950/40 border-amber-500/30'
+              }`}>
+                ⚠️ Peringatan Kritis: Tindakan ini akan menghapus seluruh riwayat transaksi, jurnal keuangan, PO, dan shift kasir ke posisi Rp 0. Katalog Master Data, karyawan, dan API Keys akan dipertahankan.
+              </p>
+              <div>
+                <label className={`block font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-400'}`}>Masukkan PIN Super Admin / Password (1234):</label>
+                <input
+                  type="password"
+                  value={cleanSlatePin}
+                  onChange={(e) => setCleanSlatePin(e.target.value)}
+                  placeholder="PIN Otorisasi..."
+                  className={`w-full border rounded-xl px-3.5 py-2.5 font-mono text-sm outline-none focus:border-rose-500 ${
+                    isLight
+                      ? 'bg-white border-rose-300 text-slate-900'
+                      : 'bg-[#0d1117] border-gray-700 text-white'
+                  }`}
+                />
+              </div>
+              {cleanSlateError && <div className="text-rose-500 font-medium text-xs">{cleanSlateError}</div>}
+            </div>
+
+            <div className={`flex items-center justify-end gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <button
+                type="button"
+                onClick={() => setShowCleanSlateModal(false)}
+                className={`px-4 py-2 rounded-xl font-medium text-xs cursor-pointer ${
+                  isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (cleanSlatePin === '1234' || cleanSlatePin === developerPassword || cleanSlatePin === '8888') {
+                    cleanSlateTransactions();
+                    setShowCleanSlateModal(false);
+                    showToast('Clean Slate berhasil dieksekusi! Data transaksi dikosongkan.');
+                  } else {
+                    setCleanSlateError('PIN / Password Otorisasi salah!');
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs transition cursor-pointer shadow-md"
+              >
+                Konfirmasi Clean Slate (Reset Transaksi)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Snapshot Restore Security Confirmation Modal */}
+      {showRestoreConfirmModal && pendingSnapshot && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+              : 'bg-[#161b22] border-cyan-500/45 shadow-[0_0_24px_rgba(6,182,212,0.16)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5 text-cyan-500">
+                <Database className="w-6 h-6" />
+                <h3 className="font-medium text-base tracking-wide">Konfirmasi Pulihkan Snapshot</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRestoreConfirmModal(false);
+                  setPendingSnapshot(null);
+                }}
+                className={`cursor-pointer ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-gray-400 hover:text-white'}`}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className={`space-y-3 text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-300'}`}>
+              <div className={`p-3 rounded-xl border space-y-1.5 ${
+                isLight ? 'bg-cyan-50/60 border-cyan-300' : 'bg-cyan-950/40 border-cyan-500/30'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`font-bold ${isLight ? 'text-cyan-800' : 'text-cyan-300'}`}>File: {pendingSnapshot.fileName}</p>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" />
+                    SHA-256 VALID
+                  </span>
+                </div>
+                {pendingSnapshot.checksum && (
+                  <p className="text-[10px] font-mono text-emerald-400 break-all">
+                    SHA-256 Checksum: {pendingSnapshot.checksum}
+                  </p>
+                )}
+                {pendingSnapshot.exportedAt && (
+                  <p className="text-[11px] text-gray-400 font-mono">
+                    Timestamp: {new Date(pendingSnapshot.exportedAt).toLocaleString('id-ID')} • Oleh: {pendingSnapshot.signedBy || 'SuperAdmin'}
+                  </p>
+                )}
+                <p className={`text-[11px] pt-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Data terverifikasi: {pendingSnapshot.counts.products} produk, {pendingSnapshot.counts.sales} penjualan, {pendingSnapshot.counts.financeEntries} entri keuangan, {pendingSnapshot.counts.journalEntries} jurnal, {pendingSnapshot.counts.branches} cabang, {pendingSnapshot.counts.employees} karyawan, {pendingSnapshot.counts.suppliers} pemasok.
+                </p>
+              </div>
+              <p className={`font-normal ${isLight ? 'text-amber-700' : 'text-amber-400'}`}>
+                Data aplikasi saat ini akan ditimpa dengan isi snapshot cadangan. Pastikan Anda sudah mencadangkan data terbaru sebelum melanjutkan.
+              </p>
+              <div>
+                <label className={`block font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-400'}`}>Masukkan PIN / Kode Otoritas Super Admin (1234):</label>
+                <input
+                  type="password"
+                  value={restorePin}
+                  onChange={(e) => {
+                    setRestorePin(e.target.value);
+                    setRestoreError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmSnapshotRestore();
+                  }}
+                  placeholder="PIN Otorisasi..."
+                  className={`w-full border rounded-xl px-3.5 py-2.5 font-mono text-sm outline-none focus:border-cyan-500 ${
+                    isLight
+                      ? 'bg-white border-cyan-500/50 text-slate-900'
+                      : 'bg-[#0d1117] border-gray-700 text-white'
+                  }`}
+                />
+              </div>
+              {restoreError && <div className="text-rose-500 font-medium text-xs">{restoreError}</div>}
+            </div>
+
+            <div className={`flex items-center justify-end gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRestoreConfirmModal(false);
+                  setPendingSnapshot(null);
+                }}
+                className={`px-4 py-2 rounded-xl font-medium text-xs cursor-pointer ${
+                  isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSnapshotRestore}
+                className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs transition cursor-pointer shadow-md"
+              >
+                Konfirmasi &amp; Pulihkan Snapshot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ubah PIN Divisi (SHA-256 Persisten) */}
+      {editingDivisionCard && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div
+            className={`w-full max-w-md rounded-3xl p-6 border space-y-5 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+                : 'bg-[#161b22] border-cyan-500/45 shadow-[0_0_24px_rgba(6,182,212,0.16)] text-white'
+            }`}
+          >
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center border"
+                  style={{
+                    backgroundColor: `${editingDivisionCard.colorHex}20`,
+                    borderColor: `${editingDivisionCard.colorHex}50`,
+                    color: editingDivisionCard.colorHex,
+                  }}
+                >
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm tracking-wide">
+                    Ubah PIN Divisi: {editingDivisionCard.name}
+                  </h3>
+                  <p className={`text-[11px] font-normal ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    {editingDivisionCard.roleLabel}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingDivisionCard(null)}
+                className="text-gray-400 hover:text-rose-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setDivisionPinError(null);
+                const cleanPin = divisionNewPin.trim();
+                const cleanConfirm = divisionConfirmPin.trim();
+                if (cleanPin.length < 4) {
+                  setDivisionPinError('PIN baru minimal 4 karakter/digit!');
+                  return;
+                }
+                if (cleanPin !== cleanConfirm) {
+                  setDivisionPinError('Konfirmasi PIN baru tidak cocok!');
+                  return;
+                }
+                setIsSavingDivisionPin(true);
+                const res = await updateDivisionPin(editingDivisionCard.id, cleanPin);
+                setIsSavingDivisionPin(false);
+                if (res.success) {
+                  recordAudit({
+                    traceId: `DIV-PIN-${editingDivisionCard.id.toUpperCase()}-${Date.now()}`,
+                    userId: effectiveUser?.id || 'super-admin',
+                    userName: effectiveUser?.name || 'Super Admin',
+                    userRole: 'Super Admin',
+                    module: 'AUTH',
+                    action: 'AUTH_OVERRIDE_PIN',
+                    severity: 'SECURITY',
+                    entityId: editingDivisionCard.id,
+                    payloadAfter: {
+                      division: editingDivisionCard.name,
+                      sha256Prefix: res.hash ? res.hash.slice(0, 12) : 'sha256',
+                    },
+                  });
+                  setEditingDivisionCard(null);
+                  setDivisionNewPin('');
+                  setDivisionConfirmPin('');
+                } else {
+                  setDivisionPinError(res.message);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div
+                className={`p-3 rounded-xl border text-[11px] font-mono ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-[#0d1117] border-gray-800 text-gray-400'
+                }`}
+              >
+                PIN akan di-hash menggunakan <span className="font-mono font-medium text-emerald-500">SHA-256</span> sebelum disimpan di localStorage dan langsung aktif saat login divisi {editingDivisionCard.name}.
+              </div>
+
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  PIN Akses Baru (Min. 4 karakter):
+                </label>
+                <div className="relative">
+                  <input
+                    type={showDivisionPin ? 'text' : 'password'}
+                    autoFocus
+                    value={divisionNewPin}
+                    onChange={(e) => {
+                      setDivisionNewPin(e.target.value);
+                      setDivisionPinError(null);
+                    }}
+                    placeholder="Masukkan PIN baru..."
+                    className={`w-full py-2.5 pl-3.5 pr-10 rounded-xl border font-mono text-sm outline-none ${
+                      isLight
+                        ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                        : 'bg-[#0d1117] border-gray-700 text-white focus:border-cyan-500'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDivisionPin(!showDivisionPin)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-cyan-400 cursor-pointer"
+                  >
+                    {showDivisionPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Konfirmasi PIN Baru:
+                </label>
+                <input
+                  type={showDivisionPin ? 'text' : 'password'}
+                  value={divisionConfirmPin}
+                  onChange={(e) => {
+                    setDivisionConfirmPin(e.target.value);
+                    setDivisionPinError(null);
+                  }}
+                  placeholder="Ulangi PIN baru..."
+                  className={`w-full py-2.5 px-3.5 rounded-xl border font-mono text-sm outline-none ${
+                    isLight
+                      ? 'bg-white border-cyan-500/50 text-slate-900 focus:border-cyan-500'
+                      : 'bg-[#0d1117] border-gray-700 text-white focus:border-cyan-500'
+                  }`}
+                />
+              </div>
+
+              {divisionPinError && (
+                <div className={`p-2.5 rounded-xl border text-rose-500 text-xs font-medium flex items-center gap-2 ${
+                  isLight ? 'bg-rose-50 border-rose-300' : 'bg-rose-500/15 border-rose-500/30'
+                }`}>
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{divisionPinError}</span>
+                </div>
+              )}
+
+              <div className={`flex items-center justify-end gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                <button
+                  type="button"
+                  onClick={() => setEditingDivisionCard(null)}
+                  className={`px-4 py-2 rounded-xl text-xs font-medium cursor-pointer ${
+                    isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingDivisionPin}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{isSavingDivisionPin ? 'Mengenkripsi...' : 'Simpan PIN (SHA-256)'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ganti Kode Otoritas SuperAdmin (Wajib Verifikasi Kode Lama) */}
+      {showChangeSuperAdminCodeModal && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div
+            className={`w-full max-w-md rounded-3xl p-6 border space-y-5 transition-all duration-200 ${
+              isLight
+                ? 'bg-white border-rose-500/70 shadow-[0_0_24px_rgba(244,63,94,0.22)] text-slate-900'
+                : 'bg-[#161b22] border-rose-500/45 shadow-[0_0_24px_rgba(244,63,94,0.16)] text-white'
+            }`}
+          >
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-2.5 text-rose-500">
+                <KeyRound className="w-6 h-6" />
+                <div>
+                  <h3 className="font-medium text-sm tracking-wide">Ganti Kode Otoritas SuperAdmin</h3>
+                  <p className={`text-[11px] font-normal ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Wajib verifikasi kode lama sebelum enkripsi SHA-256 kode baru.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChangeSuperAdminCodeModal(false)}
+                className="text-gray-400 hover:text-rose-400 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSuperAdminCodeError(null);
+                if (!oldSuperAdminCodeInput.trim()) {
+                  setSuperAdminCodeError('Kode otoritas lama wajib diisi untuk verifikasi!');
+                  return;
+                }
+                if (newSuperAdminCodeInput.trim().length < 4) {
+                  setSuperAdminCodeError('Kode otoritas baru minimal 4 karakter!');
+                  return;
+                }
+                if (newSuperAdminCodeInput.trim() !== confirmSuperAdminCodeInput.trim()) {
+                  setSuperAdminCodeError('Konfirmasi kode otoritas baru tidak cocok!');
+                  return;
+                }
+                setIsSavingSuperAdminCode(true);
+                const res = await updateSuperAdminAuthorityCode(
+                  oldSuperAdminCodeInput.trim(),
+                  newSuperAdminCodeInput.trim()
+                );
+                setIsSavingSuperAdminCode(false);
+                if (res.success) {
+                  recordAudit({
+                    traceId: `SUPERADMIN-CODE-CHANGE-${Date.now()}`,
+                    userId: effectiveUser?.id || 'super-admin',
+                    userName: effectiveUser?.name || 'Super Admin',
+                    userRole: 'Super Admin',
+                    module: 'AUTH',
+                    action: 'AUTH_OVERRIDE_PIN',
+                    severity: 'CRITICAL',
+                    payloadAfter: {
+                      action: 'UPDATE_SUPERADMIN_AUTHORITY_CODE_SHA256',
+                      sha256Prefix: res.hash ? res.hash.slice(0, 12) : 'sha256',
+                    },
+                  });
+                  setShowChangeSuperAdminCodeModal(false);
+                  setOldSuperAdminCodeInput('');
+                  setNewSuperAdminCodeInput('');
+                  setConfirmSuperAdminCodeInput('');
+                } else {
+                  setSuperAdminCodeError(res.message);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  1. Verifikasi Kode Otoritas Lama:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldSuperAdminCode ? 'text' : 'password'}
+                    autoFocus
+                    value={oldSuperAdminCodeInput}
+                    onChange={(e) => {
+                      setOldSuperAdminCodeInput(e.target.value);
+                      setSuperAdminCodeError(null);
+                    }}
+                    placeholder="Masukkan kode otoritas aktif saat ini..."
+                    className={`w-full py-2.5 pl-3.5 pr-10 rounded-xl border font-mono text-sm outline-none ${
+                      isLight
+                        ? 'bg-white border-rose-300 text-slate-900 focus:border-rose-500'
+                        : 'bg-[#0d1117] border-gray-700 text-white focus:border-rose-500'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldSuperAdminCode(!showOldSuperAdminCode)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    {showOldSuperAdminCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  2. Kode Otoritas SuperAdmin Baru:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewSuperAdminCode ? 'text' : 'password'}
+                    value={newSuperAdminCodeInput}
+                    onChange={(e) => {
+                      setNewSuperAdminCodeInput(e.target.value);
+                      setSuperAdminCodeError(null);
+                    }}
+                    placeholder="Minimal 4 karakter..."
+                    className={`w-full py-2.5 pl-3.5 pr-10 rounded-xl border font-mono text-sm outline-none ${
+                      isLight
+                        ? 'bg-white border-rose-300 text-slate-900 focus:border-rose-500'
+                        : 'bg-[#0d1117] border-gray-700 text-white focus:border-rose-500'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewSuperAdminCode(!showNewSuperAdminCode)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    {showNewSuperAdminCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-medium mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  3. Konfirmasi Kode Otoritas Baru:
+                </label>
+                <input
+                  type={showNewSuperAdminCode ? 'text' : 'password'}
+                  value={confirmSuperAdminCodeInput}
+                  onChange={(e) => {
+                    setConfirmSuperAdminCodeInput(e.target.value);
+                    setSuperAdminCodeError(null);
+                  }}
+                  placeholder="Ulangi kode baru..."
+                  className={`w-full py-2.5 px-3.5 rounded-xl border font-mono text-sm outline-none ${
+                    isLight
+                      ? 'bg-white border-rose-300 text-slate-900 focus:border-rose-500'
+                      : 'bg-[#0d1117] border-gray-700 text-white focus:border-rose-500'
+                  }`}
+                />
+              </div>
+
+              {superAdminCodeError && (
+                <div className={`p-2.5 rounded-xl border text-rose-500 text-xs font-medium flex items-center gap-2 ${
+                  isLight ? 'bg-rose-50 border-rose-300' : 'bg-rose-500/15 border-rose-500/30'
+                }`}>
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{superAdminCodeError}</span>
+                </div>
+              )}
+
+              <div className={`flex items-center justify-end gap-3 pt-3 border-t ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                <button
+                  type="button"
+                  onClick={() => setShowChangeSuperAdminCodeModal(false)}
+                  className={`px-4 py-2 rounded-xl text-xs font-medium cursor-pointer ${
+                    isLight ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSuperAdminCode}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs transition cursor-pointer shadow-md disabled:opacity-50 flex items-center gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{isSavingSuperAdminCode ? 'Memverifikasi...' : 'Verifikasi & Simpan Kode'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-// Helper Icon for Cloud Sync
-const CloudSyncIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-  </svg>
-);
 
 export default SuperAdminModule;

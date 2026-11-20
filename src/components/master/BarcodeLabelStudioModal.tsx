@@ -131,6 +131,7 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
   const [copies, setCopies] = useState<number>(1);
   const [paperFormat, setPaperFormat] = useState<'ROLL_40x30' | 'A4_SHEET'>('ROLL_40x30');
   const [showStoreName, setShowStoreName] = useState<boolean>(true);
+  const [showCategoryCode, setShowCategoryCode] = useState<boolean>(true);
   const [showPrice, setShowPrice] = useState<boolean>(true);
   const [storeName, setStoreName] = useState<string>('JacS Enterprise');
 
@@ -145,8 +146,15 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
 
   if (!isOpen || !activeProduct) return null;
 
-  const barcodeValue = activeProduct.barcode || activeProduct.plu || activeProduct.id;
-  const retailPrice = activeProduct.price_retail ?? activeProduct.sell_price;
+  const barcodeValue =
+    activeProduct.barcode?.trim() ||
+    activeProduct.plu?.trim() ||
+    (activeProduct.id?.startsWith('INT-')
+      ? activeProduct.id
+      : `INT-${(activeProduct.id || '0000').replace(/[^A-Za-z0-9]/g, '').slice(-4).toUpperCase().padStart(4, '0')}`);
+  const categoryCodeLabel = String(activeProduct.categoryCode || 10).replace(/^PC\./i, '');
+  const categoryNameLabel = activeProduct.category || 'Umum';
+  const retailPrice = activeProduct.price_retail ?? activeProduct.sell_price ?? activeProduct.sellingPrice ?? activeProduct.price ?? 0;
   const description = activeProduct.description || activeProduct.name;
   const isEn = language === 'EN';
 
@@ -356,6 +364,15 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
                 <label className="flex items-center gap-2 text-slate-900 dark:text-slate-100 cursor-pointer font-medium">
                   <input
                     type="checkbox"
+                    checked={showCategoryCode}
+                    onChange={(e) => setShowCategoryCode(e.target.checked)}
+                    className="rounded text-purple-500 focus:ring-0"
+                  />
+                  <span>{isEn ? 'Show Category Code' : 'Tampilkan No Kategori'}</span>
+                </label>
+                <label className="flex items-center gap-2 text-slate-900 dark:text-slate-100 cursor-pointer font-medium">
+                  <input
+                    type="checkbox"
                     checked={showPrice}
                     onChange={(e) => setShowPrice(e.target.checked)}
                     className="rounded text-purple-500 focus:ring-0"
@@ -391,22 +408,32 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
                   fontFamily: 'system-ui, -apple-system, sans-serif',
                 }}
               >
-                {/* 1. Header: Store Name */}
-                {showStoreName && (
-                  <div className="text-center border-b border-gray-300 pb-1 mb-1">
-                    <div className="font-extrabold text-[12px] uppercase tracking-wider text-black">
-                      {storeName || 'JacS Enterprise'}
-                    </div>
+                {/* 1. Header: Store Name & No Kategori */}
+                {(showStoreName || showCategoryCode) && (
+                  <div className="border-b border-gray-300 pb-1 mb-1 flex items-center justify-between gap-1">
+                    {showStoreName ? (
+                      <div className="font-extrabold text-[11px] uppercase tracking-wider text-black truncate">
+                        {storeName || 'JacS Enterprise'}
+                      </div>
+                    ) : (
+                      <span />
+                    )}
+                    {showCategoryCode && (
+                      <span className="px-1.5 py-0.5 rounded bg-gray-900 text-white font-mono text-[9px] font-bold shrink-0">
+                        {categoryCodeLabel}
+                      </span>
+                    )}
                   </div>
                 )}
 
-                {/* 2. Description Produk */}
+                {/* 2. Description Produk & Kategori */}
                 <div className="text-center my-0.5">
                   <div className="font-bold text-[11px] leading-tight text-black line-clamp-2" title={description}>
                     {description}
                   </div>
-                  <div className="text-[9px] text-gray-600 mt-0.5 font-semibold">
-                    {activeProduct.brand} • {activeProduct.unit || 'PCS'}
+                  <div className="text-[9px] text-gray-600 mt-0.5 font-semibold truncate">
+                    {showCategoryCode ? `${categoryNameLabel} • ` : ''}
+                    {activeProduct.brand || 'GENERIC'} • {activeProduct.unit || 'PCS'}
                   </div>
                 </div>
 
@@ -522,22 +549,24 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
                 className="label-item-thermal flex flex-col justify-between p-1 bg-white text-black"
                 style={{ fontFamily: 'Arial, sans-serif' }}
               >
-                {showStoreName && (
-                  <div className="text-center font-bold text-[8px] uppercase tracking-wide border-b border-black pb-0.5">
-                    {storeName}
+                {(showStoreName || showCategoryCode) && (
+                  <div className="flex items-center justify-between font-bold text-[7.5px] uppercase tracking-wide border-b border-black pb-0.5">
+                    <span className="truncate">{showStoreName ? storeName : ''}</span>
+                    {showCategoryCode && <span className="font-mono font-black shrink-0">{categoryCodeLabel}</span>}
                   </div>
                 )}
                 <div className="text-center my-0.5">
                   <div className="font-bold text-[8px] leading-tight line-clamp-2">
                     {description}
                   </div>
-                  <div className="text-[6.5px] text-gray-700">
-                    {activeProduct.brand || ''} • {activeProduct.unit || 'PCS'}
+                  <div className="text-[6.5px] text-gray-700 truncate">
+                    {showCategoryCode ? `${categoryNameLabel} • ` : ''}
+                    {activeProduct.brand || 'GENERIC'} • {activeProduct.unit || 'PCS'}
                   </div>
                 </div>
                 <div className="flex flex-col items-center my-0.5">
                   <div className="w-full px-1">
-                    <Code128Svg code={barcodeValue} height={28} barColor="#000000" />
+                    <Code128Svg code={barcodeValue} height={26} barColor="#000000" />
                   </div>
                   <div className="font-mono font-bold text-[7.5px] tracking-wider">
                     {barcodeValue}
@@ -560,22 +589,24 @@ export const BarcodeLabelStudioModal: React.FC<BarcodeLabelStudioModalProps> = (
                 className="label-item-a4 flex flex-col justify-between p-1.5 bg-white text-black"
                 style={{ fontFamily: 'Arial, sans-serif' }}
               >
-                {showStoreName && (
-                  <div className="text-center font-bold text-[8px] uppercase tracking-wide border-b border-black pb-0.5">
-                    {storeName}
+                {(showStoreName || showCategoryCode) && (
+                  <div className="flex items-center justify-between font-bold text-[8px] uppercase tracking-wide border-b border-black pb-0.5">
+                    <span className="truncate">{showStoreName ? storeName : ''}</span>
+                    {showCategoryCode && <span className="font-mono font-black shrink-0">{categoryCodeLabel}</span>}
                   </div>
                 )}
                 <div className="text-center my-0.5">
                   <div className="font-bold text-[8.5px] leading-tight line-clamp-2">
                     {description}
                   </div>
-                  <div className="text-[7px] text-gray-700">
-                    {activeProduct.brand || ''} • {activeProduct.unit || 'PCS'}
+                  <div className="text-[7px] text-gray-700 truncate">
+                    {showCategoryCode ? `${categoryNameLabel} • ` : ''}
+                    {activeProduct.brand || 'GENERIC'} • {activeProduct.unit || 'PCS'}
                   </div>
                 </div>
                 <div className="flex flex-col items-center my-0.5">
                   <div className="w-full px-2">
-                    <Code128Svg code={barcodeValue} height={32} barColor="#000000" />
+                    <Code128Svg code={barcodeValue} height={30} barColor="#000000" />
                   </div>
                   <div className="font-mono font-bold text-[8px] tracking-wider">
                     {barcodeValue}

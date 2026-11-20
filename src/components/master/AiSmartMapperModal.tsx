@@ -153,8 +153,6 @@ export const AiSmartMapperModal: React.FC<AiSmartMapperModalProps> = ({
   const [fileName, setFileName] = useState('contoh_toko_lain.csv');
   const [customMappings, setCustomMappings] = useState<Record<string, CanonicalField>>({});
 
-  if (!isOpen) return null;
-
   // Handle Raw CSV parsing into headers and rows
   const parsedData = useMemo(() => {
     if (!rawText.trim()) return { headers: [], rows: [] };
@@ -268,6 +266,8 @@ export const AiSmartMapperModal: React.FC<AiSmartMapperModalProps> = ({
     }
     return result;
   }, [parsedData, autoFieldMappings]);
+
+  if (!isOpen) return null;
 
   // Process & Confirm Import
   const handleConfirmImport = () => {

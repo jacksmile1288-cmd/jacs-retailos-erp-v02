@@ -14,6 +14,8 @@ import {
   ShieldCheck,
   Scale,
 } from 'lucide-react';
+import { SearchableProductCombobox } from '../common/SearchableProductCombobox';
+import { filterProductsByBusinessDomain } from '../../utils/buildingDomainIsolation';
 
 interface StockOpnameModalProps {
   isOpen: boolean;
@@ -30,7 +32,12 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
   isLight = false,
   isEn = false,
 }) => {
-  const { products, activeUser, processStockOpnameAdjustment } = useApp();
+  const { products: rawProducts, businessDomainConfig, activeUser, processStockOpnameAdjustment } = useApp();
+
+  const products = useMemo(
+    () => filterProductsByBusinessDomain(rawProducts || [], businessDomainConfig),
+    [rawProducts, businessDomainConfig]
+  );
 
   const [selectedProductId, setSelectedProductId] = useState<string>(
     preselectedProduct?.id || products[0]?.id || ''
@@ -94,29 +101,33 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+    <div className="warehouse-modal fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-200 font-sans">
       <div
-        className={`w-full max-w-xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[92vh] ${
-          isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
+        className={`w-full max-w-xl rounded-2xl border overflow-hidden flex flex-col max-h-[92vh] ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-900'
+            : 'bg-[#161b22] border-cyan-500/40 shadow-[0_0_24px_rgba(6,182,212,0.16)] text-white'
         }`}
       >
         {/* Header */}
         <div
           className={`p-4 sm:p-5 border-b flex items-center justify-between ${
-            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d]'
+            isLight ? 'bg-slate-50 border-cyan-500/35 text-slate-900' : 'bg-[#0d1117] border-cyan-500/25'
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
+            <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+              isLight ? 'bg-cyan-50 border-cyan-500/60 text-cyan-700' : 'bg-cyan-500/15 border-cyan-500/35 text-cyan-400'
+            }`}>
               <ClipboardCheck className="w-5 h-5" />
             </div>
             <div>
-              <div className={`text-[10px] font-black font-mono uppercase tracking-wider ${
-                isLight ? 'text-indigo-700' : 'text-cyan-400'
+              <div className={`text-[11px] font-mono font-normal uppercase tracking-widest ${
+                isLight ? 'text-cyan-700' : 'text-cyan-400'
               }`}>
                 Warehouse • Inventory Audit Gateway
               </div>
-              <h3 className={`text-base sm:text-lg font-black tracking-tight ${
+              <h3 className={`text-base font-medium tracking-tight ${
                 isLight ? 'text-slate-950' : 'text-white'
               }`}>
                 {isEn ? 'Stock Opname & Discrepancy Adjustment' : 'Stock Opname & Rekonsiliasi Fisik Inventori'}
@@ -127,7 +138,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition cursor-pointer ${
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 cursor-pointer ${
               isLight ? 'text-slate-600 hover:text-slate-950 hover:bg-slate-200' : 'text-gray-400 hover:text-white hover:bg-slate-800'
             }`}
           >
@@ -136,86 +147,78 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="p-5 sm:p-6 overflow-y-auto space-y-4 text-sm font-normal">
           {/* 1. Pilih Produk */}
           <div>
-            <label className={`block mb-1.5 ${
-              isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] font-bold text-gray-300'
+            <label className={`block mb-1.5 text-sm font-medium ${
+              isLight ? 'text-slate-800' : 'text-gray-200'
             }`}>
               Pilih Produk untuk Di-Opname:
             </label>
-            <select
-              value={selectedProductId}
-              onChange={(e) => handleProductChange(e.target.value)}
-              className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-none transition cursor-pointer font-medium ${
-                isLight
-                  ? 'bg-slate-50 border-slate-300 text-slate-950 focus:border-indigo-600'
-                  : 'bg-[#0d1117] border-[#30363d] text-white focus:border-cyan-500'
-              }`}
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id} - {p.name} (Stok Sistem: {p.stock} {p.unit || 'Unit'})
-                </option>
-              ))}
-            </select>
+            <SearchableProductCombobox
+              products={products}
+              selectedId={selectedProductId}
+              onSelect={handleProductChange}
+              placeholder="Cari produk..."
+              className="w-full"
+            />
           </div>
 
           {/* 2. Informasi Produk Terpilih */}
           {selectedProduct && (
-            <div className={`p-3.5 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs border ${
+            <div className={`p-3.5 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-3 border ${
               isLight
-                ? 'bg-slate-50 border-slate-300 text-slate-900'
-                : 'bg-slate-900/60 border-slate-800'
+                ? 'bg-slate-50 border-cyan-500/45 text-slate-900'
+                : 'bg-[#0d1117] border-cyan-500/25'
             }`}>
               <div>
-                <span className={`block ${
-                  isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'
+                <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                  isLight ? 'text-slate-600' : 'text-gray-400'
                 }`}>
                   SKU / PLU
                 </span>
-                <span className={`mt-1 inline-block ${
+                <span className={`mt-1 inline-block font-mono font-normal text-[11px] px-2 py-0.5 rounded border ${
                   isLight
-                    ? 'bg-blue-100 border border-blue-300 text-blue-950 font-bold text-xs px-2 py-0.5 rounded font-mono'
-                    : 'font-mono font-bold text-cyan-400'
+                    ? 'bg-cyan-50 border-cyan-500/60 text-cyan-800'
+                    : 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
                 }`}>
                   {selectedProduct.id}
                 </span>
               </div>
               <div>
-                <span className={`block ${
-                  isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'
+                <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                  isLight ? 'text-slate-600' : 'text-gray-400'
                 }`}>
                   Kategori
                 </span>
-                <span className={`mt-1 block truncate ${
-                  isLight ? 'text-slate-950 font-black text-xs' : 'font-semibold text-gray-300'
+                <span className={`mt-1 block truncate text-sm font-normal ${
+                  isLight ? 'text-slate-900' : 'text-gray-200'
                 }`}>
                   {selectedProduct.category || 'Umum'}
                 </span>
               </div>
               <div>
-                <span className={`block ${
-                  isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'
+                <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                  isLight ? 'text-slate-600' : 'text-gray-400'
                 }`}>
-                  Harga Modal (HPP)
+                  HPP
                 </span>
-                <span className={`mt-1 block font-mono ${
-                  isLight ? 'text-slate-950 font-black text-xs' : 'font-bold text-gray-200'
+                <span className={`mt-1 block font-mono font-normal text-sm ${
+                  isLight ? 'text-slate-900' : 'text-gray-200'
                 }`}>
                   Rp {unitCost.toLocaleString('id-ID')}
                 </span>
               </div>
               <div>
-                <span className={`block ${
-                  isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-medium'
+                <span className={`block text-[11px] font-mono font-normal tracking-widest uppercase ${
+                  isLight ? 'text-slate-600' : 'text-gray-400'
                 }`}>
-                  Satuan Barang
+                  Satuan
                 </span>
-                <span className={`mt-1 inline-block ${
+                <span className={`mt-1 inline-block font-mono font-normal text-[11px] px-2 py-0.5 rounded border ${
                   isLight
-                    ? 'bg-blue-100 border border-blue-300 text-blue-950 font-bold text-xs px-2 py-0.5 rounded'
-                    : 'font-semibold text-gray-300'
+                    ? 'bg-cyan-50 border-cyan-500/60 text-cyan-800'
+                    : 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
                 }`}>
                   {selectedProduct.unit || 'Pcs / Unit'}
                 </span>
@@ -227,31 +230,35 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Stok Sistem (Tercatat) */}
             <div className={`p-4 rounded-xl border space-y-1 ${
-              isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'border-slate-700 bg-slate-900/50'
+              isLight
+                ? 'bg-white border-cyan-500/60 shadow-[0_0_12px_rgba(6,182,212,0.12)] text-slate-900'
+                : 'bg-[#0d1117] border-cyan-500/35'
             }`}>
-              <span className={`uppercase tracking-wider block ${
-                isLight ? 'text-slate-700 font-bold text-xs' : 'text-[10px] text-gray-400 font-bold'
+              <span className={`text-[11px] font-mono font-normal uppercase tracking-widest block ${
+                isLight ? 'text-slate-600' : 'text-gray-400'
               }`}>
-                Stok Sistem (Tercatat)
+                Stok Sistem
               </span>
-              <div className={`text-2xl font-black font-mono ${
+              <div className={`text-lg font-mono font-medium ${
                 isLight ? 'text-slate-950' : 'text-cyan-400'
               }`}>
-                {systemStock} <span className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>{selectedProduct?.unit || 'Unit'}</span>
+                {systemStock} <span className={`text-sm font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>{selectedProduct?.unit || 'Unit'}</span>
               </div>
-              <span className={`text-[10px] block ${isLight ? 'text-slate-600 font-medium' : 'text-gray-500'}`}>
-                Saldo inventori saat ini
+              <span className={`text-[11px] font-mono font-normal block ${isLight ? 'text-slate-500' : 'text-gray-500'}`}>
+                Saldo tercatat saat ini
               </span>
             </div>
 
             {/* Input Stok Fisik Nyata */}
             <div className={`p-4 rounded-xl border space-y-1 ${
-              isLight ? 'border-amber-300 bg-amber-50/70 text-slate-900' : 'border-amber-500/40 bg-amber-500/10'
+              isLight
+                ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_16px_rgba(245,158,11,0.18)] text-slate-900'
+                : 'border-amber-500/65 bg-amber-500/5 shadow-[0_0_16px_rgba(245,158,11,0.14)]'
             }`}>
-              <label htmlFor="input-physical-stock" className={`uppercase tracking-wider block ${
-                isLight ? 'text-amber-950 font-black text-xs' : 'text-[10px] text-amber-300 font-black'
+              <label htmlFor="input-physical-stock" className={`text-[11px] font-mono font-normal uppercase tracking-widest block ${
+                isLight ? 'text-amber-700' : 'text-amber-300'
               }`}>
-                Hitungan Fisik Riil *
+                Hitungan Fisik *
               </label>
               <input
                 id="input-physical-stock"
@@ -259,106 +266,100 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
                 min="0"
                 value={physicalStock}
                 onChange={(e) => setPhysicalStock(Math.max(0, parseInt(e.target.value) || 0))}
-                className={`w-full text-2xl font-black font-mono rounded-lg px-2.5 py-1 outline-none border ${
+                className={`w-full text-lg font-mono font-medium rounded-lg px-2.5 py-1 outline-none border transition-all duration-200 ${
                   isLight
-                    ? 'bg-white border-amber-400 text-slate-950 focus:ring-1 focus:ring-amber-500'
-                    : 'bg-slate-950 border-amber-500/50 text-white focus:ring-1 focus:ring-amber-400'
+                    ? 'bg-white border-amber-500/70 text-slate-950 focus:border-amber-600'
+                    : 'bg-slate-950 border-amber-500/50 text-white focus:border-amber-400'
                 }`}
                 required
               />
-              <span className={`text-[10px] block ${isLight ? 'text-amber-900 font-semibold' : 'text-amber-300/80'}`}>
-                Masukkan hasil cacah fisik
+              <span className={`text-[11px] font-mono font-normal block ${isLight ? 'text-amber-700' : 'text-amber-300/80'}`}>
+                Hasil cacah fisik
               </span>
             </div>
 
             {/* Selisih (Delta) */}
             <div
               className={`p-4 rounded-xl border space-y-1 ${
-                isLight
-                  ? difference === 0
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
-                    : difference < 0
-                    ? 'border-rose-300 bg-rose-50 text-rose-950'
-                    : 'border-emerald-300 bg-emerald-50 text-emerald-950'
-                  : difference === 0
-                  ? 'border-blue-500/40 bg-blue-500/10'
+                difference === 0
+                  ? isLight
+                    ? 'border-emerald-500/70 bg-emerald-50 text-slate-900'
+                    : 'border-emerald-500/40 bg-emerald-500/10'
                   : difference < 0
-                  ? 'border-rose-500/40 bg-rose-500/10'
+                  ? isLight
+                    ? 'border-rose-500/75 bg-rose-50 text-slate-900'
+                    : 'border-rose-500/50 bg-rose-500/10'
+                  : isLight
+                  ? 'border-emerald-500/70 bg-emerald-50 text-slate-900'
                   : 'border-emerald-500/40 bg-emerald-500/10'
               }`}
             >
-              <span className={`uppercase tracking-wider block ${
-                isLight ? 'text-slate-800 font-bold text-xs' : 'text-[10px] font-bold text-gray-300'
+              <span className={`text-[11px] font-mono font-normal uppercase tracking-widest block ${
+                isLight ? 'text-slate-600' : 'text-gray-300'
               }`}>
-                Selisih (Adjustment)
+                Selisih (Delta)
               </span>
               <div
-                className={`text-2xl font-black font-mono ${
-                  isLight
-                    ? difference === 0
-                      ? 'text-emerald-950'
-                      : difference < 0
-                      ? 'text-rose-950'
-                      : 'text-emerald-950'
-                    : difference === 0
-                    ? 'text-blue-400'
+                className={`text-lg font-mono font-medium ${
+                  difference === 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
                     : difference < 0
-                    ? 'text-rose-400'
-                    : 'text-emerald-400'
+                    ? 'text-rose-600 dark:text-rose-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               >
                 {difference > 0 ? `+${difference}` : difference}{' '}
-                <span className={`text-xs font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                <span className={`text-sm font-normal ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
                   {selectedProduct?.unit || 'Unit'}
                 </span>
               </div>
               <div className="pt-0.5">
-                {isLight ? (
-                  <span
-                    className={
-                      difference === 0
-                        ? 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold text-xs px-2 py-0.5 rounded inline-block'
-                        : difference < 0
-                        ? 'bg-rose-100 border border-rose-300 text-rose-950 font-bold text-xs px-2 py-0.5 rounded inline-block'
-                        : 'bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold text-xs px-2 py-0.5 rounded inline-block'
-                    }
-                  >
-                    {difference === 0
-                      ? 'Balance (Sesuai)'
+                <span
+                  className={`text-[11px] font-mono font-normal px-2 py-0.5 rounded border inline-block ${
+                    difference === 0
+                      ? isLight
+                        ? 'bg-white border-emerald-400 text-emerald-700'
+                        : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
                       : difference < 0
-                      ? 'Defisit Fisik (Shortage)'
-                      : 'Surplus Fisik'}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-gray-400 block">
-                    {difference === 0
-                      ? 'Balance (Sesuai)'
-                      : difference < 0
-                      ? 'Kurang Fisik (Shortage)'
-                      : 'Lebih Fisik (Surplus)'}
-                  </span>
-                )}
+                      ? isLight
+                        ? 'bg-white border-rose-400 text-rose-700'
+                        : 'bg-rose-500/15 border-rose-500/35 text-rose-300'
+                      : isLight
+                      ? 'bg-white border-emerald-400 text-emerald-700'
+                      : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                  }`}
+                >
+                  {difference === 0
+                    ? 'Balance (Sesuai)'
+                    : difference < 0
+                    ? 'Defisit Fisik'
+                    : 'Surplus Fisik'}
+                </span>
               </div>
             </div>
           </div>
 
           {/* 4. Rekonsiliasi Akuntansi Berimbang (FIN-STK-ADJ) Callout */}
           <div
-            className={`p-4 rounded-xl border space-y-2 text-xs leading-relaxed ${
-              isLight
-                ? difference === 0
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                  : difference < 0
-                  ? 'bg-rose-50 border-rose-300 text-rose-950'
-                  : 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                : difference === 0
-                ? 'bg-blue-500/10 border-blue-500/30 text-blue-200'
+            className={`p-4 rounded-xl border space-y-2 text-sm font-normal leading-relaxed ${
+              difference === 0
+                ? isLight
+                  ? 'bg-emerald-50 border-emerald-500/60 text-slate-900'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
                 : difference < 0
-                ? 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+                ? isLight
+                  ? 'bg-rose-50 border-rose-500/65 text-slate-900'
+                  : 'bg-rose-500/10 border-rose-500/35 text-rose-200'
+                : isLight
+                ? 'bg-emerald-50 border-emerald-500/60 text-slate-900'
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
             }`}
           >
-            <div className="flex items-center gap-2 font-bold">
+            <div className={`flex items-center gap-2 text-sm font-medium ${
+              difference < 0
+                ? isLight ? 'text-rose-700' : 'text-rose-300'
+                : isLight ? 'text-emerald-700' : 'text-emerald-300'
+            }`}>
               <Scale className="w-4 h-4 shrink-0" />
               <span>
                 {difference === 0
@@ -370,46 +371,46 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
             </div>
 
             {difference === 0 ? (
-              <p className={`text-[11px] ${isLight ? 'text-slate-700 font-medium' : 'text-gray-300'}`}>
+              <p className={`text-sm font-normal ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
                 Stok fisik riil sama persis dengan pencatatan sistem ({systemStock} unit). Tidak diperlukan jurnal penyesuaian nilai buku.
               </p>
             ) : difference < 0 ? (
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between font-mono">
-                  <span className={isLight ? 'text-slate-700 font-bold' : ''}>Nominal Penyesuaian Beban:</span>
-                  <strong className={isLight ? 'text-rose-950 font-black' : 'text-rose-300 font-bold'}>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between font-mono text-sm font-normal">
+                  <span className={isLight ? 'text-slate-700' : 'text-gray-300'}>Nominal Penyesuaian Beban:</span>
+                  <span className={`font-mono font-medium ${isLight ? 'text-rose-700' : 'text-rose-300'}`}>
                     -Rp {totalAdjValue.toLocaleString('id-ID')} ({Math.abs(difference)} x Rp {unitCost.toLocaleString('id-ID')})
-                  </strong>
+                  </span>
                 </div>
-                <div className={`p-2.5 rounded-lg font-mono text-[10.5px] space-y-1 ${
-                  isLight ? 'bg-white border border-slate-300 text-slate-900' : 'bg-black/30'
+                <div className={`p-2.5 rounded-lg font-mono text-[11px] font-normal space-y-1 border ${
+                  isLight ? 'bg-white border-rose-200 text-slate-800' : 'bg-black/30 border-rose-500/20'
                 }`}>
-                  <div className={`flex items-center justify-between ${isLight ? 'text-rose-950 font-bold' : 'text-rose-300'}`}>
+                  <div className={`flex items-center justify-between ${isLight ? 'text-rose-700' : 'text-rose-300'}`}>
                     <span>(Debit) 5-10502 Beban Selisih Persediaan:</span>
                     <span>Rp {totalAdjValue.toLocaleString('id-ID')}</span>
                   </div>
-                  <div className={`flex items-center justify-between pl-4 ${isLight ? 'text-slate-800 font-semibold' : 'text-gray-300'}`}>
+                  <div className={`flex items-center justify-between pl-4 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
                     <span>(Kredit) 1-10501 Persediaan:</span>
                     <span>Rp {totalAdjValue.toLocaleString('id-ID')}</span>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between font-mono">
-                  <span className={isLight ? 'text-slate-700 font-bold' : ''}>Nominal Penambahan Nilai Inventori:</span>
-                  <strong className={isLight ? 'text-emerald-950 font-black' : 'text-emerald-300 font-bold'}>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between font-mono text-sm font-normal">
+                  <span className={isLight ? 'text-slate-700' : 'text-gray-300'}>Nominal Penambahan Nilai Inventori:</span>
+                  <span className={`font-mono font-medium ${isLight ? 'text-emerald-700' : 'text-emerald-300'}`}>
                     +Rp {totalAdjValue.toLocaleString('id-ID')} (+{difference} x Rp {unitCost.toLocaleString('id-ID')})
-                  </strong>
+                  </span>
                 </div>
-                <div className={`p-2.5 rounded-lg font-mono text-[10.5px] space-y-1 ${
-                  isLight ? 'bg-white border border-slate-300 text-slate-900' : 'bg-black/30'
+                <div className={`p-2.5 rounded-lg font-mono text-[11px] font-normal space-y-1 border ${
+                  isLight ? 'bg-white border-emerald-200 text-slate-800' : 'bg-black/30 border-emerald-500/20'
                 }`}>
-                  <div className={`flex items-center justify-between ${isLight ? 'text-emerald-950 font-bold' : 'text-emerald-300'}`}>
+                  <div className={`flex items-center justify-between ${isLight ? 'text-emerald-700' : 'text-emerald-300'}`}>
                     <span>(Debit) 1-10501 Persediaan:</span>
                     <span>Rp {totalAdjValue.toLocaleString('id-ID')}</span>
                   </div>
-                  <div className={`flex items-center justify-between pl-4 ${isLight ? 'text-slate-800 font-semibold' : 'text-gray-300'}`}>
+                  <div className={`flex items-center justify-between pl-4 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
                     <span>(Kredit) 4-10502 Pendapatan Penyesuaian Persediaan:</span>
                     <span>Rp {totalAdjValue.toLocaleString('id-ID')}</span>
                   </div>
@@ -421,8 +422,8 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
           {/* 5. Petugas & Catatan Opname */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className={`block mb-1 ${
-                isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] font-bold text-gray-300'
+              <label className={`block mb-1 text-sm font-normal ${
+                isLight ? 'text-slate-700' : 'text-gray-300'
               }`}>
                 Petugas Verifikasi Opname:
               </label>
@@ -430,17 +431,17 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
                 type="text"
                 value={operator}
                 onChange={(e) => setOperator(e.target.value)}
-                className={`w-full px-3 py-2 rounded-xl border outline-none text-xs font-semibold ${
+                className={`w-full px-3 py-2 rounded-xl border outline-none text-sm font-normal transition-all duration-200 ${
                   isLight
-                    ? 'bg-slate-50 border-slate-300 text-slate-950 focus:border-indigo-600'
-                    : 'bg-slate-900/60 border-slate-700 text-white focus:border-cyan-500'
+                    ? 'bg-white border-cyan-500/60 text-slate-950 focus:border-cyan-500'
+                    : 'bg-[#0d1117] border-cyan-500/35 text-white focus:border-cyan-400'
                 }`}
               />
             </div>
 
             <div>
-              <label className={`block mb-1 ${
-                isLight ? 'text-slate-700 font-bold text-xs' : 'text-[11px] font-bold text-gray-300'
+              <label className={`block mb-1 text-sm font-normal ${
+                isLight ? 'text-slate-700' : 'text-gray-300'
               }`}>
                 Catatan / Berita Acara Opname:
               </label>
@@ -449,10 +450,10 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
                 value={opnameNotes}
                 onChange={(e) => setOpnameNotes(e.target.value)}
                 placeholder="Contoh: Stock Opname Kuartal III / Temuan Selisih Fisik"
-                className={`w-full px-3 py-2 rounded-xl border outline-none text-xs font-medium ${
+                className={`w-full px-3 py-2 rounded-xl border outline-none text-sm font-normal transition-all duration-200 ${
                   isLight
-                    ? 'bg-slate-50 border-slate-300 text-slate-950 focus:border-indigo-600'
-                    : 'bg-slate-900/60 border-slate-700 text-white focus:border-cyan-500'
+                    ? 'bg-white border-cyan-500/60 text-slate-950 focus:border-cyan-500'
+                    : 'bg-[#0d1117] border-cyan-500/35 text-white focus:border-cyan-400'
                 }`}
               />
             </div>
@@ -460,13 +461,15 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
 
           {/* Modal Actions */}
           <div className={`pt-3 border-t flex items-center justify-end gap-2.5 ${
-            isLight ? 'border-slate-300' : 'border-slate-800'
+            isLight ? 'border-slate-200' : 'border-slate-800'
           }`}>
             <button
               type="button"
               onClick={onClose}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-                isLight ? 'text-slate-700 hover:text-slate-950 hover:bg-slate-100' : 'text-gray-400 hover:text-white'
+              className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all duration-200 cursor-pointer active:scale-[0.99] ${
+                isLight
+                  ? 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                  : 'bg-[#0d1117] border-slate-700 text-gray-300 hover:text-white'
               }`}
             >
               Batal
@@ -476,7 +479,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
               id="btn-confirm-stock-opname"
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs flex items-center gap-2 shadow-sm transition cursor-pointer active:scale-95 disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-medium text-sm flex items-center gap-2 border border-cyan-500/40 shadow-[0_0_14px_rgba(6,182,212,0.28)] transition-all duration-200 cursor-pointer active:scale-[0.99] disabled:opacity-50"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>
@@ -484,7 +487,7 @@ export const StockOpnameModal: React.FC<StockOpnameModalProps> = ({
                   ? 'Menyimpan...'
                   : difference === 0
                   ? 'Konfirmasi Opname (Balance)'
-                  : `Simpan & Sesuaikan Inventori (FIN-STK-ADJ)`}
+                  : 'Simpan & Sesuaikan Inventori (FIN-STK-ADJ)'}
               </span>
             </button>
           </div>

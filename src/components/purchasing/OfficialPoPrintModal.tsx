@@ -40,10 +40,10 @@ export const OfficialPoPrintModal: React.FC<OfficialPoPrintModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 overflow-y-auto">
       <div
-        className={`w-full max-w-4xl rounded-2xl shadow-2xl relative border my-8 flex flex-col max-h-[92vh] ${
+        className={`w-full max-w-4xl rounded-2xl relative border my-8 flex flex-col max-h-[92vh] ${
           isLight
-            ? 'bg-slate-100 border-slate-300 text-slate-800'
-            : 'bg-[#0f141c] border-[#30363d] text-gray-200'
+            ? 'bg-slate-100 border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#0f141c] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-gray-200'
         }`}
       >
         {/* Modal Top Control Bar (Hidden on Print) */}
@@ -55,15 +55,15 @@ export const OfficialPoPrintModal: React.FC<OfficialPoPrintModalProps> = ({
           }`}
         >
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#0052FF]/20 text-[#0052FF] flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-lg bg-[#0052FF]/20 text-[#0052FF] flex items-center justify-center font-mono font-medium text-xs">
               PO
             </div>
             <div>
-              <h3 className="font-bold text-sm">
+              <h3 className="font-medium text-base leading-6">
                 Pratinjau Dokumen Purchase Order Resmi
               </h3>
-              <p className="text-[11px] text-gray-400">
-                Dokumen pengadaan barang resmi terintegrasi ERP & format cetak A4.
+              <p className="text-[11px] leading-4 font-mono font-normal tracking-wide text-gray-400">
+                Dokumen pengadaan barang resmi terintegrasi ERP &amp; format cetak A4
               </p>
             </div>
           </div>
@@ -72,7 +72,7 @@ export const OfficialPoPrintModal: React.FC<OfficialPoPrintModalProps> = ({
             <button
               type="button"
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold text-xs shadow-[0_0_15px_rgba(0,82,255,0.4)] transition cursor-pointer active:scale-95"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0052FF] hover:bg-[#0043d1] text-white font-medium text-xs shadow-[0_0_15px_rgba(0,82,255,0.4)] transition-all cursor-pointer active:scale-[0.99]"
             >
               <Printer className="w-4 h-4" />
               <span>Cetak / Print PDF</span>
@@ -80,7 +80,7 @@ export const OfficialPoPrintModal: React.FC<OfficialPoPrintModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer active:scale-[0.99]"
             >
               <X className="w-5 h-5" />
             </button>

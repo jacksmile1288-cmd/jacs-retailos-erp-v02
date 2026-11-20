@@ -94,7 +94,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
   const handleSavePromo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !code.trim()) {
-      alert(isEn ? 'Name and code are required' : 'Nama promo dan kode kupon wajib diisi');
+      showToast(isEn ? 'Name and code are required' : 'Nama promo dan kode kupon wajib diisi', 'warning');
       return;
     }
 
@@ -152,10 +152,10 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
     <div className="space-y-6 animate-fadeIn">
       {/* Executive Authorization Banner */}
       <div
-        className={`p-5 rounded-2xl border border-purple-200 dark:border-purple-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+        className={`p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
           isLight
-            ? 'bg-gradient-to-r from-purple-50/80 via-white to-pink-50/80'
-            : 'bg-gradient-to-r from-[#170f26] via-[#161b22] to-[#1d102a]'
+            ? 'bg-gradient-to-r from-purple-50/80 via-white to-pink-50/80 border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-gradient-to-r from-[#170f26] via-[#161b22] to-[#1d102a] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
         }`}
       >
         <div className="flex items-start gap-3.5">
@@ -164,16 +164,16 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className={`font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
+              <h3 className={`font-medium text-base leading-6 ${isLight ? 'text-slate-900' : 'text-white'}`}>
                 {isEn
                   ? 'Executive Promotion, Discounts & Bundling Hub'
                   : 'Otorisasi Promo, Diskon & Bundling (Promos & Packages)'}
               </h3>
-              <span className="bg-purple-100 border border-purple-300 text-purple-900 font-bold text-xs px-2.5 py-0.5 rounded-full font-mono dark:bg-purple-950 dark:border-purple-700 dark:text-purple-300">
+              <span className="bg-purple-100 border border-purple-300 text-purple-900 font-mono font-normal tracking-wide text-[11px] px-2.5 py-0.5 rounded-full dark:bg-purple-950 dark:border-purple-700 dark:text-purple-300">
                 SINKRON POS KASIR
               </span>
             </div>
-            <p className="text-slate-800 font-medium text-xs mt-1 max-w-3xl leading-relaxed dark:text-slate-200">
+            <p className="text-slate-600 dark:text-slate-300 font-normal text-xs leading-5 mt-1 max-w-3xl">
               {isEn
                 ? 'Managerial authorization for promotional campaigns: SKU percentage/amount discounts, combo bundling (Buy A + B get X% off), and limited-time flash sales. Active approved programs automatically propagate to POS Cashier registers (PosModule.tsx).'
                 : 'Otorisasi eksekutif untuk program promosi: Diskon Khusus SKU (%) atau nominal (Rp), paket bundling hemat (Beli A + B diskon X%), serta promo berbatas waktu. Program promo yang disetujui otomatis tersinkronisasi ke register kasir (PosModule.tsx) agar kasir dapat menerapkan potongan resmi tanpa otorisasi manual berulang.'}
@@ -181,40 +181,77 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="px-3.5 py-2 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-500/10 text-right">
-            <div className="text-slate-700 font-bold text-xs uppercase tracking-wider dark:text-slate-300">
-              {isEn ? 'Active Programs' : 'Promo Aktif'}
-            </div>
-            <div className="text-lg font-black font-mono text-purple-400">
-              {activeCount} <span className="text-xs font-normal text-slate-400">/ {promotions.length} Promo</span>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className={`rounded-2xl p-4 border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
+        }`}>
+          <span className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 uppercase mb-1 block">
+            PROMO AKTIF DI POS
+          </span>
+          <span className="text-lg leading-7 font-mono font-semibold text-slate-900 dark:text-white">
+            {activeCount} Program
+          </span>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-1">
+            Terhubung ke terminal kasir
+          </p>
+        </div>
 
+        <div className={`rounded-2xl p-4 border hover:-translate-y-0.5 active:scale-[0.99] transition-all ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
+        }`}>
+          <span className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 uppercase mb-1 block">
+            TOTAL KATALOG PROMO
+          </span>
+          <span className="text-lg leading-7 font-mono font-semibold text-slate-900 dark:text-white">
+            {promotions.length} Berkas
+          </span>
+          <p className="text-xs text-slate-500 dark:text-slate-400 font-normal mt-1">
+            Katalog promo terdaftar
+          </p>
+        </div>
+
+        <div className={`rounded-2xl p-4 border hover:-translate-y-0.5 active:scale-[0.99] transition-all flex flex-col justify-between ${
+          isLight
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
+        }`}>
+          <div>
+            <span className="text-[11px] leading-4 font-mono font-normal tracking-widest text-slate-500 dark:text-slate-400 uppercase mb-1 block">
+              OTORISASI BARU
+            </span>
+            <span className="text-sm font-medium text-slate-900 dark:text-white">
+              Buat Program Diskon
+            </span>
+          </div>
           <button
             type="button"
             onClick={handleOpenCreate}
-            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-purple-500 hover:bg-purple-400 text-slate-950 flex items-center gap-2 shadow-[0_0_15px_rgba(168,85,247,0.35)] cursor-pointer transition whitespace-nowrap"
+            className="mt-2 w-full py-2 rounded-xl text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white shadow-sm cursor-pointer active:scale-[0.99] transition-all flex items-center justify-center gap-2"
           >
-            <Plus className="w-4 h-4" />
-            <span>{isEn ? '+ Create Promotion' : '+ Buat Program Promo'}</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>{isEn ? 'Create Promo' : 'Buat Promo'}</span>
           </button>
         </div>
+      </div>
       </div>
 
       {/* POS Synchronization Alert Callout */}
       <div className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs ${
-        isLight ? 'bg-cyan-50/70 border-cyan-200 text-cyan-900' : 'bg-cyan-950/20 border-cyan-500/30 text-cyan-300'
+        isLight ? 'bg-cyan-50/70 border-cyan-300 text-cyan-900' : 'bg-cyan-950/20 border-cyan-500/30 text-cyan-300'
       }`}>
         <div className="flex items-center gap-2.5">
-          <Smartphone className="w-4 h-4 text-cyan-400 shrink-0" />
-          <span>
+          <Smartphone className="w-4 h-4 text-cyan-500 shrink-0" />
+          <span className="font-normal text-xs leading-5">
             {isEn
               ? 'Realtime Sync Active: Cashiers at all 10 POS Terminals can immediately redeem these approved vouchers & package deals.'
               : 'Sinkronisasi POS Kasir Aktif: Operator kasir di seluruh 10 Terminal POS dapat langsung menerapkan kupon voucher & bundling ini saat checkout transaksi.'}
           </span>
         </div>
-        <span className="font-mono font-bold text-[11px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/40">
+        <span className="font-mono font-normal text-[11px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/40">
           DB_PROMOTIONS LIVE
         </span>
       </div>
@@ -239,35 +276,37 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
           return (
             <div
               key={promo.id}
-              className={`p-5 rounded-2xl border border-slate-300 dark:border-slate-700 shadow-xs flex flex-col justify-between transition-all relative overflow-hidden ${
-                isLight ? 'bg-white' : 'bg-[#161b22]'
+              className={`p-5 rounded-2xl border hover:-translate-y-0.5 active:scale-[0.99] transition-all flex flex-col justify-between relative overflow-hidden ${
+                isLight
+                  ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+                  : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
               } ${!promo.isActive ? 'opacity-60' : ''}`}
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2.5">
-                  <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded border uppercase font-mono ${badgeColor}`}>
+                  <span className={`text-[10px] font-mono font-normal tracking-wide px-2 py-0.5 rounded border uppercase ${badgeColor}`}>
                     {promo.type.replace('_', ' ')}
                   </span>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => togglePromotionStatus(promo.id)}
-                      className={`cursor-pointer transition ${
+                      className={`cursor-pointer active:scale-[0.99] transition px-2.5 py-1 rounded-full text-xs font-medium border ${
                         promo.isActive
-                          ? 'bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-[10px] px-2.5 py-0.5 rounded-full dark:bg-emerald-950 dark:border-emerald-700 dark:text-emerald-300'
-                          : 'bg-slate-200 border border-slate-400 text-slate-800 font-bold text-[10px] px-2 py-0.5 rounded-full dark:bg-slate-800 dark:border-slate-600 dark:text-slate-200'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
                       }`}
                     >
-                      {promo.isActive ? 'AKTIF DI POS' : 'NON-AKTIF'}
+                      {promo.isActive ? 'AKTIF' : 'NON-AKTIF'}
                     </button>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between mb-1">
-                  <h4 className={`font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  <h4 className={`font-medium text-base leading-6 ${isLight ? 'text-slate-900' : 'text-white'}`}>
                     {promo.name}
                   </h4>
-                  <div className="font-mono bg-purple-100 border border-purple-300 text-purple-900 font-black text-xs px-2 py-0.5 rounded dark:bg-purple-950 dark:border-purple-700 dark:text-purple-300">
+                  <div className="font-mono bg-purple-100 border border-purple-300 text-purple-900 font-semibold text-xs px-2 py-0.5 rounded dark:bg-purple-950 dark:border-purple-700 dark:text-purple-300">
                     {promo.discountType === 'PERCENT'
                       ? `${promo.discountValue}% OFF`
                       : `Rp ${promo.discountValue.toLocaleString('id-ID')} OFF`}
@@ -276,38 +315,38 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
 
                 <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-3">
                   <Tag className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400 tracking-wider">
+                  <span className="font-mono font-normal text-amber-600 dark:text-amber-400 tracking-wider">
                     {promo.code}
                   </span>
                 </div>
 
                 <div className="space-y-1.5 text-xs">
                   {targetProd && (
-                    <div className="flex justify-between text-slate-800 font-bold text-xs dark:text-slate-200">
+                    <div className="flex justify-between text-slate-700 dark:text-slate-300 font-normal text-xs">
                       <span>Target Item:</span>
-                      <span className="truncate max-w-[180px]">
+                      <span className="truncate max-w-[180px] font-medium text-slate-900 dark:text-white">
                         {targetProd.name}
                       </span>
                     </div>
                   )}
 
                   {isBundle && promo.bundleProductSkus && promo.bundleProductSkus.length > 0 && (
-                    <div className="flex justify-between text-slate-700 font-semibold dark:text-slate-300">
+                    <div className="flex justify-between text-slate-600 dark:text-slate-400 font-normal">
                       <span>Produk Bundle (+):</span>
-                      <span className="font-bold text-purple-700 dark:text-purple-300">
+                      <span className="font-medium text-purple-700 dark:text-purple-300">
                         {promo.bundleProductSkus.length} Item Tambahan
                       </span>
                     </div>
                   )}
 
-                  <div className="flex justify-between text-slate-700 font-medium dark:text-slate-400">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400 font-normal">
                     <span>Min. Pembelian:</span>
                     <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
                       {promo.minPurchaseQty || 1} Unit
                     </span>
                   </div>
 
-                  <div className="flex justify-between text-slate-700 font-medium dark:text-slate-400">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400 font-normal">
                     <span>Masa Berlaku:</span>
                     <span className="font-mono text-slate-800 dark:text-slate-300 text-[11px]">
                       {promo.startDate} s/d {promo.endDate}
@@ -316,7 +355,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                 </div>
 
                 {promo.description && (
-                  <p className="text-[11px] text-slate-700 dark:text-slate-400 mt-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
+                  <p className="text-[11px] leading-4 font-normal text-slate-500 dark:text-slate-400 mt-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
                     {promo.description}
                   </p>
                 )}
@@ -330,7 +369,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                   <button
                     type="button"
                     onClick={() => handleOpenEdit(promo)}
-                    className="p-1 rounded text-slate-400 hover:text-purple-400 cursor-pointer"
+                    className="p-1 rounded text-slate-400 hover:text-purple-400 cursor-pointer active:scale-[0.99] transition-all"
                     title={isEn ? 'Edit Promo' : 'Edit Promo'}
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -338,7 +377,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                   <button
                     type="button"
                     onClick={() => handleDelete(promo.id, promo.name)}
-                    className="p-1 rounded text-slate-400 hover:text-rose-400 cursor-pointer"
+                    className="p-1 rounded text-slate-400 hover:text-rose-400 cursor-pointer active:scale-[0.99] transition-all"
                     title={isEn ? 'Delete Promo' : 'Hapus Promo'}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -353,15 +392,15 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
       {/* Modal Form: Add / Edit Promo */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div
-            className={`w-full max-w-xl rounded-2xl border p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${
-              isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-[#161b22] border-[#30363d] text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between border-b border-slate-700/40 pb-3">
+          <div className={`w-full max-w-xl rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${
+            isLight
+              ? 'bg-white border border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+              : 'bg-[#161b22] border border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.1)]'
+          }`}>
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700/40 pb-3">
               <div className="flex items-center gap-2">
-                <Gift className="w-5 h-5 text-purple-400" />
-                <h3 className="font-bold text-base">
+                <Gift className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <h3 className="font-medium text-base leading-6 text-slate-900 dark:text-white">
                   {editingPromoId
                     ? isEn
                       ? 'Edit Promotion Program'
@@ -374,7 +413,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -383,7 +422,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
             <form onSubmit={handleSavePromo} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Promotion Name' : 'Nama Program Promo'} *
                   </label>
                   <input
@@ -392,14 +431,14 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Contoh: Paket Kopi Hemat Sore"
                     required
-                    className={`w-full px-3 py-2 rounded-xl border text-sm transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                    className={`w-full px-3 py-2 rounded-xl border text-sm font-medium transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                     }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Voucher Code (POS)' : 'Kode Kupon / Voucher'} *
                   </label>
                   <input
@@ -408,8 +447,8 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                     onChange={(e) => setCode(e.target.value.toUpperCase())}
                     placeholder="Contoh: HEMATSORE15"
                     required
-                    className={`w-full px-3 py-2 rounded-xl border text-sm font-mono font-bold text-amber-400 uppercase transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'
+                    className={`w-full px-3 py-2 rounded-xl border text-sm font-mono font-bold uppercase transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-amber-700' : 'bg-[#0d1117] border-[#30363d] text-amber-400'
                     }`}
                   />
                 </div>
@@ -417,14 +456,14 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Promo Scheme Type' : 'Skema Promosi'}
                   </label>
                   <select
                     value={type}
                     onChange={(e: any) => setType(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-xl border text-xs transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                    className={`w-full px-3 py-2 rounded-xl border text-xs font-medium transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                     }`}
                   >
                     <option value="SKU_DISCOUNT">Diskon Khusus SKU</option>
@@ -435,7 +474,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Discount Method' : 'Tipe Potongan'}
                   </label>
                   <div className="grid grid-cols-2 gap-2">
@@ -444,9 +483,9 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                       onClick={() => setDiscountType('PERCENT')}
                       className={`py-2 rounded-xl font-bold border transition cursor-pointer ${
                         discountType === 'PERCENT'
-                          ? 'bg-purple-500/20 text-purple-400 border-purple-500/50'
+                          ? 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/50'
                           : isLight
-                          ? 'bg-slate-100 border-slate-300 text-slate-600'
+                          ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
                           : 'bg-[#0d1117] border-[#30363d] text-slate-400'
                       }`}
                     >
@@ -457,9 +496,9 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                       onClick={() => setDiscountType('IDR')}
                       className={`py-2 rounded-xl font-bold border transition cursor-pointer ${
                         discountType === 'IDR'
-                          ? 'bg-purple-500/20 text-purple-400 border-purple-500/50'
+                          ? 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/50'
                           : isLight
-                          ? 'bg-slate-100 border-slate-300 text-slate-600'
+                          ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
                           : 'bg-[#0d1117] border-[#30363d] text-slate-400'
                       }`}
                     >
@@ -470,10 +509,10 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
               </div>
 
               {/* Discount Value */}
-              <div className="space-y-1 p-3.5 rounded-xl border border-purple-500/30 bg-purple-500/10">
-                <label className="font-bold text-purple-300 flex justify-between items-center">
+              <div className="space-y-1 p-3.5 rounded-xl border border-purple-200 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-500/10">
+                <label className="font-bold text-purple-900 dark:text-purple-300 flex justify-between items-center">
                   <span>{isEn ? 'Discount Value' : 'Besaran Nilai Diskon'}</span>
-                  <span className="font-mono text-base font-extrabold text-purple-400">
+                  <span className="font-mono text-base font-extrabold text-purple-700 dark:text-purple-400">
                     {discountType === 'PERCENT' ? `${discountValue}%` : `Rp ${discountValue.toLocaleString('id-ID')}`}
                   </span>
                 </label>
@@ -484,21 +523,21 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                   value={discountValue}
                   onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
                   className={`w-full px-3 py-2 rounded-xl border text-sm font-mono font-bold transition focus:outline-none ${
-                    isLight ? 'bg-white border-slate-300 text-purple-900' : 'bg-[#0d1117] border-[#30363d] text-purple-400'
+                    isLight ? 'bg-white border-purple-300 text-purple-900' : 'bg-[#0d1117] border-[#30363d] text-purple-400'
                   }`}
                 />
               </div>
 
               {/* Target Item Selection */}
               <div className="space-y-1">
-                <label className="font-semibold text-slate-300">
+                <label className="font-semibold app-text-sub">
                   {isEn ? 'Primary Product Target (SKU)' : 'Produk Sasaran Utama (SKU)'}
                 </label>
                 <select
                   value={targetProductSku}
                   onChange={(e) => setTargetProductSku(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs transition focus:outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                  className={`w-full px-3 py-2 rounded-xl border text-xs font-medium transition focus:outline-none ${
+                    isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                   }`}
                 >
                   <option value="">-- Semua Produk Transaksi --</option>
@@ -513,7 +552,7 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
               {/* Min Qty & Date Range */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Min Purchase Qty' : 'Min. Jumlah Beli'}
                   </label>
                   <input
@@ -521,43 +560,43 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                     min="1"
                     value={minPurchaseQty}
                     onChange={(e) => setMinPurchaseQty(parseInt(e.target.value) || 1)}
-                    className={`w-full px-3 py-2 rounded-xl border text-sm font-mono transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                    className={`w-full px-3 py-2 rounded-xl border text-sm font-mono font-medium transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                     }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'Start Date' : 'Tanggal Mulai'}
                   </label>
                   <input
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-xl border text-xs transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                    className={`w-full px-3 py-2 rounded-xl border text-xs font-medium transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                     }`}
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-slate-300">
+                  <label className="font-semibold app-text-sub">
                     {isEn ? 'End Date' : 'Tanggal Berakhir'}
                   </label>
                   <input
                     type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-xl border text-xs transition focus:outline-none ${
-                      isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                    className={`w-full px-3 py-2 rounded-xl border text-xs font-medium transition focus:outline-none ${
+                      isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                     }`}
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-slate-300">
+                <label className="font-semibold app-text-sub">
                   {isEn ? 'Executive Description & Notes' : 'Deskripsi & Catatan Promo'}
                 </label>
                 <input
@@ -565,23 +604,23 @@ export const PromotionsTab: React.FC<PromotionsTabProps> = ({ isLight, isEn }) =
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Keterangan syarat dan ketentuan..."
-                  className={`w-full px-3 py-2 rounded-xl border text-xs transition focus:outline-none ${
-                    isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d] text-white'
+                  className={`w-full px-3 py-2 rounded-xl border text-xs font-medium transition focus:outline-none ${
+                    isLight ? 'bg-white border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
                   }`}
                 />
               </div>
 
-              <div className="pt-3 border-t border-slate-700/40 flex justify-end gap-2">
+              <div className="pt-3 border-t border-slate-200 dark:border-slate-700/40 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-slate-400 hover:text-white cursor-pointer"
+                  className="px-4 py-2 rounded-xl text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white font-medium active:scale-[0.99] transition-all cursor-pointer"
                 >
                   {isEn ? 'Cancel' : 'Batal'}
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl font-bold bg-purple-500 hover:bg-purple-400 text-slate-950 flex items-center gap-1.5 shadow-lg shadow-purple-500/25 cursor-pointer"
+                  className="px-5 py-2 rounded-xl font-medium bg-purple-600 hover:bg-purple-500 text-white flex items-center gap-1.5 shadow-md shadow-purple-500/25 active:scale-[0.99] transition-all cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>{isEn ? 'Authorize & Sync to POS' : 'Otorisasi & Sinkronkan ke POS'}</span>

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
+import { validateSafeDataImportFile, sanitizeImportRows } from '../../utils/securityShield';
 import {
   X,
   Upload,
@@ -260,6 +261,7 @@ export const DataMigrationModal: React.FC<DataMigrationModalProps> = ({
     activeUser,
     showToast,
     addAuditLog,
+    recordSecurityShieldEvent,
     theme,
     language,
   } = useApp();
@@ -548,16 +550,50 @@ export const DataMigrationModal: React.FC<DataMigrationModalProps> = ({
   };
 
   const processUploadedFile = async (file: File) => {
+    // 1. Strict Anti-Malware File Upload Validation (Blocks .exe, .svg, .js, .html, .bat, .sh)
+    const fileValidation = validateSafeDataImportFile(file, ['json', 'csv', 'spreadsheet'], 10 * 1024 * 1024);
+    if (!fileValidation.valid) {
+      recordSecurityShieldEvent({
+        type: 'MALWARE_UPLOAD_BLOCKED',
+        details: `Import Master Data Diblokir (${file.name}): ${fileValidation.reason}`,
+        module: 'DATA_MIGRATION',
+        level: 'ERROR',
+      });
+      showToast(fileValidation.reason || 'File berbahaya ditolak oleh Security Shield.', 'error');
+      return;
+    }
+
     setUploadedFileName(file.name);
     setIsProcessingFile(true);
 
     try {
-      const result = await normalizeMultiFormatFile(file);
-      if (result.headers.length === 0 || result.rows.length === 0) {
+      const rawResult = await normalizeMultiFormatFile(file);
+      if (rawResult.headers.length === 0 || rawResult.rows.length === 0) {
         showToast('Berkas tidak memiliki data atau baris kosong.');
         setIsProcessingFile(false);
         return;
       }
+
+      // 2. Sanitize every header and cell against XSS / HTML tags / inline event handlers
+      const sanitized = sanitizeImportRows(rawResult.headers, rawResult.rows);
+      if (sanitized.threatsRemoved > 0) {
+        recordSecurityShieldEvent({
+          type: 'XSS_BLOCKED',
+          details: `XSS Firewall membersihkan ${sanitized.threatsRemoved} sel berbahaya (${sanitized.matchedPatterns.join(', ')}) pada file impor "${file.name}".`,
+          module: 'DATA_MIGRATION',
+          level: 'WARN',
+        });
+        showToast(
+          `Security Shield: ${sanitized.threatsRemoved} tag HTML/payload XSS berbahaya otomatis dibersihkan dari file "${file.name}".`,
+          'warning'
+        );
+      }
+
+      const result = {
+        ...rawResult,
+        headers: sanitized.headers,
+        rows: sanitized.rows,
+      };
 
       setRawHeaders(result.headers);
       setRawRows(result.rows);

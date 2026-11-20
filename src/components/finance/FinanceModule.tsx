@@ -1,1422 +1,1243 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
-import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
+import { useAudit } from '../../audit';
+import { LedgerTable } from './LedgerTable';
 import { AccountsPayableTab } from './AccountsPayableTab';
 import { AccountsReceivableTab } from './AccountsReceivableTab';
 import { FinancialReportsTab } from './FinancialReportsTab';
 import { CashReconciliationTab } from './CashReconciliationTab';
+import { PromoAuditRebateTab } from './PromoAuditRebateTab';
+import { JournalVoucherModal } from './JournalVoucherModal';
+import { CashEntryModal } from './CashEntryModal';
+import MasterDataModule from '../master/MasterDataModule';
 import {
-  CreditCard,
-  TrendingUp,
-  TrendingDown,
-  Plus,
-  ArrowUpRight,
-  ArrowDownRight,
-  DollarSign,
-  X,
-  Layers,
-  FileSpreadsheet,
-  CheckCircle2,
-  Calendar,
-  AlertCircle,
-  Building,
-  ShieldCheck,
-  Send,
   Wallet,
+  TrendingUp,
+  ArrowDownRight,
+  CreditCard,
+  Printer,
+  Database,
   Receipt,
-  Calculator,
-  Scale,
-  ArrowRight,
-  Check,
-  Filter,
-  Clock,
+  Truck,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  ChevronDown,
+  CheckCircle2,
+  Shirt,
+  Tag,
 } from 'lucide-react';
+import { estimateFleetDeliveryExpense } from '../../utils/buildingTierPricing';
+import { calculateFashionFinanceSummary } from '../../utils/fashionAnalytics';
+import { getEffectiveBusinessDomainConfig } from '../../utils/businessDomainConfig';
+import {
+  buildDomainIsolatedApInvoices,
+  isApInvoiceUnpaid,
+  filterArInvoicesByBusinessDomain,
+  filterProductsByBusinessDomain,
+} from '../../utils/buildingDomainIsolation';
 
 export const FinanceModule: React.FC = () => {
   const {
     finance,
-    journalEntries,
-    addFinanceEntry,
     sales,
     invoicesDue,
     invoicesReceivable,
-    markInvoicePaid,
+    purchasing,
+    cashierShifts,
+    supplierRebateClaims,
+    products,
+    businessProfile,
     theme,
+    postGeneralJournalVoucher,
     language,
-    activeNeonCards,
-    setActiveNeonCard,
-    employees,
-    isPayrollSynced,
-    lastPayrollSyncTime,
-    syncPayrollToFinance,
-    activeShift,
+    showJournalModal,
+    setShowJournalModal,
+    journalVoucherInitialData,
+    setJournalVoucherInitialData,
+    getLiquidCashBalance,
+    activeUser,
+    currentUser,
+    businessDomainConfig,
+    laundryOrders,
+    isLedgerReset,
   } = useApp();
 
+  const { recordAudit } = useAudit();
   const isLight = theme === 'light';
   const isEn = language === 'en';
+  const effectiveDomainConfig = useMemo(
+    () => businessDomainConfig || getEffectiveBusinessDomainConfig(businessProfile),
+    [businessDomainConfig, businessProfile]
+  );
+  const isBuildingBulkActive = effectiveDomainConfig.mechanismFamily === 'BUILDING_BULK';
+  const isLaundryActive = effectiveDomainConfig.primaryBusinessModel === 'LAUNDRY';
+  const isFashionActive = effectiveDomainConfig.primaryBusinessModel === 'FASHION_BUTIK';
 
-  const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [entryType, setEntryType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
-  const [category, setCategory] = useState('Operational');
-  const [description, setDescription] = useState('');
-  const [amount, setAmount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState('TRANSFER');
-  const [accountTarget, setAccountTarget] = useState('Kas Kasir / Laci');
-  const [ledgerFilter, setLedgerFilter] = useState<'ALL' | 'INCOME' | 'HPP' | 'EXPENSE' | 'CASH_DRAWER' | 'BANK_QRIS' | 'DOUBLE_ENTRY'>('ALL');
-  const [financeMainTab, setFinanceMainTab] = useState<'ledger' | 'ap' | 'ar' | 'reports' | 'cash_reconciliation'>('ledger');
+  const [financeMainTab, setFinanceMainTab] = useState('ledger');
+  const [showCashEntryModal, setShowCashEntryModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const tabScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Compute live payroll summary from employee roster
-  const payrollSummary = useMemo(() => {
-    const RATES = {
-      kesCompany: 0.04,
-      kesEmployee: 0.01,
-      tkCompany: 0.0624,
-      tkEmployee: 0.03,
-    };
-
-    let totalBaseSalary = 0;
-    let totalCompanyContribution = 0;
-    let totalEmployeeDeductions = 0;
-    let totalTakeHomePay = 0;
-    let totalBpjsRemittance = 0;
-    let activeBpjsStaffCount = 0;
-
-    employees.forEach((emp) => {
-      const baseSalary = emp.baseSalary ?? 5000000;
-      const isBpjsActive = emp.bpjsEnabled !== false;
-      if (isBpjsActive) activeBpjsStaffCount += 1;
-
-      const kesCompany = isBpjsActive ? Math.round(baseSalary * RATES.kesCompany) : 0;
-      const kesEmployee = isBpjsActive ? Math.round(baseSalary * RATES.kesEmployee) : 0;
-      const tkCompany = isBpjsActive ? Math.round(baseSalary * RATES.tkCompany) : 0;
-      const tkEmployee = isBpjsActive ? Math.round(baseSalary * RATES.tkEmployee) : 0;
-
-      const companyBpjs = kesCompany + tkCompany;
-      const empDeduct = kesEmployee + tkEmployee;
-
-      totalBaseSalary += baseSalary;
-      totalCompanyContribution += companyBpjs;
-      totalEmployeeDeductions += empDeduct;
-      totalTakeHomePay += (baseSalary - empDeduct);
-      totalBpjsRemittance += (companyBpjs + empDeduct);
-    });
-
-    return {
-      totalStaffCount: employees.length,
-      activeBpjsStaffCount,
-      totalBaseSalary,
-      totalCompanyContribution,
-      totalEmployeeDeductions,
-      totalTakeHomePay,
-      totalBpjsRemittance,
-      period: isEn ? 'September 2026' : 'September 2026',
-    };
-  }, [employees, isEn]);
-
-  const handleSyncPayroll = () => {
-    syncPayrollToFinance(payrollSummary);
+  const handleScrollTabs = (direction: 'left' | 'right') => {
+    if (!tabScrollRef.current) return;
+    const offset = direction === 'left' ? -260 : 260;
+    tabScrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
   };
 
-  // =========================================================================
-  // KALKULASI KEUANGAN REALTIME: KAS MASUK, HPP RESEP, & LABA KOTOR RIIL
-  // =========================================================================
+  const effectiveUser = currentUser || activeUser;
 
-  // 1. Total Kas Masuk / Pendapatan (INCOME + IN / PENDAPATAN)
-  const totalIncome = useMemo(() => {
-    return finance
-      .filter((f) => f.type === 'INCOME' || f.type === 'IN / PENDAPATAN')
-      .reduce((acc, f) => acc + f.amount, 0);
-  }, [finance]);
+  const t = {
+    header: isEn ? 'FINANCIAL CENTER & GENERAL LEDGER' : 'PUSAT KEUANGAN & BUKU BESAR',
+    btnCash: isEn ? '+ Cash In/Out' : '+ Kas Masuk/Keluar',
+    btnJournal: isEn ? '+ Journal Adjustment / COA' : '+ Jurnal Koreksi / COA',
+    btnPrint: isEn ? 'Print / Export' : 'Cetak / Export',
+    cardCash: isEn ? 'Cash & Bank Balance' : 'Saldo Kas & Bank',
+    cardGross: isEn ? 'Real Gross Profit' : 'Laba Kotor Riil',
+    cardAP: isEn ? 'Accounts Payable (AP)' : 'Hutang Usaha (AP)',
+    cardFlow: isEn ? 'Daily Cash Flow' : 'Arus Kas Harian',
+    tabLedger: isEn ? 'General Ledger & Cash' : 'Buku Besar & Kas',
+    tabAP: isEn ? 'Accounts Payable (AP)' : 'Hutang Dagang (AP)',
+    tabAR: isEn ? 'Accounts Receivable (AR)' : 'Piutang Usaha (AR)',
+    tabReports: isEn ? 'Financial Reports' : 'Laporan Keuangan',
+    tabRecon: isEn ? 'Shift Reconciliation' : 'Rekonsiliasi Shift',
+    tabPromoAudit: isEn ? 'Promo Expense & Supplier Rebates' : 'Audit Beban Promo & Klaim Supplier',
+    tabMaster: isEn ? 'Master Data & Pricing' : 'Data Master & Harga',
+  };
 
-  // 2. Total Akumulasi Modal HPP Resep Bahan Baku / Barang Keluar
-  const totalHpp = useMemo(() => {
-    return finance
-      .filter((f) => f.type === 'HPP / BEBAN POKOK')
-      .reduce((acc, f) => acc + f.amount, 0);
-  }, [finance]);
+  const liquidCashBalance = getLiquidCashBalance();
 
-  // 3. Total Beban Kas Operasional
-  const totalOperationalExpense = useMemo(() => {
-    return finance
-      .filter((f) => f.type === 'EXPENSE')
-      .reduce((acc, f) => acc + f.amount, 0);
-  }, [finance]);
+  // Normalisasi label kategori Buku Besar berdasarkan rumpun usaha aktif
+  const domainAlignedFinance = useMemo(() => {
+    if (!isBuildingBulkActive) return finance;
+    return finance.map((entry) => {
+      const catUpper = (entry.category || '').trim().toUpperCase();
+      if (catUpper === 'PENJUALAN POS RITEL' || catUpper === 'PENDAPATAN PENJUALAN MATERIAL') {
+        return {
+          ...entry,
+          category: 'PENJUALAN DEPO MATERIAL',
+          account_target: entry.account_target || '4-10101 · Pendapatan Penjualan Material',
+        };
+      }
+      if (!entry.account_target) {
+        if (catUpper === 'HPP') {
+          return { ...entry, account_target: '5-10101 · Harga Pokok Penjualan (HPP)' };
+        }
+        if (catUpper.includes('MODAL KAS')) {
+          return { ...entry, account_target: '1-10002 · Bank Operasional' };
+        }
+      }
+      return entry;
+    });
+  }, [finance, isBuildingBulkActive]);
 
-  const totalExpense = totalOperationalExpense + totalHpp;
+  // Helper: identifikasi apakah entri merupakan transaksi pembukaan modal / saldo awal / neraca (bukan pendapatan penjualan 4-*)
+  const isOpeningOrBalanceSheetEntry = (f: typeof domainAlignedFinance[0]): boolean => {
+    const idUpper = (f.id || '').toUpperCase();
+    const refUpper = (f.reference || '').toUpperCase();
+    const catUpper = (f.category || '').toUpperCase();
+    const target = (f.account_target || '').trim();
+    const descUpper = (f.description || '').toUpperCase();
 
-  // 4. Perhitungan Laba Kotor Riil (Omzet Penjualan vs Total HPP Resep)
-  const grossProfitReal = Math.max(0, totalIncome - totalHpp);
-  const grossProfitMargin = totalIncome > 0
-    ? Math.round((grossProfitReal / totalIncome) * 1000) / 10
-    : 0;
+    if (
+      idUpper === 'FIN-OPENING-001' ||
+      idUpper.startsWith('FIN-OPENING') ||
+      refUpper.startsWith('CAP-') ||
+      catUpper.includes('MODAL KAS') ||
+      catUpper.includes('SALDO AWAL') ||
+      catUpper.includes('SETORAN MODAL') ||
+      catUpper.includes('PELUNASAN PIUTANG') ||
+      catUpper.includes('UANG MUKA') ||
+      descUpper.includes('SALDO AWAL KAS') ||
+      target.startsWith('3-') ||
+      target.startsWith('1-') ||
+      target.startsWith('2-')
+    ) {
+      return true;
+    }
+    return false;
+  };
 
-  // 5. Saldo Kas Kasir & Bank QRIS Realtime
-  const cashDrawerBalance = useMemo(() => {
-    return finance
-      .filter(
-        (f) =>
-          f.account_target === 'Kas Kasir / Laci' ||
-          f.account_target?.includes('Kas') ||
-          (f.payment_method === 'CASH' && f.type !== 'HPP / BEBAN POKOK') ||
-          (f.payment_method?.includes('Kas') && f.type !== 'HPP / BEBAN POKOK')
-      )
-      .reduce((acc, f) => {
-        if (f.type === 'INCOME' || f.type === 'IN / PENDAPATAN') return acc + f.amount;
-        if (f.type === 'EXPENSE') return acc - f.amount;
-        return acc;
-      }, 0);
-  }, [finance]);
+  const isContraRevenueEntry = (f: typeof domainAlignedFinance[0]): boolean => {
+    const target = (f.account_target || '').trim();
+    const catUpper = (f.category || '').toUpperCase();
+    const idUpper = (f.id || '').toUpperCase();
+    return (
+      idUpper.startsWith('FIN-FASH-DISC-') ||
+      target.startsWith('4-10004') ||
+      target.startsWith('4-10002') ||
+      catUpper.includes('POTONGAN & DISKON PENJUALAN') ||
+      catUpper.includes('RETUR PENJUALAN')
+    );
+  };
 
-  const qrisBankBalance = useMemo(() => {
-    return finance
-      .filter(
-        (f) =>
-          f.account_target === 'Bank QRIS / Settlement' ||
-          f.account_target?.includes('Bank') ||
-          ((f.payment_method === 'QRIS' ||
-            f.payment_method === 'EDC_DEBIT' ||
-            f.payment_method === 'EDC_CREDIT' ||
-            f.payment_method === 'TRANSFER' ||
-            f.payment_method?.includes('Bank')) &&
-            f.type !== 'HPP / BEBAN POKOK')
-      )
-      .reduce((acc, f) => {
-        if (f.type === 'INCOME' || f.type === 'IN / PENDAPATAN') return acc + f.amount;
-        if (f.type === 'EXPENSE') return acc - f.amount;
-        return acc;
-      }, 0);
-  }, [finance]);
+  const isSalesRevenueEntry = (f: typeof domainAlignedFinance[0]): boolean => {
+    if (isOpeningOrBalanceSheetEntry(f)) return false;
+    if (isContraRevenueEntry(f)) return false;
+    const typeUpper = (f.type || '').toUpperCase();
+    const target = (f.account_target || '').trim();
+    const catUpper = (f.category || '').toUpperCase();
+    if (target.startsWith('4-')) return true;
+    if (typeUpper === 'INCOME' || typeUpper === 'IN / PENDAPATAN') {
+      return (
+        catUpper.includes('PENJUALAN') ||
+        catUpper.includes('PENDAPATAN') ||
+        catUpper.includes('JASA BONGKAR') ||
+        !target
+      );
+    }
+    return false;
+  };
 
-  const liquidCashBalance = cashDrawerBalance + qrisBankBalance;
-  const netCashFlow = totalIncome - totalOperationalExpense;
+  const isCogsHppEntry = (f: typeof domainAlignedFinance[0]): boolean => {
+    const t = (f.type || '').toUpperCase();
+    const cat = (f.category || '').toUpperCase();
+    const target = (f.account_target || '').trim();
+    return (
+      t === 'HPP / BEBAN POKOK' ||
+      cat === 'HPP' ||
+      cat === 'BEBAN BAHAN HABIS PAKAI JASA' ||
+      cat.includes('SUSUT MATERIAL') ||
+      target.startsWith('5-10001') ||
+      target.startsWith('5-10101') ||
+      target.startsWith('5-10302') ||
+      target.startsWith('5-10003')
+    );
+  };
 
-  // 6. Arus Kas Harian secara realtime (Live Today atau Tanggal Terakhir Aktif)
+  const realGrossProfit = useMemo(() => {
+    const grossSalesRevenue = domainAlignedFinance
+      .filter((f) => isSalesRevenueEntry(f))
+      .reduce((acc, f) => acc + (Number(f.amount) || 0), 0);
+    const contraRevenueDiscounts = domainAlignedFinance
+      .filter((f) => isContraRevenueEntry(f))
+      .reduce((acc, f) => acc + (Number(f.amount) || 0), 0);
+    const hpp = domainAlignedFinance
+      .filter((f) => isCogsHppEntry(f))
+      .reduce((acc, f) => acc + (Number(f.amount) || 0), 0);
+    return grossSalesRevenue - contraRevenueDiscounts - hpp;
+  }, [domainAlignedFinance]);
+
   const dailyCashFlow = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    const hasTodayEntries = finance.some((f) => f.date === today);
-    const activeDate = hasTodayEntries ? today : (finance[0]?.date || today);
+    return domainAlignedFinance
+      .filter((f) => (f.date || '').slice(0, 10) === today && !isOpeningOrBalanceSheetEntry(f))
+      .reduce((acc, f) => {
+        if (typeof (f as any).cashDelta === 'number') {
+          return acc + (f as any).cashDelta;
+        }
+        const type = (f.type || '').toUpperCase();
+        const payMethod = String((f as any).paymentMethod || f.payment_method || '').toUpperCase();
+        const idUpper = String(f.id || '').toUpperCase();
+        if (
+          payMethod === 'ACCRUAL_COMMISSION' ||
+          idUpper.startsWith('FIN-COMM-') ||
+          ((f.category === 'HPP' || f.category === 'Beban Bahan Habis Pakai Jasa' || type === 'HPP / BEBAN POKOK') &&
+            (payMethod === 'SYSTEM_AUTO' || payMethod === 'FIFO'))
+        ) {
+          return acc;
+        }
+        return type === 'INCOME' || type === 'IN / PENDAPATAN' ? acc + f.amount : acc - f.amount;
+      }, 0);
+  }, [domainAlignedFinance]);
 
-    const todayInflow = finance
-      .filter((f) => f.date === activeDate && (f.type === 'INCOME' || f.type === 'IN / PENDAPATAN'))
-      .reduce((acc, f) => acc + f.amount, 0);
-    const todayHpp = finance
-      .filter((f) => f.date === activeDate && f.type === 'HPP / BEBAN POKOK')
-      .reduce((acc, f) => acc + f.amount, 0);
-    const todayExpense = finance
-      .filter((f) => f.date === activeDate && f.type === 'EXPENSE')
-      .reduce((acc, f) => acc + f.amount, 0);
-    const todayNet = todayInflow - todayExpense;
-    return {
-      activeDate,
-      isLiveToday: activeDate === today,
-      inflow: todayInflow,
-      hpp: todayHpp,
-      expense: todayExpense,
-      net: todayNet,
-      grossProfit: Math.max(0, todayInflow - todayHpp),
-    };
-  }, [finance]);
+  const isolatedApInvoices = useMemo(
+    () => buildDomainIsolatedApInvoices(invoicesDue, purchasing, businessDomainConfig, isLedgerReset),
+    [invoicesDue, purchasing, businessDomainConfig, isLedgerReset]
+  );
 
-  // Total AP (Utang Usaha dari Supplier Invoices + BPJS Payable)
-  const totalAP = useMemo(() => {
-    return invoicesDue
-      .filter((inv) => inv.status === 'Unpaid')
-      .reduce((acc, inv) => acc + inv.amount, 0);
-  }, [invoicesDue]);
+  const totalInvoicesDue = useMemo(() => {
+    return isolatedApInvoices
+      .filter((inv) => isApInvoiceUnpaid(inv.status, inv.amount))
+      .reduce((acc, inv) => acc + (Number(inv.amount) || 0), 0);
+  }, [isolatedApInvoices]);
 
-  // Payment methods recap from sales
-  const paymentRecap = useMemo(() => {
-    const map: Record<string, number> = {
-      CASH: 0,
-      QRIS: 0,
-      EDC_DEBIT: 0,
-      EDC_CREDIT: 0,
-      TRANSFER: 0,
-    };
-    sales.forEach((s) => {
-      if (map[s.payment_method] !== undefined) {
-        map[s.payment_method] += s.total_amount;
-      }
+  // Ringkasan Pemisahan Jurnal Biaya Logistik (Upah Bongkar Kuli & Beban Armada Frangko) untuk Depo Bangunan
+  const buildingLogisticsSummary = useMemo(() => {
+    const kuliEntries = domainAlignedFinance.filter(
+      (f) => (f.account_target || '').startsWith('4-10102') || (f.category || '').includes('Jasa Bongkar Kuli')
+    );
+    const frangkoEntries = domainAlignedFinance.filter(
+      (f) => (f.account_target || '').startsWith('5-10205') || (f.category || '').includes('Beban Pengiriman Armada') || (f.category || '').includes('Beban Armada')
+    );
+    const materialRevenueEntries = domainAlignedFinance.filter(
+      (f) =>
+        isSalesRevenueEntry(f) &&
+        !(f.account_target || '').startsWith('4-10102') &&
+        !(f.category || '').includes('Jasa Bongkar Kuli')
+    );
+    const cogsEntries = domainAlignedFinance.filter((f) => isCogsHppEntry(f));
+
+    const buildingSales = (sales || []).filter(
+      (s) =>
+        s.status !== 'VOID' &&
+        s.status !== 'VOIDED' &&
+        (Boolean(s.deliveryFleetActive) ||
+          Boolean(s.fleetType) ||
+          (s.loadingFee || 0) > 0 ||
+          (s.fleetDeliveryCost || 0) > 0)
+    );
+
+    const kuliFromFinance = kuliEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+    const frangkoFromFinance = frangkoEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+
+    const materialRevTotal = materialRevenueEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+    const materialCogsTotal = cogsEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+
+    let loadingFeeTotal = kuliFromFinance;
+    let frangkoTotal = frangkoFromFinance;
+    let pickupCount = 0;
+    let engkelCount = 0;
+    let dumpCount = 0;
+
+    buildingSales.forEach((s) => {
+      const kuli = s.loadingFee || 0;
+      if (kuliFromFinance === 0 && kuli > 0) loadingFeeTotal += kuli;
+
+      const fExpense = estimateFleetDeliveryExpense(s.fleetType, s.deliveryPolicy, s.deliveryFleetActive);
+      const fCost = s.fleetDeliveryCost !== undefined ? s.fleetDeliveryCost : fExpense;
+      if (frangkoFromFinance === 0 && fCost > 0) frangkoTotal += fCost;
+
+      const ft = (s.fleetType || '').toUpperCase();
+      if (ft.includes('PICKUP')) pickupCount += 1;
+      else if (ft.includes('ENGKEL')) engkelCount += 1;
+      else if (ft.includes('DUMP') || ft.includes('TRUCK')) dumpCount += 1;
     });
-    return map;
-  }, [sales]);
 
-  // 4 Financial Neon Metric Cards with standardized bilingual labels
-  const financialCards = [
-    {
-      id: 'cash-balance',
-      title: isEn ? 'Liquid Cash Balance' : 'Saldo Kas & Bank Likuid',
-      value: `Rp ${liquidCashBalance.toLocaleString('id-ID')}`,
-      sub: isEn
-        ? `Drawer: Rp ${cashDrawerBalance.toLocaleString('id-ID')} • QRIS/Bank: Rp ${qrisBankBalance.toLocaleString('id-ID')}`
-        : `Laci: Rp ${cashDrawerBalance.toLocaleString('id-ID')} • Bank QRIS: Rp ${qrisBankBalance.toLocaleString('id-ID')}`,
-      colorHex: '#10B981',
-      icon: Wallet,
-      focusDesc: isEn
-        ? 'Real liquid cash from cash drawer and bank QRIS settlement accounts.'
-        : 'Fokus Analisis: Saldo likuid kasir fisik (Cash Drawer) dan settlement bank/QRIS secara realtime.',
-    },
-    {
-      id: 'gross-profit',
-      title: isEn ? 'Real Gross Profit (Revenue vs COGS)' : 'Laba Kotor Riil (Omzet vs HPP)',
-      value: `Rp ${grossProfitReal.toLocaleString('id-ID')}`,
-      sub: isEn
-        ? `Gross Margin ${grossProfitMargin}% • Total HPP: Rp ${totalHpp.toLocaleString('id-ID')}`
-        : `Margin ${grossProfitMargin}% • Total HPP: Rp ${totalHpp.toLocaleString('id-ID')}`,
-      colorHex: '#00f2fe',
-      icon: TrendingUp,
-      focusDesc: isEn
-        ? 'Real profit margin comparing cash register revenue against recipe-based COGS.'
-        : 'Fokus Analisis: Selisih riil Omzet Penjualan Kasir terhadap Beban Pokok Penjualan (HPP Resep BOM F&B).',
-    },
-    {
-      id: 'ap',
-      title: isEn ? 'Accounts Payable (AP)' : 'Hutang Usaha (AP)',
-      value: `Rp ${totalAP.toLocaleString('id-ID')}`,
-      sub: isEn
-        ? `${invoicesDue.filter((i) => i.status === 'Unpaid').length} Outstanding Due Invoices / Remittances`
-        : `${invoicesDue.filter((i) => i.status === 'Unpaid').length} Invoice Jatuh Tempo Supplier & BPJS`,
-      colorHex: '#f43f5e',
-      icon: ArrowDownRight,
-      focusDesc: isEn
-        ? 'Analytical Focus: Obligations for verified procurement suppliers & BPJS remittance payable.'
-        : 'Fokus Analisis: Rekapitulasi kewajiban utang dagang pengadaan barang & setoran BPJS.',
-    },
-    {
-      id: 'cash-flow',
-      title: isEn ? 'Daily Flow & General Ledger' : 'Arus Kas Harian & Jurnal',
-      value: `+Rp ${dailyCashFlow.inflow.toLocaleString('id-ID')}`,
-      sub: isEn
-        ? `Today Net: Rp ${dailyCashFlow.net.toLocaleString('id-ID')} (${finance.length} Transactions)`
-        : `Net Hari Ini: Rp ${dailyCashFlow.net.toLocaleString('id-ID')} (${finance.length} Jurnal)`,
-      colorHex: '#8b5cf6',
-      icon: CreditCard,
-      focusDesc: isEn
-        ? 'Analytical Focus: General Ledger bookkeeping, auto-journal cash in, and daily cash flow.'
-        : 'Fokus Analisis: Pembukuan arus kas harian realtime, mutasi otomatis kasir dan buku besar.',
-    },
+    // Hitung jumlah ritase dari jurnal 5-10205 jika diposting via Voucher Jurnal Umum
+    frangkoEntries.forEach((entry) => {
+      const desc = `${entry.account_target || ''} ${entry.description || ''}`.toUpperCase();
+      if (desc.includes('PICK-UP') || desc.includes('PICKUP')) pickupCount += 1;
+      else if (desc.includes('DUMP')) dumpCount += 1;
+      else engkelCount += 1;
+    });
+
+    const grossProfitMaterial = materialRevTotal - materialCogsTotal;
+    const netProfitAfterShipping = grossProfitMaterial + loadingFeeTotal - frangkoTotal;
+
+    return {
+      materialRevTotal,
+      materialCogsTotal,
+      grossProfitMaterial,
+      loadingFeeTotal,
+      frangkoTotal,
+      netProfitAfterShipping,
+      pickupCount,
+      engkelCount,
+      dumpCount,
+      hasData: isBuildingBulkActive || kuliEntries.length > 0 || frangkoEntries.length > 0,
+    };
+  }, [domainAlignedFinance, sales, isBuildingBulkActive]);
+
+  const laundryFinanceSummary = useMemo(() => {
+    const model = businessDomainConfig?.primaryBusinessModel;
+    const catLower = (businessProfile?.category || '').toLowerCase();
+    const hasLaundryFinance = domainAlignedFinance.some(
+      (f) =>
+        (f.id || '').startsWith('FIN-LND-') ||
+        (f.account_target || '').startsWith('4-10105') ||
+        (f.category || '').toLowerCase().includes('laundry')
+    );
+    const isActive = model === 'LAUNDRY' || catLower.includes('laundry') || hasLaundryFinance;
+
+    const orders = Array.isArray(laundryOrders) ? laundryOrders : [];
+    const totalOrders = orders.length;
+    const totalRevenue = orders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+    const cashDpCollected = orders.reduce((acc, o) => acc + (Number(o.paidAmount) || 0), 0);
+    const unpaidArTotal = orders.reduce((acc, o) => acc + Math.max(0, Number(o.remainingAmount) || 0), 0);
+    const unpaidOrdersCount = orders.filter((o) => (Number(o.remainingAmount) || 0) > 0).length;
+    const readyRackArTotal = orders
+      .filter((o) => o.productionStatus === 'SIAP_AMBIL' && (Number(o.remainingAmount) || 0) > 0)
+      .reduce((acc, o) => acc + (Number(o.remainingAmount) || 0), 0);
+    const settledCount = orders.filter((o) => (Number(o.remainingAmount) || 0) <= 0).length;
+
+    return {
+      isActive,
+      totalOrders,
+      totalRevenue,
+      cashDpCollected,
+      unpaidArTotal,
+      unpaidOrdersCount,
+      readyRackArTotal,
+      settledCount,
+    };
+  }, [businessDomainConfig?.primaryBusinessModel, businessProfile?.category, domainAlignedFinance, laundryOrders]);
+
+  const fashionFinanceSummary = useMemo(
+    () =>
+      calculateFashionFinanceSummary(
+        sales || [],
+        domainAlignedFinance,
+        businessDomainConfig,
+        businessProfile
+      ),
+    [sales, domainAlignedFinance, businessDomainConfig, businessProfile]
+  );
+
+  const tabs = [
+    { id: 'ledger', label: t.tabLedger },
+    { id: 'ap', label: t.tabAP },
+    { id: 'ar', label: t.tabAR },
+    { id: 'reports', label: t.tabReports },
+    { id: 'cash_reconciliation', label: t.tabRecon },
+    { id: 'promo_audit', label: t.tabPromoAudit, icon: Receipt },
+    { id: 'master_data', label: t.tabMaster, icon: Database },
   ];
 
-  const selectedCardId = activeNeonCards['finance'] || 'cash-balance';
-  const selectedFinancialCard =
-    financialCards.find((c) => c.id === selectedCardId) || financialCards[0];
+  const activeTabInfo = useMemo(() => {
+    const map: Record<string, { title: string; fileSlug: string }> = {
+      ledger: { title: 'Buku Besar & Arus Kas', fileSlug: 'buku-besar-kas' },
+      ap: { title: 'Daftar Hutang Dagang (AP)', fileSlug: 'hutang-dagang-ap' },
+      ar: { title: 'Daftar Piutang Usaha (AR)', fileSlug: 'piutang-usaha-ar' },
+      reports: { title: 'Laporan Laba Rugi & Keuangan', fileSlug: 'laporan-laba-rugi' },
+      cash_reconciliation: { title: 'Rekonsiliasi Shift Kasir', fileSlug: 'rekonsiliasi-shift' },
+      promo_audit: { title: 'Audit Beban Promo & Klaim Rebate', fileSlug: 'audit-rebate-promo' },
+      master_data: { title: 'Katalog Harga & Data Master', fileSlug: 'katalog-harga-master' },
+    };
+    return map[financeMainTab] || map.ledger;
+  }, [financeMainTab]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description.trim() || amount <= 0) return;
+  const activeBusinessTitle =
+    businessProfile?.name ||
+    (businessDomainConfig?.mechanismFamily === 'FNB_CULINARY'
+      ? 'NEXUS CULINARY & COFFEE ROASTERY'
+      : businessDomainConfig?.mechanismFamily === 'BUILDING_BULK'
+      ? 'DEPO MATERIAL & BAJA NUSANTARA'
+      : 'NEXUS RETAIL & ENTERPRISE');
 
-    addFinanceEntry({
-      date: new Date().toISOString().slice(0, 10),
-      type: entryType,
-      category,
-      description,
-      amount,
-      reference: `MAN-${Date.now().toString().slice(-4)}`,
-      payment_method: paymentMethod,
-      account_target: accountTarget,
-    });
+  const activeDomainLabel =
+    businessDomainConfig?.primaryBusinessModel ||
+    businessDomainConfig?.mechanismFamily ||
+    'Multi-Industry';
 
-    setDescription('');
-    setAmount(0);
-    setIsModalOpen(false);
+  const escapeCsvCell = (val: unknown): string => {
+    const str = String(val ?? '').replace(/"/g, '""');
+    return `"${str}"`;
   };
 
-  // Filtered General Ledger Entries
-  const filteredFinance = useMemo(() => {
-    return finance.filter((f) => {
-      if (ledgerFilter === 'INCOME') return f.type === 'INCOME' || f.type === 'IN / PENDAPATAN';
-      if (ledgerFilter === 'HPP') return f.type === 'HPP / BEBAN POKOK';
-      if (ledgerFilter === 'EXPENSE') return f.type === 'EXPENSE';
-      if (ledgerFilter === 'CASH_DRAWER')
-        return (
-          f.account_target === 'Kas Kasir / Laci' ||
-          f.account_target?.includes('Kas') ||
-          f.payment_method === 'CASH' ||
-          f.payment_method?.includes('Kas')
-        );
-      if (ledgerFilter === 'BANK_QRIS')
-        return (
-          f.account_target === 'Bank QRIS / Settlement' ||
-          f.account_target?.includes('Bank') ||
-          f.payment_method === 'QRIS' ||
-          f.payment_method === 'EDC_DEBIT' ||
-          f.payment_method === 'TRANSFER' ||
-          f.payment_method?.includes('Bank')
-        );
-      return true;
-    });
-  }, [finance, ledgerFilter]);
+  const handleExportActiveTabCsv = () => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let headers: string[] = [];
+    let rows: (string | number)[][] = [];
 
-  const inCount = useMemo(() => finance.filter((f) => f.type === 'INCOME' || f.type === 'IN / PENDAPATAN').length, [finance]);
-  const hppCount = useMemo(() => finance.filter((f) => f.type === 'HPP / BEBAN POKOK').length, [finance]);
-  const expCount = useMemo(() => finance.filter((f) => f.type === 'EXPENSE').length, [finance]);
+    if (financeMainTab === 'ledger') {
+      headers = ['Tanggal', 'ID / Referensi', 'Kategori', 'Akun COA', 'Deskripsi', 'Tipe', 'Metode Bayar', 'Nominal (Rp)'];
+      rows = domainAlignedFinance.map((f) => [
+        f.date || todayStr,
+        f.reference || f.id,
+        f.category || '-',
+        f.account_target || '-',
+        f.description || '-',
+        f.type || '-',
+        (f as any).paymentMethod || f.payment_method || 'TUNAI',
+        Number(f.amount) || 0,
+      ]);
+    } else if (financeMainTab === 'ap') {
+      headers = ['ID Tagihan', 'Referensi PO', 'Supplier / Vendor', 'Jatuh Tempo', 'Total Tagihan (Rp)', 'Sisa Hutang (Rp)', 'Status'];
+      rows = isolatedApInvoices.map((inv: any) => [
+        inv.id || '-',
+        inv.poId || inv.reference || '-',
+        inv.supplier || inv.vendor || '-',
+        inv.dueDate || inv.due_date || '-',
+        Number(inv.totalAmount || inv.amount) || 0,
+        Number(inv.amount) || 0,
+        inv.status || 'BELUM LUNAS',
+      ]);
+    } else if (financeMainTab === 'ar') {
+      const domainAr = filterArInvoicesByBusinessDomain(invoicesReceivable || [], businessDomainConfig);
+      headers = ['No Invoice', 'Pelanggan / Klien', 'Tanggal Jatuh Tempo', 'Sisa Piutang (Rp)', 'Status'];
+      rows = domainAr.map((ar: any) => [
+        ar.invoice_number || ar.id || '-',
+        ar.party_name || ar.vendor || ar.customerName || '-',
+        ar.due_date || ar.dueDate || '-',
+        Number(ar.amount) || 0,
+        ar.status || 'Unpaid',
+      ]);
+    } else if (financeMainTab === 'reports') {
+      const salesRevenue = domainAlignedFinance
+        .filter((f) => isSalesRevenueEntry(f))
+        .reduce((acc, f) => acc + (Number(f.amount) || 0), 0);
+      const hppTotal = domainAlignedFinance
+        .filter((f) => isCogsHppEntry(f))
+        .reduce((acc, f) => acc + (Number(f.amount) || 0), 0);
+      headers = ['Komponen Laporan Keuangan', 'Kode Akun', 'Keterangan Domain', 'Nilai (Rp)'];
+      rows = [
+        ['Pendapatan Penjualan Bersih', '4-10001', activeDomainLabel, salesRevenue],
+        ['Beban Pokok Penjualan (HPP)', '5-10001', 'Harga Pokok Penjualan / Resep BOM', hppTotal],
+        ['Laba Kotor Riil', 'LABA-KOTOR', 'Pendapatan Penjualan dikurangi HPP', realGrossProfit],
+        ['Saldo Kas & Bank Aktif', '1-10001 / 1-10002', 'Kas Operasional & Rekening Giro', liquidCashBalance],
+        ['Total Hutang Dagang Belum Lunas (AP)', '2-10001', 'Kewajiban Supplier Aktif', totalInvoicesDue],
+      ];
+    } else if (financeMainTab === 'cash_reconciliation') {
+      headers = ['ID Shift', 'Kasir', 'Terminal', 'Waktu Buka', 'Waktu Tutup', 'Saldo Awal (Rp)', 'Kas Fisik Aktual (Rp)', 'Status'];
+      rows = (cashierShifts || []).map((sh: any) => [
+        sh.id || '-',
+        sh.cashierName || '-',
+        sh.terminalId || 'KASIR-01',
+        sh.openedAt || sh.startTime || '-',
+        sh.closedAt || sh.endTime || 'MASIH BUKA',
+        Number(sh.openingCash || sh.initialCash) || 0,
+        Number(sh.closingCash ?? sh.actualCash ?? sh.openingCash) || 0,
+        sh.status || 'OPEN',
+      ]);
+    } else if (financeMainTab === 'promo_audit') {
+      headers = ['ID Klaim', 'Nama Kampanye Promo', 'Supplier / Prinsipal', 'Total Diskon (Rp)', 'Subsidi Supplier (Rp)', 'Beban Toko (Rp)', 'Status Klaim'];
+      rows = (supplierRebateClaims || []).map((cl: any) => [
+        cl.id || '-',
+        cl.campaignName || cl.promoName || '-',
+        cl.supplierName || '-',
+        Number(cl.totalDiscountAmount || cl.claimAmount) || 0,
+        Number(cl.supplierSubsidyAmount || cl.claimAmount) || 0,
+        Number(cl.storeExpenseAmount) || 0,
+        cl.status || 'PENDING',
+      ]);
+    } else {
+      const domainProds = filterProductsByBusinessDomain(products || [], businessDomainConfig);
+      headers = ['Kode SKU', 'Nama Produk / Menu', 'Kategori', 'Satuan', 'HPP (Rp)', 'Harga Jual (Rp)', 'Margin (%)', 'Stok'];
+      rows = domainProds.map((p: any) => {
+        const cost = Number(p.cost ?? p.buyPrice) || 0;
+        const price = Number(p.price ?? p.sellPrice) || 0;
+        const marginPct = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : '0.0';
+        return [
+          p.id || p.sku || '-',
+          p.name || '-',
+          p.category || '-',
+          p.unit || 'Pcs',
+          cost,
+          price,
+          marginPct,
+          Number(p.stock) || 0,
+        ];
+      });
+    }
+
+    const metaRows = [
+      [`LAPORAN RESMI: ${activeTabInfo.title.toUpperCase()}`],
+      [`Entitas Usaha: ${activeBusinessTitle} (${activeDomainLabel})`],
+      [`Tanggal Unduh: ${new Date().toLocaleString('id-ID')} | Dicetak Oleh: ${effectiveUser?.name || 'Finance Officer'}`],
+      [],
+    ];
+
+    const csvContent =
+      '\uFEFF' +
+      [
+        ...metaRows.map((r) => r.map(escapeCsvCell).join(',')),
+        headers.map(escapeCsvCell).join(','),
+        ...rows.map((r) => r.map(escapeCsvCell).join(',')),
+      ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${activeTabInfo.fileSlug}-${todayStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setShowExportMenu(false);
+    setExportNotice(`File CSV/Excel "${activeTabInfo.title}" berhasil diunduh (${rows.length} baris data).`);
+    setTimeout(() => setExportNotice(null), 4000);
+  };
+
+  const handlePrintOfficialReport = () => {
+    setShowExportMenu(false);
+    setExportNotice(`Menyiapkan cetak dokumen resmi "${activeTabInfo.title}" dengan kop surat ${activeBusinessTitle}...`);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => setExportNotice(null), 3000);
+    }, 150);
+  };
 
   return (
-    <div id="finance-module" className="space-y-6 max-w-7xl mx-auto pb-6">
-      {/* Header */}
+    <div id="finance-module" className="p-4 md:p-6 space-y-6 rounded-2xl bg-slate-50 dark:bg-[#070d1e] min-h-full text-slate-900 dark:text-slate-100 transition-colors">
+      {/* Kop Surat Resmi (Tampil saat Cetak / Save PDF & saat pemicu cetak aktif) */}
+      <div className={`${exportNotice?.includes('Menyiapkan cetak') ? 'block' : 'hidden'} print:block p-5 rounded-xl border-2 border-slate-800 bg-white text-slate-900 mb-4`}>
+        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-3">
+          <div>
+            <div className="text-lg font-black uppercase tracking-wide text-slate-900">
+              {activeBusinessTitle}
+            </div>
+            <div className="text-xs font-medium text-slate-600">
+              Rumpun Usaha: {activeDomainLabel} • {businessProfile?.address || 'Jl. Jend. Sudirman Kav. 52-53, Jakarta'}
+            </div>
+            <div className="text-[11px] font-mono text-slate-500">
+              NPWP: {(businessProfile as any)?.npwp || '01.345.678.9-012.000'} • Telp: {businessProfile?.phone || '(021) 5098-7700'}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs font-mono font-bold uppercase px-2.5 py-1 rounded bg-slate-900 text-white inline-block">
+              DOKUMEN KEUANGAN RESMI
+            </div>
+            <div className="text-sm font-bold text-slate-800 mt-1">
+              {activeTabInfo.title}
+            </div>
+            <div className="text-[11px] font-mono text-slate-500">
+              Dicetak: {new Date().toLocaleString('id-ID')} • Oleh: {effectiveUser?.name || 'Finance Officer'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notifikasi Umpan Balik Export */}
+      {exportNotice && (
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-medium shadow-sm">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+            <span>{exportNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExportNotice(null)}
+            className="text-[11px] font-mono underline hover:opacity-80 cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {/* Top Banner & Action Controls */}
       <div
-        className={`p-5 rounded-2xl border transition duration-200 ${
+        className={`p-5 md:p-6 rounded-2xl border transition-all duration-200 ${
           isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
+            ? 'bg-white border-cyan-500/70 text-slate-900 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+            : 'bg-[#161b22] border-cyan-500/35 text-white shadow-[0_0_16px_rgba(6,182,212,0.08)]'
         }`}
       >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
           <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-[#f59e0b]/15 border border-[#f59e0b]/40 text-[#f59e0b] text-[11px] font-bold mb-2">
-              <Layers className="w-3.5 h-3.5" />
-              <span>{isEn ? 'Finance & Accounting • Integrated ERP Ledger' : 'Finance & Accounting • Tata Kelola Keuangan Terpadu'}</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-slate-900 dark:text-white font-medium text-xl leading-7 tracking-tight">
+                {t.header}
+              </h1>
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono font-normal tracking-widest uppercase border flex items-center gap-1.5 ${
+                  isLight
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                    : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.16)]'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                ENTERPRISE CORE - LIVE SYNC
+              </span>
             </div>
-            <h2
-              className={`text-xl sm:text-2xl font-black tracking-tight ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              {isEn ? 'Finance & Accounting Management' : 'Pusat Keuangan & Akuntansi Enterprise'}
-            </h2>
-            <p className="text-xs text-[#8b949e]">
+            <p className="text-sm font-normal text-slate-600 dark:text-slate-400 mt-1 leading-5">
               {isEn
-                ? 'Automated Cash In, Recipe COGS auto-journal, real gross profit KPI, and live liquid cash drawer tracking.'
-                : 'Otomatisasi kasir masuk (Cash In), jurnal HPP resep BOM F&B, analisis laba kotor riil, dan mutasi saldo laci kasir realtime.'}
+                ? 'Unified multi-industry accounting, live ledger sync & master pricing hub'
+                : 'Konsol sentral pembukuan multi-lini bisnis, sinkronisasi buku besar & kendali harga master'}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Sync Payroll to Finance Button */}
-            <div className="flex items-center gap-2">
-              {isPayrollSynced && (
-                <div className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${
-                  isLight
-                    ? 'bg-emerald-50 text-emerald-800 border-slate-200'
-                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                }`}>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{isEn ? 'Payroll Synced' : 'Gaji Disinkronkan'}</span>
-                </div>
-              )}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setShowCashEntryModal(true)}
+              className="px-3.5 py-2 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl text-sm font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/55 transition-all duration-150 cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-[0.99]"
+            >
+              <Wallet className="w-4 h-4" />
+              {t.btnCash}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowJournalModal(true)}
+              className="px-3.5 py-2 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-950/40 rounded-xl text-sm font-medium hover:bg-cyan-100 dark:hover:bg-cyan-900/55 transition-all duration-150 cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-[0.99]"
+            >
+              <CreditCard className="w-4 h-4" />
+              {t.btnJournal}
+            </button>
+
+            {/* Dropdown Menu Cetak / Export Sesuai Tab Aktif */}
+            <div className="relative">
               <button
                 type="button"
-                id="btn-sync-payroll-finance-page"
-                onClick={handleSyncPayroll}
-                className={`flex items-center gap-1.5 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer active:scale-95 ${
-                  isLight
-                    ? 'bg-emerald-600 hover:bg-emerald-700 border border-emerald-600 shadow-sm'
-                    : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-[0_0_15px_rgba(16,185,129,0.35)]'
-                }`}
-                title={
-                  isEn
-                    ? 'Book Salary Expense, Company BPJS Expense, and BPJS Payable'
-                    : 'Bukukan Beban Gaji, Beban BPJS Perusahaan, dan Hutang Iuran BPJS'
-                }
+                onClick={() => setShowExportMenu((prev) => !prev)}
+                className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700/80 font-medium shadow-sm rounded-xl text-sm transition-all duration-150 cursor-pointer flex items-center gap-1.5 active:scale-[0.99]"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>
-                  {isPayrollSynced
-                    ? isEn
-                      ? 'Re-Sync Payroll Journal'
-                      : 'Kirim Ulang Jurnal Penggajian'
-                    : isEn
-                    ? 'Sync Payroll to Finance'
-                    : 'Kirim Jurnal Penggajian ke Keuangan'}
-                </span>
+                <Printer className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                <span>{t.btnPrint}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showExportMenu ? 'rotate-180' : ''}`} />
               </button>
-            </div>
 
-            <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold ${
-                isLight ? 'bg-slate-50 border-slate-200' : ''
-              }`}
-              style={{
-                borderColor: isLight ? undefined : `${selectedFinancialCard.colorHex}60`,
-                backgroundColor: isLight ? undefined : `${selectedFinancialCard.colorHex}15`,
-                color: isLight ? '#0f172a' : selectedFinancialCard.colorHex,
-              }}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: selectedFinancialCard.colorHex }}
-              />
-              <span>{isEn ? 'Focus' : 'Fokus'}: {selectedFinancialCard.title}</span>
-            </div>
+              {showExportMenu && (
+                <div
+                  className={`absolute right-0 mt-2 w-80 rounded-xl border shadow-2xl z-50 p-2 ${
+                    isLight
+                      ? 'bg-white border-slate-200 text-slate-800'
+                      : 'bg-slate-900 border-slate-700 text-slate-100'
+                  }`}
+                >
+                  <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-600 dark:text-cyan-400 font-bold">
+                      Target Export Tab Aktif
+                    </div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white mt-0.5">
+                      {activeTabInfo.title}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      Kop: {activeBusinessTitle}
+                    </div>
+                  </div>
 
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer active:scale-95 ${
-                isLight
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 shadow-sm'
-                  : 'bg-[#0052FF] hover:bg-[#0043d1] text-white shadow-[0_0_15px_rgba(0,82,255,0.4)]'
-              }`}
-            >
-              <Plus className="w-4 h-4" />
-              <span>{isEn ? 'Add Cash Entry' : 'Tambah Transaksi Kas'}</span>
-            </button>
+                  <div className="py-1 space-y-1">
+                    <button
+                      type="button"
+                      onClick={handlePrintOfficialReport}
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-cyan-50 dark:hover:bg-cyan-950/40 transition flex items-start gap-2.5 cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white">
+                          Cetak Laporan Resmi / Save PDF
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Format dokumen resmi lengkap dengan kop surat usaha aktif
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportActiveTabCsv}
+                      className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition flex items-start gap-2.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span>Unduh File CSV / Excel</span>
+                          <Download className="w-3 h-3 text-emerald-500" />
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Ekspor tabel {activeTabInfo.title} ({activeTabInfo.fileSlug}.csv)
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* 4 NEON FINANCIAL METRIC CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {financialCards.map((card) => {
-          const Icon = card.icon;
-          const isSelected = selectedCardId === card.id;
-          const isHovered = hoveredCardId === card.id;
-          const glowStyle = getReactiveNeonGlowStyle(
-            card.colorHex,
-            isSelected,
-            isHovered,
+        {/* 4 Kartu Metrik Ringkasan */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className={`rounded-xl p-4 transition-all duration-200 hover:-translate-y-0.5 border ${
+            liquidCashBalance < 0 
+              ? 'border-rose-500/80 bg-rose-500/5 shadow-[0_0_18px_rgba(244,63,94,0.22)]' 
+              : isLight 
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' 
+              : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 dark:text-slate-400 font-mono font-normal text-[11px] leading-4 uppercase tracking-widest">
+                  {t.cardCash}
+                </span>
+                {liquidCashBalance < 0 && (
+                  <span className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[9px] px-1.5 py-0.5 rounded font-mono font-normal uppercase animate-pulse">
+                    DEFISIT
+                  </span>
+                )}
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <Wallet className="w-4 h-4" />
+              </div>
+            </div>
+            <div className={`text-lg leading-7 font-mono font-semibold ${liquidCashBalance < 0 ? 'text-rose-600 dark:text-rose-400 animate-pulse' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              Rp {liquidCashBalance.toLocaleString('id-ID')}
+            </div>
+            <div className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400 mt-1">
+              Kas Aktif & Rekening Giro
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-4 transition-all duration-200 hover:-translate-y-0.5 border ${
+            isLight 
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' 
+              : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-slate-500 dark:text-slate-400 font-mono font-normal text-[11px] leading-4 uppercase tracking-widest">
+                {t.cardGross}
+              </span>
+              <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                <TrendingUp className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-lg leading-7 font-mono font-semibold text-blue-600 dark:text-blue-400">
+              Rp {realGrossProfit.toLocaleString('id-ID')}
+            </div>
+            <div className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400 mt-1">
+              Total Omzet dikurangi HPP
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-4 transition-all duration-200 hover:-translate-y-0.5 border ${
+            totalInvoicesDue > 0
+              ? 'border-amber-500/80 bg-amber-500/5 shadow-[0_0_18px_rgba(245,158,11,0.22)]'
+              : isLight 
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]' 
+              : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 dark:text-slate-400 font-mono font-normal text-[11px] leading-4 uppercase tracking-widest">
+                  {t.cardAP}
+                </span>
+                {totalInvoicesDue > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                )}
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <CreditCard className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="text-lg leading-7 font-mono font-semibold text-amber-600 dark:text-amber-400">
+              Rp {totalInvoicesDue.toLocaleString('id-ID')}
+            </div>
+            <div className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400 mt-1">
+              Tagihan Supplier Belum Lunas
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-4 transition-all duration-200 hover:-translate-y-0.5 border ${
+            dailyCashFlow >= 0
+              ? 'border-emerald-500/60 bg-emerald-500/5 shadow-[0_0_14px_rgba(16,185,129,0.14)]'
+              : 'border-rose-500/60 bg-rose-500/5 shadow-[0_0_14px_rgba(244,63,94,0.14)]'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-slate-500 dark:text-slate-400 font-mono font-normal text-[11px] leading-4 uppercase tracking-widest">
+                {t.cardFlow}
+              </span>
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${dailyCashFlow >= 0 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                <ArrowDownRight className="w-4 h-4" />
+              </div>
+            </div>
+            <div className={`text-lg leading-7 font-mono font-semibold ${dailyCashFlow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+              {dailyCashFlow >= 0 ? '+' : '-'}Rp {Math.abs(dailyCashFlow).toLocaleString('id-ID')}
+            </div>
+            <div className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400 mt-1">
+              Net Arus Masuk/Keluar Hari Ini
+            </div>
+          </div>
+        </div>
+
+        {/* Panel Pemisahan Jurnal Biaya Logistik Depo Bangunan (Upah Bongkar Kuli & Beban Armada Frangko) */}
+        {buildingLogisticsSummary.hasData && (
+          <div className={`mt-4 rounded-xl border p-4 transition-all ${
             isLight
-          );
-
-          return (
-            <button
-              key={card.id}
-              id={`finance-card-${card.id}`}
-              onClick={() => {
-                setActiveNeonCard('finance', card.id);
-                if (card.id === 'ap') setFinanceMainTab('ap');
-              }}
-              onMouseEnter={() => setHoveredCardId(card.id)}
-              onMouseLeave={() => setHoveredCardId(null)}
-              style={glowStyle}
-              className="relative p-4 rounded-2xl text-left cursor-pointer overflow-hidden flex flex-col justify-between min-h-[140px] transition-all duration-150 ease-out"
-            >
-              {/* Top Accent Strip */}
-              <div
-                className="absolute top-0 left-0 right-0 h-1.5 transition-all duration-150 ease-out"
-                style={{
-                  backgroundColor: card.colorHex,
-                  boxShadow: !isLight && (isSelected || isHovered) ? `0 0 16px ${card.colorHex}` : 'none',
-                }}
-              />
-
-              <div className="flex items-center justify-between">
-                <span
-                  className="text-xs font-bold uppercase tracking-wider"
-                  style={{ color: isSelected ? card.colorHex : '#8b949e' }}
-                >
-                  {card.title}
+              ? 'bg-orange-50/60 border-orange-300 text-slate-900'
+              : 'bg-orange-950/20 border-orange-500/35 text-slate-100'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-500/30">
+                  <Truck className="w-4 h-4" />
                 </span>
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{
-                    backgroundColor: isLight ? '#f1f5f9' : `${card.colorHex}20`,
-                    color: isLight ? '#0f172a' : card.colorHex,
-                    border: isLight ? '1px solid #e2e8f0' : `1px solid ${card.colorHex}40`,
-                  }}
-                >
-                  <Icon className="w-4 h-4" />
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-orange-900 dark:text-orange-300">
+                    Pemisahan Jurnal Biaya Logistik Depo Bangunan (Kuli Bongkar & Armada Frangko)
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Otomatis memisahkan Pendapatan Material (4-10001), Jasa Bongkar Kuli (4-10102), dan Beban Armada Frangko (5-10205)
+                  </div>
                 </div>
               </div>
-
-              <div className="mt-2">
-                <div
-                  className={`text-lg sm:text-xl font-black font-mono tracking-tight ${
-                    isLight ? 'text-slate-900' : 'text-white'
-                  }`}
-                  style={{ color: isSelected ? card.colorHex : undefined }}
-                >
-                  {card.value}
-                </div>
-                <div className="text-[11px] text-[#8b949e] font-medium mt-1 truncate">
-                  {card.sub}
-                </div>
+              <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-orange-300 dark:border-orange-500/30 text-orange-700 dark:text-orange-300 font-bold">
+                  Pick-up: {buildingLogisticsSummary.pickupCount}x (Rp 85rb)
+                </span>
+                <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-orange-300 dark:border-orange-500/30 text-orange-700 dark:text-orange-300 font-bold">
+                  Engkel: {buildingLogisticsSummary.engkelCount}x (Rp 175rb)
+                </span>
+                <span className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-orange-300 dark:border-orange-500/30 text-orange-700 dark:text-orange-300 font-bold">
+                  Dump Truck: {buildingLogisticsSummary.dumpCount}x (Rp 325rb)
+                </span>
               </div>
-            </button>
-          );
-        })}
-      </div>
+            </div>
 
-      {/* DYNAMIC FINANCIAL FOCUS ANALYSIS PANEL */}
-      <div
-        className={`p-5 rounded-2xl border transition duration-200 ${
-          isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
-        }`}
-      >
-        <div className="flex items-center justify-between pb-3 border-b border-[#30363d]/50 mb-4">
-          <div className="flex items-center gap-2">
-            <span
-              className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: selectedFinancialCard.colorHex }}
-            />
-            <h3
-              className={`font-black text-base ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              Fokus Analisis: {selectedFinancialCard.title}
-            </h3>
-          </div>
-          <span className="text-xs text-[#8b949e] hidden sm:inline">
-            {selectedFinancialCard.focusDesc}
-          </span>
-        </div>
-
-        {/* 1. Cash Balance Focus */}
-        {selectedCardId === 'cash-balance' && (
-          <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div
-                className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-                  isLight ? 'bg-white border-slate-300 shadow-xs' : 'bg-[#0d1117] border-emerald-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Kas Kasir / Laci (Drawer)</span>
-                  <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded-full uppercase dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    Tunai Kasir
-                  </span>
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Pendapatan Penjualan Material (4-10001)
                 </div>
-                <div className={`text-lg font-black font-mono mt-2 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                  Rp {cashDrawerBalance.toLocaleString('id-ID')}
+                <div className="text-sm font-mono font-bold text-slate-900 dark:text-white mt-0.5">
+                  Rp {buildingLogisticsSummary.materialRevTotal.toLocaleString('id-ID')}
                 </div>
-                <div className="text-slate-800 font-medium text-xs mt-1 dark:text-slate-300">
-                  Uang tunai fisik siap setor / register drawer
+                <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                  Laba Kotor Material: Rp {buildingLogisticsSummary.grossProfitMaterial.toLocaleString('id-ID')}
                 </div>
               </div>
 
-              <div
-                className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-                  isLight ? 'bg-white border-slate-300 shadow-xs' : 'bg-[#0d1117] border-cyan-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Bank QRIS / Settlement</span>
-                  <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded-full uppercase dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    Non-Tunai
-                  </span>
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-indigo-200 dark:border-indigo-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                  Pendapatan / Titipan Jasa Bongkar Kuli (4-10102)
                 </div>
-                <div className={`text-lg font-black font-mono mt-2 ${isLight ? 'text-cyan-700' : 'text-cyan-400'}`}>
-                  Rp {qrisBankBalance.toLocaleString('id-ID')}
+                <div className="text-sm font-mono font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                  +Rp {buildingLogisticsSummary.loadingFeeTotal.toLocaleString('id-ID')}
                 </div>
-                <div className="text-slate-800 font-medium text-xs mt-1 dark:text-slate-300">
-                  Penerimaan QRIS &amp; EDC EDC merchant
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Terpisah dari omzet material pokok
                 </div>
               </div>
 
-              <div
-                className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-                  isLight ? 'bg-white border-slate-300 shadow-xs' : 'bg-[#0d1117] border-amber-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Total Kas Masuk Hari Ini</span>
-                  <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded-full uppercase dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    Hari Ini
-                  </span>
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-rose-200 dark:border-rose-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                  Beban Pengiriman Armada Frangko (5-10205)
                 </div>
-                <div className={`text-lg font-black font-mono mt-2 ${isLight ? 'text-amber-800' : 'text-amber-400'}`}>
-                  Rp {dailyCashFlow.inflow.toLocaleString('id-ID')}
+                <div className="text-sm font-mono font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                  -Rp {buildingLogisticsSummary.frangkoTotal.toLocaleString('id-ID')}
                 </div>
-                <div className="text-slate-800 font-medium text-xs mt-1 dark:text-slate-300">
-                  Akumulasi penjualan kasir tanggal hari ini
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  BBM & Ritase Sopir (Frangko Lokasi Proyek)
                 </div>
               </div>
 
-              <div
-                className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-                  isLight ? 'bg-white border-slate-300 shadow-xs' : 'bg-[#0d1117] border-purple-500/40'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold ${isLight ? 'text-slate-800' : 'text-gray-400'}`}>Arus Kas Bersih (Net)</span>
-                  <span className="bg-slate-100 border border-slate-300 text-slate-900 font-bold text-xs px-2 py-0.5 rounded-full uppercase dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    Likuid Net
-                  </span>
+              <div className="rounded-lg p-3 bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-500/40">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-bold">
+                  Est. Laba Bersih Setelah Ongkir
                 </div>
-                <div className={`text-lg font-black font-mono mt-2 ${isLight ? 'text-purple-800' : 'text-purple-400'}`}>
-                  Rp {dailyCashFlow.net.toLocaleString('id-ID')}
+                <div className="text-base font-mono font-black text-emerald-700 dark:text-emerald-400 mt-0.5">
+                  Rp {buildingLogisticsSummary.netProfitAfterShipping.toLocaleString('id-ID')}
                 </div>
-                <div className="text-slate-800 font-medium text-xs mt-1 dark:text-slate-300">
-                  Inflow hari ini dikurangi pengeluaran operasional
+                <div className="text-[10px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
+                  Laba Kotor Material + Jasa Kuli − Beban Armada
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* 2. Real Gross Profit Focus (Omzet vs HPP) */}
-        {selectedCardId === 'gross-profit' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div
-                className={`p-3.5 rounded-xl border ${
-                  isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-emerald-500/30'
-                }`}
-              >
-                <div className="text-xs text-gray-400">Total Omzet Penjualan (Revenue)</div>
-                <div className="text-base sm:text-lg font-black font-mono text-emerald-400 mt-1">
-                  Rp {totalIncome.toLocaleString('id-ID')}
-                </div>
-                <div className="text-[10px] text-gray-400 mt-1">
-                  Kasir masuk dari struk penjualan resmi
-                </div>
-              </div>
-
-              <div
-                className={`p-3.5 rounded-xl border ${
-                  isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-amber-500/30'
-                }`}
-              >
-                <div className="text-xs text-gray-400">Akumulasi Beban Pokok (HPP Resep)</div>
-                <div className="text-base sm:text-lg font-black font-mono text-amber-400 mt-1">
-                  Rp {totalHpp.toLocaleString('id-ID')}
-                </div>
-                <div className="text-[10px] text-gray-400 mt-1">
-                  BOM Bahan Baku + Susut (5%) + Kemasan
-                </div>
-              </div>
-
-              <div
-                className={`p-3.5 rounded-xl border ${
-                  isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-cyan-500/30'
-                }`}
-              >
-                <div className="text-xs text-gray-400">Laba Kotor Riil (Gross Profit)</div>
-                <div className="text-base sm:text-lg font-black font-mono text-cyan-400 mt-1">
-                  Rp {grossProfitReal.toLocaleString('id-ID')}
-                </div>
-                <div className="text-[10px] text-cyan-400 mt-1">
-                  Selisih Bersih (Omzet dikurangi HPP)
-                </div>
-              </div>
-
-              <div
-                className={`p-3.5 rounded-xl border ${
-                  isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-purple-500/30'
-                }`}
-              >
-                <div className="text-xs text-gray-400">Margin Laba Kotor (Gross Margin)</div>
-                <div className="text-base sm:text-lg font-black font-mono text-purple-400 mt-1">
-                  {grossProfitMargin}%
-                </div>
-                <div className="text-[10px] text-emerald-400 mt-1">
-                  {grossProfitMargin >= 50
-                    ? '✓ Performa Margin Sangat Sehat'
-                    : grossProfitMargin >= 35
-                    ? '✓ Margin Moderat Sesuai Target'
-                    : '⚠ Perlu Evaluasi Biaya Resep'}
-                </div>
-              </div>
-            </div>
-
-            {/* Visual Comparative Bar */}
-            <div className="p-3.5 rounded-xl border bg-black/20 border-gray-800 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-gray-300">
-                  Komparasi Proporsi: HPP ({totalIncome > 0 ? Math.round((totalHpp / totalIncome) * 100) : 0}%) vs Laba Kotor ({grossProfitMargin}%)
+        {/* Panel Rekonsiliasi Keuangan & Piutang Jasa Laundry (4-10105 & 1-10301) */}
+        {laundryFinanceSummary.isActive && isLaundryActive && (
+          <div className={`mt-4 rounded-xl border p-4 transition-all ${
+            isLight
+              ? 'bg-cyan-50/60 border-cyan-300 text-slate-900'
+              : 'bg-cyan-950/20 border-cyan-500/35 text-slate-100'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30">
+                  <Shirt className="w-4 h-4" />
                 </span>
-                <span className="text-[11px] text-gray-400 font-mono">
-                  Basis Omzet Rp {totalIncome.toLocaleString('id-ID')}
-                </span>
-              </div>
-              <div className="w-full h-3 rounded-full bg-gray-800 overflow-hidden flex">
-                <div
-                  className="h-full bg-amber-500 transition-all duration-300"
-                  style={{ width: `${totalIncome > 0 ? Math.min(100, Math.round((totalHpp / totalIncome) * 100)) : 0}%` }}
-                  title={`HPP Resep: Rp ${totalHpp.toLocaleString('id-ID')}`}
-                />
-                <div
-                  className="h-full bg-cyan-500 transition-all duration-300"
-                  style={{ width: `${Math.max(0, 100 - (totalIncome > 0 ? Math.round((totalHpp / totalIncome) * 100) : 0))}%` }}
-                  title={`Laba Kotor: Rp ${grossProfitReal.toLocaleString('id-ID')}`}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                  Beban Pokok Resep (HPP Bahan, Susut, Kemasan)
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-500 inline-block" />
-                  Laba Kotor Riil (Gross Profit Kasir)
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 3. Total AP (Utang) Focus & Settlement */}
-        {selectedCardId === 'ap' && (
-          <AccountsPayableTab isLight={isLight} />
-        )}
-
-        {/* 4. Cash Flow Focus */}
-        {selectedCardId === 'cash-flow' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div
-                className={`p-3 rounded-xl border ${
-                  isLight
-                    ? 'bg-slate-50 border-slate-200'
-                    : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <span className="text-[#8b949e]">Total Pemasukan (Debit)</span>
-                <div className="text-lg font-black font-mono text-[#10B981] mt-1">
-                  Rp {totalIncome.toLocaleString('id-ID')}
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-cyan-900 dark:text-cyan-300">
+                    Rekonsiliasi Keuangan &amp; Piutang Usaha Jasa Laundry (4-10105 &amp; 1-10301)
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Pembayaran Lunas/DP masuk ke Kas/Bank real-time; sisa tagihan (Bayar Saat Ambil / Sisa DP) otomatis tercatat di Piutang Usaha &amp; lunas saat pengambilan.
+                  </div>
                 </div>
               </div>
-              <div
-                className={`p-3 rounded-xl border ${
-                  isLight
-                    ? 'bg-slate-50 border-slate-200'
-                    : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <span className="text-[#8b949e]">Total Beban Pokok (HPP)</span>
-                <div className="text-lg font-black font-mono text-amber-400 mt-1">
-                  Rp {totalHpp.toLocaleString('id-ID')}
-                </div>
-              </div>
-              <div
-                className={`p-3 rounded-xl border ${
-                  isLight
-                    ? 'bg-slate-50 border-slate-200'
-                    : 'bg-[#0d1117] border-[#30363d]'
-                }`}
-              >
-                <span className="text-[#8b949e]">Saldo Bersih Buku Kas</span>
-                <div className="text-lg font-black font-mono text-[#8b5cf6] mt-1">
-                  Rp {netCashFlow.toLocaleString('id-ID')}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* FINANCE MAIN NAVIGATION TABS */}
-      <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-[#30363d]/50 pb-2`}>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            id="tab-btn-finance-ledger"
-            onClick={() => setFinanceMainTab('ledger')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              financeMainTab === 'ledger'
-                ? isLight
-                  ? 'bg-white border border-slate-200 text-blue-600 shadow-sm'
-                  : 'bg-[#0052FF] text-white shadow-[0_0_12px_rgba(0,82,255,0.4)]'
-                : isLight
-                ? 'border border-slate-300 bg-slate-50 text-slate-800 font-semibold text-xs hover:bg-slate-100'
-                : 'text-gray-400 hover:text-white bg-slate-800/40 border border-slate-700/60'
-            }`}
-          >
-            <Receipt className="w-4 h-4" />
-            <span>Buku Besar & Kas ({finance.length})</span>
-          </button>
-
-          <button
-            type="button"
-            id="tab-btn-finance-ap"
-            onClick={() => setFinanceMainTab('ap')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              financeMainTab === 'ap'
-                ? isLight
-                  ? 'bg-white border border-slate-200 text-rose-600 shadow-sm'
-                  : 'bg-rose-600 text-white shadow-[0_0_12px_rgba(244,63,94,0.4)]'
-                : isLight
-                ? 'border border-slate-300 bg-slate-50 text-slate-800 font-semibold text-xs hover:bg-slate-100'
-                : 'text-gray-400 hover:text-white bg-slate-800/40 border border-slate-700/60'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>Hutang Dagang (AP)</span>
-            {invoicesDue.filter((i) => (i.type === 'PAYABLE' || !i.type) && (i.status === 'Unpaid' || i.status === 'Overdue')).length > 0 && (
-              <span className={`px-2 py-0.2 rounded-full text-[10px] font-mono font-bold border ${
-                isLight ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-              }`}>
-                {invoicesDue.filter((i) => (i.type === 'PAYABLE' || !i.type) && (i.status === 'Unpaid' || i.status === 'Overdue')).length} Belum Bayar
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            id="tab-btn-finance-ar"
-            onClick={() => setFinanceMainTab('ar')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              financeMainTab === 'ar'
-                ? isLight
-                  ? 'bg-white border border-slate-200 text-purple-600 shadow-sm'
-                  : 'bg-purple-600 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                : isLight
-                ? 'border border-slate-300 bg-slate-50 text-slate-800 font-semibold text-xs hover:bg-slate-100'
-                : 'text-gray-400 hover:text-white bg-slate-800/40 border border-slate-700/60'
-            }`}
-          >
-            <Wallet className="w-4 h-4" />
-            <span>Piutang Usaha (AR)</span>
-            {invoicesReceivable.filter((i) => i.status === 'Unpaid' || i.status === 'Overdue').length > 0 && (
-              <span className={`px-2 py-0.2 rounded-full text-[10px] font-mono font-bold border ${
-                isLight ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs' : 'bg-purple-500/30 text-purple-300 border border-purple-500/50'
-              }`}>
-                {invoicesReceivable.filter((i) => i.status === 'Unpaid' || i.status === 'Overdue').length} Belum Lunas
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            id="tab-btn-finance-reports"
-            onClick={() => setFinanceMainTab('reports')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              financeMainTab === 'reports'
-                ? isLight
-                  ? 'bg-white border border-slate-200 text-emerald-600 shadow-sm'
-                  : 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                : isLight
-                ? 'border border-slate-300 bg-slate-50 text-slate-800 font-semibold text-xs hover:bg-slate-100'
-                : 'text-gray-400 hover:text-white bg-slate-800/40 border border-slate-700/60'
-            }`}
-          >
-            <Scale className="w-4 h-4" />
-            <span>Laporan Keuangan &amp; Neraca Saldo</span>
-          </button>
-
-          <button
-            type="button"
-            id="tab-btn-finance-cash-reconciliation"
-            onClick={() => setFinanceMainTab('cash_reconciliation')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              financeMainTab === 'cash_reconciliation'
-                ? isLight
-                  ? 'bg-white border border-slate-200 text-teal-600 shadow-sm'
-                  : 'bg-teal-600 text-white shadow-[0_0_12px_rgba(20,184,166,0.4)]'
-                : isLight
-                ? 'border border-slate-300 bg-slate-50 text-slate-800 font-semibold text-xs hover:bg-slate-100'
-                : 'text-gray-400 hover:text-white bg-slate-800/40 border border-slate-700/60'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span>Rekonsiliasi Kas &amp; Tutup Shift</span>
-            {activeShift && (
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Shift Kasir Aktif" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {financeMainTab === 'ap' && (
-        <AccountsPayableTab isLight={isLight} />
-      )}
-
-      {financeMainTab === 'ar' && (
-        <AccountsReceivableTab isLight={isLight} />
-      )}
-
-      {financeMainTab === 'reports' && (
-        <FinancialReportsTab isLight={isLight} />
-      )}
-
-      {financeMainTab === 'cash_reconciliation' && (
-        <CashReconciliationTab isLight={isLight} />
-      )}
-
-      {/* Journal Table (General Ledger) */}
-      {financeMainTab === 'ledger' && (
-      <div
-        className={`rounded-2xl border overflow-hidden shadow-lg transition duration-200 ${
-          isLight
-            ? 'bg-white border-slate-200'
-            : 'bg-[#161b22] border-[#30363d]'
-        }`}
-      >
-        <div className="p-4 border-b border-[#30363d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3
-              className={`font-bold text-sm ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              Jurnal Transaksi Kas Masuk, HPP & Beban (General Ledger)
-            </h3>
-            <p className="text-xs text-[#8b949e] mt-0.5">
-              Pencatatan otomatis penerimaan kasir, mutasi HPP bahan baku, dan pengeluaran operasional
-            </p>
-          </div>
-
-          {/* Quick Filter Buttons */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('ALL')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
-                ledgerFilter === 'ALL'
-                  ? 'bg-gray-700 text-white border-gray-600'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-white'
-              }`}
-            >
-              Semua ({finance.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('INCOME')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 ${
-                ledgerFilter === 'INCOME'
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-emerald-400'
-              }`}
-            >
-              <span>Kas Masuk</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-emerald-500/30 text-emerald-300 font-bold">
-                {inCount}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('HPP')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 ${
-                ledgerFilter === 'HPP'
-                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-amber-400'
-              }`}
-            >
-              <span>HPP Resep</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-500/30 text-amber-300 font-bold">
-                {hppCount}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('EXPENSE')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1 ${
-                ledgerFilter === 'EXPENSE'
-                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/50'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-rose-400'
-              }`}
-            >
-              <span>Biaya Operasional</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-rose-500/30 text-rose-300 font-bold">
-                {expCount}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('CASH_DRAWER')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
-                ledgerFilter === 'CASH_DRAWER'
-                  ? 'bg-teal-500/20 text-teal-400 border-teal-500/50'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-teal-400'
-              }`}
-            >
-              Laci Kasir
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('BANK_QRIS')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer ${
-                ledgerFilter === 'BANK_QRIS'
-                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/50'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-cyan-400'
-              }`}
-            >
-              Bank QRIS
-            </button>
-            <button
-              type="button"
-              onClick={() => setLedgerFilter('DOUBLE_ENTRY')}
-              className={`px-3 py-1.5 rounded-xl border transition cursor-pointer flex items-center gap-1.5 ${
-                ledgerFilter === 'DOUBLE_ENTRY'
-                  ? 'bg-purple-500/25 text-purple-300 border-purple-500/60 shadow-[0_0_12px_rgba(168,85,247,0.3)]'
-                  : 'bg-transparent text-gray-400 border-gray-800 hover:text-purple-300'
-              }`}
-            >
-              <Scale className="w-3.5 h-3.5 text-purple-400" />
-              <span>Jurnal Umum Ganda (APS POS5)</span>
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-purple-500/30 text-purple-200 font-bold">
-                {journalEntries.length}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          {ledgerFilter === 'DOUBLE_ENTRY' ? (
-            <table className="w-full text-left text-xs">
-              <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
-                  isLight
-                    ? 'bg-purple-50 text-purple-900 border-purple-200'
-                    : 'bg-[#12161c] text-purple-300 border-[#30363d]'
-                }`}
-              >
-                <tr>
-                  <th className="py-3 px-4">Ref Nota / Transaksi</th>
-                  <th className="py-3 px-4">Tanggal & Jam</th>
-                  <th className="py-3 px-4">Kode Akun</th>
-                  <th className="py-3 px-4">Nama Akun Buku Besar</th>
-                  <th className="py-3 px-4">Deskripsi / Keterangan</th>
-                  <th className="py-3 px-4 text-right">Debit (Rp)</th>
-                  <th className="py-3 px-4 text-right">Kredit (Rp)</th>
-                </tr>
-              </thead>
-              <tbody
-                className={`divide-y ${
-                  isLight
-                    ? 'divide-slate-200 text-slate-800'
-                    : 'divide-[#30363d] text-gray-300'
-                }`}
-              >
-                {journalEntries.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-gray-400">
-                      Belum ada Jurnal Umum Ganda POS tercatat. Lakukan transaksi kasir untuk membukukan otomatis.
-                    </td>
-                  </tr>
-                ) : (
-                  journalEntries.map((jrn, jIdx) =>
-                    jrn.lines.map((line, lIdx) => (
-                      <tr
-                        key={`${jrn.id || 'JRN'}-${jIdx}-${lIdx}`}
-                        className={`transition ${
-                          isLight
-                            ? lIdx === 0
-                              ? 'bg-slate-50/60 hover:bg-slate-100'
-                              : 'hover:bg-slate-50'
-                            : lIdx === 0
-                            ? 'bg-[#1c2128]/40 hover:bg-[#21262d]/60'
-                            : 'hover:bg-[#161b22]'
-                        }`}
-                      >
-                        <td className="py-2.5 px-4 font-mono font-semibold">
-                          {lIdx === 0 ? (
-                            <span className={isLight ? 'text-slate-900' : 'text-white'}>
-                              {jrn.reference || jrn.id}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500 pl-4">↳</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-4 text-gray-400 whitespace-nowrap">
-                          {lIdx === 0 ? jrn.date : ''}
-                        </td>
-                        <td className="py-2.5 px-4 whitespace-nowrap font-mono font-bold">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] ${
-                              line.accountCode === '1-10000'
-                                ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
-                                : line.accountCode === '1-10001'
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                                : line.accountCode === '1-10002'
-                                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                                : line.accountCode === '4-10001'
-                                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
-                                : line.accountCode === '4-10002'
-                                ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40'
-                                : line.accountCode === '5-10001'
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                                : line.accountCode === '1-10501'
-                                ? 'bg-teal-500/20 text-teal-400 border border-teal-500/40'
-                                : line.accountCode === '1-10509'
-                                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
-                                : line.accountCode === '2-10001'
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                                : line.accountCode === '5-10999'
-                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                                : line.accountCode === '4-10999'
-                                ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40'
-                                : 'bg-gray-700 text-gray-200'
-                            }`}
-                          >
-                            {line.accountCode}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4 font-semibold whitespace-nowrap">
-                          <span className={line.debit > 0 ? 'text-emerald-400' : 'text-blue-400 pl-3'}>
-                            {line.accountName}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4 text-gray-400 max-w-xs truncate" title={jrn.description}>
-                          {lIdx === 0 ? jrn.description : ''}
-                        </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-400 whitespace-nowrap">
-                          {line.debit > 0 ? `Rp ${line.debit.toLocaleString('id-ID')}` : '-'}
-                        </td>
-                        <td className="py-2.5 px-4 text-right font-mono font-bold text-blue-400 whitespace-nowrap">
-                          {line.credit > 0 ? `Rp ${line.credit.toLocaleString('id-ID')}` : '-'}
-                        </td>
-                      </tr>
-                    ))
-                  )
-                )}
-              </tbody>
-            </table>
-          ) : (
-            <table className="w-full text-left text-xs">
-              <thead
-                className={`font-semibold border-b uppercase tracking-wider text-[11px] ${
-                  isLight
-                    ? 'bg-slate-100 text-slate-700 border-slate-200'
-                    : 'bg-[#0d1117] text-[#8b949e] border-[#30363d]'
-                }`}
-              >
-                <tr>
-                  <th className="py-3 px-4">Ref ID / No Nota</th>
-                  <th className="py-3 px-4">Tanggal</th>
-                  <th className="py-3 px-4">Tipe Jurnal</th>
-                  <th className="py-3 px-4">Kategori</th>
-                  <th className="py-3 px-4">Akun Tujuan (COA)</th>
-                  <th className="py-3 px-4">Keterangan</th>
-                  <th className="py-3 px-4">Metode</th>
-                  <th className="py-3 px-4 text-right">Nominal (Rp)</th>
-                </tr>
-              </thead>
-              <tbody
-                className={`divide-y ${
-                  isLight
-                    ? 'divide-slate-200 text-slate-800'
-                    : 'divide-[#30363d] text-gray-300'
-                }`}
-              >
-                {filteredFinance.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-400">
-                      Tidak ada transaksi jurnal pada filter ini.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredFinance.map((entry, idx) => {
-                    const isInflow = entry.type === 'INCOME' || entry.type === 'IN / PENDAPATAN';
-                    const isHpp = entry.type === 'HPP / BEBAN POKOK';
-                    const isExpense = entry.type === 'EXPENSE';
-
-                    return (
-                      <tr
-                        key={`${entry.id || 'FIN'}-${idx}`}
-                        className={`transition ${
-                          isLight ? 'hover:bg-slate-50' : 'hover:bg-[#21262d]/50'
-                        }`}
-                      >
-                        <td
-                          className={`py-3 px-4 font-mono font-semibold ${
-                            isLight ? 'text-slate-900' : 'text-white'
-                          }`}
-                        >
-                          {entry.reference || entry.id}
-                        </td>
-                        <td className="py-3 px-4 text-gray-400 whitespace-nowrap">
-                          {entry.date}
-                          {entry.created_at && (
-                            <div className="text-[10px] text-gray-500 font-mono">
-                              {entry.created_at.slice(11, 19)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span
-                            className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 ${
-                              isInflow
-                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                : isHpp
-                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                            }`}
-                          >
-                            {isInflow
-                              ? 'IN / PENDAPATAN'
-                              : isHpp
-                              ? 'HPP / BEBAN POKOK'
-                              : 'EXPENSE / BIAYA'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span className="font-bold text-xs px-2 py-0.5 rounded border border-slate-300 bg-slate-50 text-slate-900 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                            {entry.category}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 whitespace-nowrap font-mono text-[11px]">
-                          {entry.account_target ? (
-                            <span
-                              className={`font-bold text-xs px-2 py-0.5 rounded border ${
-                                isLight
-                                  ? 'border-slate-300 bg-slate-50 text-slate-900'
-                                  : entry.account_target.includes('Laci') || entry.account_target.includes('1-10001')
-                                  ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                                  : entry.account_target.includes('QRIS') || entry.account_target.includes('Bank') || entry.account_target.includes('1-10002')
-                                  ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
-                                  : entry.account_target.includes('1-10501') || entry.account_target.includes('Persediaan')
-                                  ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
-                                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                              }`}
-                            >
-                              {entry.account_target}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500">-</span>
-                          )}
-                        </td>
-                        <td
-                          className={`py-3 px-4 font-medium max-w-xs truncate ${
-                            isLight ? 'text-slate-900' : 'text-white'
-                          }`}
-                          title={entry.description}
-                        >
-                          {entry.description}
-                        </td>
-                        <td className="py-3 px-4 text-gray-400 whitespace-nowrap font-mono">
-                          {entry.payment_method}
-                        </td>
-                        <td
-                          className={`py-3 px-4 text-right font-mono font-bold whitespace-nowrap ${
-                            isInflow
-                              ? 'text-[#10B981]'
-                              : isHpp
-                              ? 'text-amber-400'
-                              : 'text-rose-400'
-                          }`}
-                        >
-                          {isInflow ? '+Rp ' : isHpp ? 'Rp ' : '-Rp '}
-                          {entry.amount.toLocaleString('id-ID')}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-      )}
-
-      {/* Modal Add Finance */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div
-            className={`w-full max-w-md rounded-2xl p-6 shadow-2xl relative border ${
-              isLight
-                ? 'bg-white border-slate-300'
-                : 'bg-[#161b22] border-[#30363d]'
-            }`}
-          >
-            <button
-              onClick={() => setIsModalOpen(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3
-              className={`font-bold text-base mb-4 ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}
-            >
-              Catat Transaksi Kas
-            </h3>
-
-            <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEntryType('INCOME')}
-                  className={`py-2 rounded-xl font-bold border transition ${
-                    entryType === 'INCOME'
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                      : 'bg-[#0d1117] text-gray-400 border-[#30363d]'
-                  }`}
-                >
-                  Pemasukan (Income)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEntryType('EXPENSE')}
-                  className={`py-2 rounded-xl font-bold border transition ${
-                    entryType === 'EXPENSE'
-                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-                      : 'bg-[#0d1117] text-gray-400 border-[#30363d]'
-                  }`}
-                >
-                  Pengeluaran (Expense)
-                </button>
-              </div>
-
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">
-                  Kategori
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] text-white px-3 py-2 rounded-xl outline-none focus:border-[#0052FF]"
-                />
-              </div>
-
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">
-                  Akun Tujuan / Sumber
-                </label>
-                <select
-                  value={accountTarget}
-                  onChange={(e) => setAccountTarget(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] text-white px-3 py-2 rounded-xl outline-none focus:border-[#0052FF]"
-                >
-                  <option value="Kas Kasir / Laci">Kas Kasir / Laci (Cash Drawer)</option>
-                  <option value="Bank QRIS / Settlement">Bank QRIS / Settlement</option>
-                  <option value="Bank BCA Giro">Bank BCA Giro</option>
-                  <option value="Bank Mandiri Giro">Bank Mandiri Giro</option>
-                  <option value="Persediaan Bahan Baku / Gudang">Persediaan Bahan Baku / Gudang</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">
-                  Keterangan / Deskripsi
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Pembayaran ATK dan Kertas Struk"
-                  className="w-full bg-[#0d1117] border border-[#30363d] text-white px-3 py-2 rounded-xl outline-none focus:border-[#0052FF]"
-                />
-              </div>
-
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">
-                  Nominal (Rp)
-                </label>
-                <input
-                  type="number"
-                  required
-                  value={amount || ''}
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                  placeholder="0"
-                  className="w-full bg-[#0d1117] border border-[#30363d] text-white px-3 py-2 rounded-xl outline-none focus:border-[#0052FF]"
-                />
-              </div>
-
-              <div>
-                <label className="text-gray-300 font-semibold block mb-1">
-                  Metode Bayar
-                </label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="w-full bg-[#0d1117] border border-[#30363d] text-white px-3 py-2 rounded-xl outline-none focus:border-[#0052FF]"
-                >
-                  <option value="CASH">CASH (Tunai)</option>
-                  <option value="QRIS">QRIS</option>
-                  <option value="EDC_DEBIT">EDC / Debit Bank</option>
-                  <option value="TRANSFER">Transfer Bank</option>
-                </select>
-              </div>
-
               <button
-                type="submit"
-                className="w-full mt-4 bg-[#0052FF] hover:bg-[#0043d1] text-white font-bold py-2.5 rounded-xl shadow-lg transition cursor-pointer"
+                type="button"
+                onClick={() => setFinanceMainTab('ar')}
+                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold cursor-pointer transition"
               >
-                Simpan Entri Jurnal
+                Kelola Piutang Laundry (AR) →
               </button>
-            </form>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Pendapatan Jasa Laundry (4-10105)
+                </div>
+                <div className="text-sm font-mono font-bold text-slate-900 dark:text-white mt-0.5">
+                  Rp {laundryFinanceSummary.totalRevenue.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                  Total {laundryFinanceSummary.totalOrders} order cucian
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-emerald-200 dark:border-emerald-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  Kas &amp; DP Diterima (1-10001/02/03)
+                </div>
+                <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  +Rp {laundryFinanceSummary.cashDpCollected.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {laundryFinanceSummary.settledCount} order sudah lunas penuh
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-amber-200 dark:border-amber-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                  Piutang Usaha Cucian (1-10301)
+                </div>
+                <div className="text-sm font-mono font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                  Rp {laundryFinanceSummary.unpaidArTotal.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {laundryFinanceSummary.unpaidOrdersCount} nota Sisa DP / Bayar Ambil
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-cyan-50/90 dark:bg-cyan-950/30 border border-cyan-300 dark:border-cyan-500/40">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-800 dark:text-cyan-300 font-bold">
+                  Tagihan Tertahan di Rak (Siap Ambil)
+                </div>
+                <div className="text-base font-mono font-black text-cyan-700 dark:text-cyan-400 mt-0.5">
+                  Rp {laundryFinanceSummary.readyRackArTotal.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] text-cyan-700/80 dark:text-cyan-300/80 mt-0.5">
+                  Otomatis cair saat pelanggan ambil cucian
+                </div>
+              </div>
+            </div>
           </div>
+        )}
+
+        {/* Panel Rekonsiliasi Pendapatan Kotor, Potongan Diskon (4-10004) & Tukar Ukuran Fashion */}
+        {fashionFinanceSummary.isActive && isFashionActive && (
+          <div className={`mt-4 rounded-xl border p-4 transition-all ${
+            isLight
+              ? 'bg-fuchsia-50/50 border-fuchsia-300 text-slate-900'
+              : 'bg-fuchsia-950/15 border-fuchsia-500/35 text-slate-100'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-fuchsia-500/15 text-fuchsia-600 dark:text-fuchsia-400 border border-fuchsia-500/30">
+                  <Tag className="w-4 h-4" />
+                </span>
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-fuchsia-900 dark:text-fuchsia-300">
+                    Rekonsiliasi Pendapatan Kotor, Potongan Promo (4-10004) &amp; Tukar Ukuran Butik
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Potongan Clearance, Mix &amp; Match, dan Diskon Nota dicatat terpisah pada akun kontra-pendapatan 4-10004; Tukar Ukuran selisih Rp 0 hanya memperbarui mutasi stok tanpa menggandakan omzet.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFinanceMainTab('reports')}
+                className="px-3 py-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold cursor-pointer transition"
+              >
+                Lihat Laba Rugi (4-10001 vs 4-10004) →
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Pendapatan Kotor Butik (4-10001)
+                </div>
+                <div className="text-sm font-mono font-bold text-slate-900 dark:text-white mt-0.5">
+                  Rp {fashionFinanceSummary.grossRevenue.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] font-mono text-slate-500 mt-0.5">
+                  {fashionFinanceSummary.totalSalesCount} nota penjualan sebelum diskon
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-rose-200 dark:border-rose-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                  Potongan &amp; Diskon Penjualan (4-10004)
+                </div>
+                <div className="text-sm font-mono font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                  -Rp {fashionFinanceSummary.discountTotal.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5 truncate" title={`Clearance Rp ${fashionFinanceSummary.clearanceDiscount.toLocaleString('id-ID')} • Bundle Rp ${fashionFinanceSummary.bundleDiscount.toLocaleString('id-ID')} • Manual Rp ${fashionFinanceSummary.manualDiscount.toLocaleString('id-ID')}`}>
+                  Clr: {fashionFinanceSummary.clearanceDiscount.toLocaleString('id-ID')} • Bnd: {fashionFinanceSummary.bundleDiscount.toLocaleString('id-ID')} • Man: {fashionFinanceSummary.manualDiscount.toLocaleString('id-ID')}
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-white dark:bg-slate-900/90 border border-emerald-200 dark:border-emerald-500/30">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+                  Pendapatan Bersih Fashion (Net)
+                </div>
+                <div className="text-sm font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  +Rp {fashionFinanceSummary.netRevenue.toLocaleString('id-ID')}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Pendapatan Kotor − Potongan (4-10004)
+                </div>
+              </div>
+
+              <div className="rounded-lg p-3 bg-fuchsia-50/90 dark:bg-fuchsia-950/30 border border-fuchsia-300 dark:border-fuchsia-500/40">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-fuchsia-800 dark:text-fuchsia-300 font-bold">
+                  Tukar Ukuran / Barang (Non-Duplikasi)
+                </div>
+                <div className="text-sm font-mono font-black text-fuchsia-700 dark:text-fuchsia-300 mt-0.5">
+                  {fashionFinanceSummary.zeroDiffExchangeCount} Nota Rp 0
+                  {fashionFinanceSummary.paidExchangeCount > 0 ? ` • ${fashionFinanceSummary.paidExchangeCount} Upgrade` : ''}
+                </div>
+                <div className="text-[10px] text-fuchsia-700/80 dark:text-fuchsia-300/80 mt-0.5">
+                  {fashionFinanceSummary.paidExchangeDiffTotal > 0
+                    ? `Selisih upgrade masuk: +Rp ${fashionFinanceSummary.paidExchangeDiffTotal.toLocaleString('id-ID')}`
+                    : 'Hanya mutasi stok (+1 / -1), 0 jurnal omzet'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Navigasi Tab Horizontal dengan Tombol Scroll Kiri/Kanan (Termasuk Data Master Tertanam) */}
+      <div className={`flex items-center gap-1.5 p-1.5 rounded-xl w-full border transition-all duration-200 ${
+        isLight
+          ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)]'
+          : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)]'
+      }`}>
+        <button
+          type="button"
+          onClick={() => handleScrollTabs('left')}
+          aria-label="Scroll tab ke kiri"
+          title="Geser bilah tab ke kiri"
+          className={`p-2 rounded-lg border shrink-0 transition cursor-pointer active:scale-95 ${
+            isLight
+              ? 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-cyan-50 hover:text-cyan-700 hover:border-cyan-300'
+              : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-cyan-950/50 hover:text-cyan-300 hover:border-cyan-500/40'
+          }`}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+
+        <div
+          ref={tabScrollRef}
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth flex-1 min-w-0"
+        >
+          {tabs.map((tab) => {
+            const TabIcon = tab.icon;
+            const isAP = tab.id === 'ap';
+            const isActive = financeMainTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setFinanceMainTab(tab.id);
+                  e.currentTarget.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'nearest',
+                    inline: 'center',
+                  });
+                }}
+                className={`px-4 py-2 rounded-lg text-sm leading-5 font-medium transition-all duration-150 cursor-pointer whitespace-nowrap flex items-center gap-1.5 shrink-0 active:scale-[0.99] ${
+                  isActive
+                    ? 'bg-cyan-600 text-white shadow-[0_0_14px_rgba(6,182,212,0.4)]'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30'
+                }`}
+              >
+                {TabIcon && <TabIcon className="w-4 h-4" />}
+                <span>{tab.label}</span>
+                {isAP && totalInvoicesDue > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        <button
+          type="button"
+          onClick={() => handleScrollTabs('right')}
+          aria-label="Scroll tab ke kanan"
+          title="Geser bilah tab ke kanan (Data Master & Harga)"
+          className={`p-2 rounded-lg border shrink-0 transition cursor-pointer active:scale-95 ${
+            isLight
+              ? 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-cyan-50 hover:text-cyan-700 hover:border-cyan-300'
+              : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-cyan-950/50 hover:text-cyan-300 hover:border-cyan-500/40'
+          }`}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Konten Tab Aktif (Eksklusif Hanya 1 Tab Aktif) */}
+      <div className="transition-all duration-150" key={`finance-active-panel-${financeMainTab}`}>
+        {financeMainTab === 'master_data' ? (
+          <MasterDataModule />
+        ) : financeMainTab === 'ledger' ? (
+          <LedgerTable finance={domainAlignedFinance} isLight={isLight} />
+        ) : financeMainTab === 'ap' ? (
+          <AccountsPayableTab isLight={isLight} />
+        ) : financeMainTab === 'ar' ? (
+          <AccountsReceivableTab isLight={isLight} />
+        ) : financeMainTab === 'reports' ? (
+          <FinancialReportsTab isLight={isLight} />
+        ) : financeMainTab === 'cash_reconciliation' ? (
+          <CashReconciliationTab isLight={isLight} />
+        ) : financeMainTab === 'promo_audit' ? (
+          <PromoAuditRebateTab isLight={isLight} onNavigateToAP={() => setFinanceMainTab('ap')} />
+        ) : null}
+      </div>
+
+      {/* Modals */}
+      {showCashEntryModal && (
+        <CashEntryModal
+          isOpen={showCashEntryModal}
+          onClose={() => setShowCashEntryModal(false)}
+        />
+      )}
+
+      {showJournalModal && (
+        <JournalVoucherModal
+          isOpen={showJournalModal}
+          onClose={() => {
+            setShowJournalModal(false);
+            setJournalVoucherInitialData(null);
+          }}
+          isLight={isLight}
+          initialData={journalVoucherInitialData}
+          onSave={(data) => {
+            const totalDebit = data.lines.reduce((acc: number, l: any) => acc + (Number(l.debit) || 0), 0);
+            const totalCredit = data.lines.reduce((acc: number, l: any) => acc + (Number(l.credit) || 0), 0);
+
+            const result = postGeneralJournalVoucher({
+              voucherNo: data.reference,
+              transactionDate: data.date,
+              documentType: data.type,
+              sector: data.sector,
+              terminal: data.terminal,
+              branch: data.branch,
+              referenceNo: data.reference,
+              generalMemo: data.memo,
+              lines: data.lines.map((l: any) => ({
+                accountCode: l.accountCode || l.coa,
+                accountName: l.accountName || l.memo || l.coa,
+                description: l.memo,
+                debit: Number(l.debit) || 0,
+                credit: Number(l.credit) || 0,
+              })),
+            });
+
+            recordAudit({
+              traceId: data.reference || `JV-${Date.now()}`,
+              userId: effectiveUser?.id || 'finance-officer',
+              userName: effectiveUser?.name || 'Finance Officer',
+              userRole: effectiveUser?.role || 'Finance',
+              module: 'FINANCE',
+              action: 'CONFIG_CHANGE',
+              severity: 'CRITICAL',
+              entityId: data.reference,
+              payloadAfter: {
+                voucherNo: data.reference,
+                date: data.date,
+                memo: data.memo,
+                totalDebit,
+                totalCredit,
+                lineCount: data.lines.length,
+              },
+            });
+
+            if (result && result.success) {
+              setShowJournalModal(false);
+              setJournalVoucherInitialData(null);
+            } else {
+              setShowJournalModal(false);
+              setJournalVoucherInitialData(null);
+            }
+          }}
+        />
       )}
     </div>
   );

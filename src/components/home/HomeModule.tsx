@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ActiveNavModule } from '../../types';
-import { QuickAuthModal } from '../auth/QuickAuthModal';
 import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
 import { DIVISIONS_TRANSLATIONS } from '../../utils/translations';
 import {
@@ -40,16 +39,16 @@ const ROLE_MODULES: RoleModuleData[] = [
   {
     id: 'executive',
     order: '01',
-    title: 'Eksekutif & Manajerial (Executive & Managerial)',
-    subTitle: 'KPI, Margin & Antrean Persetujuan (KPI, Margin & Approval Queue)',
+    title: 'Eksekutif & Manajemen (Executive & Management)',
+    subTitle: 'KPI, Analitik & Otorisasi',
     colorHex: '#10B981',
     icon: Briefcase,
     summary:
-      'Pusat kendali manajerial untuk pemantauan metrik pendapatan, analisis profitabilitas produk, KPI & performa kerja karyawan, serta antrean persetujuan (Approval Queue) pengadaan bernilai besar.',
+      'Pusat kendali operasional untuk konsolidasi omzet & laba bersih multi-cabang, otorisasi persetujuan belanja modal (PO bernilai tinggi), serta audit fisik kas laci kasir & deteksi anomali cabang.',
     objectives: [
-      'Memantau Gross Profit Margin perusahaan secara realtime berdasarkan perbandingan harga jual dan HPP modal.',
-      'Meninjau performa dan kontribusi pendapatan masing-masing kasir dan terminal kerja.',
-      'Mengotorisasi permohonan pengadaan barang (PR) dan pembukaan akses pengguna baru.',
+      'Konsolidasi omzet & laba bersih multi-cabang realtime.',
+      'Otorisasi persetujuan belanja modal (PO bernilai tinggi).',
+      'Audit fisik kas laci kasir & deteksi anomali cabang.',
     ],
     sopSteps: [
       {
@@ -86,11 +85,11 @@ const ROLE_MODULES: RoleModuleData[] = [
     colorHex: '#00f2fe',
     icon: Users,
     summary:
-      'Pusat manajemen sumber daya manusia (SDM), direktori personil lengkap lintas departemen ERP, log presensi shift kerja realtime, serta sistem pengajuan dan otorisasi tiket cuti, izin & sakit.',
+      'Pusat manajemen sumber daya manusia (SDM), direktori personil lintas divisi, log presensi shift kerja realtime, serta sistem pengajuan dan otorisasi tiket cuti, izin & sakit.',
     objectives: [
-      'Mengelola direktori identitas personil (NIP, foto/avatar, jabatan, kontak, status kontrak).',
-      'Mencatat dan memonitor aktivitas presensi shift harian (Clock In / Out) serta ketepatan waktu.',
-      'Memproses pengajuan tiket cuti tahunan, izin sakit, dan pelacak kuota sisa cuti secara otomatis.',
+      'Mengelola direktori identitas personil & jabatan.',
+      'Mencatat dan memonitor aktivitas presensi shift harian.',
+      'Memproses pengajuan tiket cuti, izin, dan pelacak kuota cuti secara otomatis.',
     ],
     sopSteps: [
       {
@@ -127,11 +126,11 @@ const ROLE_MODULES: RoleModuleData[] = [
     colorHex: '#f59e0b',
     icon: CreditCard,
     summary:
-      'Pengelolaan likuiditas keuangan komprehensif mencakup rekonsiliasi Kas & Bank, penagihan Piutang Usaha (AR), penjadwalan Hutang Vendor (AP), General Ledger otomatis, dan proyeksi arus kas operasional.',
+      'Pengelolaan likuiditas keuangan komprehensif, mencakup rekonsiliasi kas & bank, penagihan piutang usaha (AR), penjadwalan hutang vendor (AP), neraca konsolidasi, dan arus kas.',
     objectives: [
-      'Memastikan rekonsiliasi penerimaan kas dari seluruh terminal POS cocok dengan rekening koran bank.',
-      'Mengelola jatuh tempo invoice supplier agar terbayar tepat waktu tanpa mengganggu likuiditas kas.',
-      'Menjaga kepatuhan pajak (PPN 11%) dan akurasi pencatatan jurnal debit/kredit General Ledger.',
+      'Rekonsiliasi kas & bank realtime.',
+      'Manajemen jatuh tempo hutang vendor.',
+      'Laporan laba-rugi & neraca konsolidasi.',
     ],
     sopSteps: [
       {
@@ -170,9 +169,9 @@ const ROLE_MODULES: RoleModuleData[] = [
     summary:
       'Tata kelola pengadaan barang dagangan, manajemen relasi vendor terdaftar, penerbitan Purchase Order resmi, evaluasi ketepatan suplai, dan pencatatan penerimaan fisik barang.',
     objectives: [
-      'Mencegah kekosongan persediaan (Out of Stock) dengan pengadaan tepat waktu berbasis data stok kritis.',
-      'Mendapatkan harga pokok pembelian (Cost Price) terbaik melalui evaluasi berkala terhadap kinerja supplier.',
-      'Mencatat dokumen Purchase Order yang terhubung langsung ke pencatatan stok dan hutang usaha.',
+      'Pengadaan barang restock otomatis.',
+      'Verifikasi PO & Persetujuan Direksi.',
+      'Evaluasi kinerja & harga vendor.',
     ],
     sopSteps: [
       {
@@ -209,11 +208,11 @@ const ROLE_MODULES: RoleModuleData[] = [
     colorHex: '#8b5cf6',
     icon: Boxes,
     summary:
-      'Manajemen fisik barang di gudang, penataan rak dan zonasi SKU, pemantauan status stok (Good, Warning, Critical), pencatatan mutasi antar-lokasi, stock opname fisik, serta proses picking & packing.',
+      'Manajemen fisik barang di gudang, penataan rak dan zonasi SKU, pemantauan status stok, pencatatan mutasi antar-lokasi, stock opname fisik, serta proses picking & packing.',
     objectives: [
-      'Menjamin akurasi 100% antara jumlah fisik barang di rak penyimpanan dengan angka stok pada sistem database.',
-      'Mendeteksi dan memperingatkan stok yang mendekati batas minimum (Warning Restock < 10 unit).',
-      'Mengatur alur barang masuk (Inbound) dan barang keluar (Outbound) secara rapi dan terdokumentasi.',
+      'Manajemen fisik barang & zonasi SKU.',
+      'Audit stock opname fisik & selisih.',
+      'Monitoring stok kritis & barang masuk.',
     ],
     sopSteps: [
       {
@@ -250,11 +249,11 @@ const ROLE_MODULES: RoleModuleData[] = [
     colorHex: '#ff7a00',
     icon: Store,
     summary:
-      'Garda depan transaksi ritel berkecepatan tinggi dengan 6 Bar Neon Terminal independen, pemindaian barcode hardware USB/Bluetooth, diskon & PPN 11%, multi-metode pembayaran, dan cetak struk thermal 80mm.',
+      'Garda depan transaksi ritel berkecepatan tinggi dengan 6 Bar Neon Terminal independen, pemindaian barcode, PPN 11%, multi-metode pembayaran, dan cetak struk thermal.',
     objectives: [
-      'Menyajikan proses transaksi checkout yang cepat, responsif, dan akurat kepada pelanggan.',
-      'Mendukung operasional multi-kasir secara simultan melalui 6 terminal neon berstatus realtime.',
-      'Secara otomatis memotong saldo stok produk dan mencatat riwayat transaksi ke database DB_Sales.',
+      'Pemrosesan transaksi kasir cepat.',
+      'Multi-metode pembayaran (QRIS/EDC).',
+      'Cetak struk & pemotongan stok otomatis.',
     ],
     sopSteps: [
       {
@@ -285,24 +284,14 @@ const ROLE_MODULES: RoleModuleData[] = [
   },
 ];
 
+interface HomeModuleProps {
+  onLoginSuccess?: (user: any) => void;
+}
+
 // Array 6 kartu divisi operasional Beranda (modulesList)
 export const modulesList = ROLE_MODULES;
 
-export 
-  const handleDivisionClick = (division: any) => {
-    // 1. Belum login -> Minta PIN
-      if (typeof openAuthModal === 'function') openAuthModal(division.tabKey || division.id);
-      return;
-    }
-    // 2. Owner & Superadmin -> Bebas akses
-    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
-    if (isSuper || currentUser.role === division.roleKey || currentUser.role === division.id) {
-      if (typeof setActiveTab === 'function') setActiveTab(division.tabKey || division.id);
-    } else {
-      alert('Akses Terkunci: Akun Anda tidak memiliki wewenang untuk membuka divisi ini.');
-    }
-  };
-const HomeModule: React.FC = () => {
+const HomeModule: React.FC<HomeModuleProps> = ({ onLoginSuccess }) => {
   const {
     theme,
     language,
@@ -328,11 +317,6 @@ const HomeModule: React.FC = () => {
   const activeRole = ROLE_MODULES.find((r) => r.id === activeRoleId) || ROLE_MODULES[0];
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
-  // QuickAuthModal state untuk proteksi pembukaan modul divisi
-  const [pendingNav, setPendingNav] = useState<ActiveNavModule | null>(null);
-  const [pendingNavTitle, setPendingNavTitle] = useState<string>('');
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-
   const isSuperAdmin = Boolean(
     isSuperAdminAuthenticated || activeUser?.role === 'Super Admin'
   );
@@ -343,15 +327,18 @@ const HomeModule: React.FC = () => {
   };
 
   const handleOpenModule = (targetId: string, targetName: string) => {
-    // Seluruh modul utama (Executive, HR, Finance, Purchasing, Warehouse, POS, Home, Dashboard) terbuka langsung tanpa gembok
-    if (['home', 'dashboard', 'pos', 'executive', 'hr', 'finance', 'purchasing', 'warehouse', 'admin', 'master_data'].includes(targetId)) {
-      setActiveNav(targetId as ActiveNavModule);
+    if (onLoginSuccess) {
+      const defaultUser = {
+        id: targetId,
+        name: targetName,
+        role: targetId === 'executive' ? 'Manager' : targetId === 'pos' ? 'Kasir' : 'Staff',
+        division: targetId,
+      };
+      onLoginSuccess(defaultUser);
       return;
     }
 
-    setPendingNav(targetId as ActiveNavModule);
-    setPendingNavTitle(targetName);
-    setIsAuthModalOpen(true);
+    setActiveNav(targetId as ActiveNavModule);
   };
 
   const activeDivisionInfo =
@@ -374,184 +361,44 @@ const HomeModule: React.FC = () => {
       'hr': 'hr',
       'finance': 'finance',
       'purchasing': 'purchasing',
-      'warehouse': 'inventory',
+      'warehouse': 'warehouse',
       'pos': 'pos'
     };
     const targetTab = tabMap[division.id] || division.id;
-
-    // Jika belum login, paksa buka modal PIN
-    if (!currentUser) {
-      if (typeof openAuthModal === 'function') openAuthModal(targetTab);
-      return;
-    }
-
-    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
-    const roleMap: Record<string, string> = {
-      'executive': 'manager',
-      'hr': 'hr_staff',
-      'finance': 'finance_staff',
-      'purchasing': 'purchasing_staff',
-      'warehouse': 'warehouse_staff',
-      'pos': 'cashier'
-    };
-    const allowed = roleMap[division.id];
-
-    // Hanya izinkan masuk jika role sesuai divisinya atau Superadmin/Owner
-    if (isSuper || currentUser.role === allowed) {
-      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
-    } else {
-      if (typeof openAuthModal === 'function') {
-        openAuthModal(targetTab);
-      } else {
-        alert('Akses Dibatasi: Masukkan PIN otorisasi untuk divisi ini.');
-      }
-    }
+    setActiveNav(targetTab as any);
   };
 
-  
   const handleEnterDivision = (division: any) => {
-    const tabMap: Record<string, string> = {
-      'executive': 'executive',
-      'hr': 'hr',
-      'finance': 'finance',
-      'purchasing': 'purchasing',
-      'warehouse': 'inventory',
-      'pos': 'pos'
-    };
-    const targetTab = tabMap[division.id] || division.id;
-
-    if (!currentUser) {
-      if (typeof openAuthModal === 'function') openAuthModal(targetTab);
-      return;
-    }
-
-    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
-    const roleMap: Record<string, string> = {
-      'executive': 'manager',
-      'hr': 'hr_staff',
-      'finance': 'finance_staff',
-      'purchasing': 'purchasing_staff',
-      'warehouse': 'warehouse_staff',
-      'pos': 'cashier'
-    };
-    const allowed = roleMap[division.id];
-
-    if (isSuper || currentUser.role === allowed) {
-      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
-    } else {
-      if (typeof openAuthModal === 'function') {
-        openAuthModal(targetTab);
-      } else {
-        alert('Akses Dibatasi: Modul ini memerlukan PIN otorisasi divisi terkait.');
-      }
-    }
+    handleOpenDivisionModule(division);
   };
 
-  
   const handleDivisionAuthAccess = (division: any) => {
-    const tabMap: Record<string, string> = {
-      'executive': 'executive',
-      'hr': 'hr',
-      'finance': 'finance',
-      'purchasing': 'purchasing',
-      'warehouse': 'inventory',
-      'pos': 'pos'
-    };
-    const targetTab = tabMap[division.id] || division.id;
-
-    if (!currentUser) {
-      if (typeof openAuthModal === 'function') {
-        openAuthModal(targetTab);
-      } else if (typeof setActiveTab === 'function') {
-        setActiveTab(targetTab);
-      }
-      return;
-    }
-
-    const isSuper = currentUser.role === 'owner' || currentUser.role === 'superadmin';
-    const roleMap: Record<string, string> = {
-      'executive': 'manager',
-      'hr': 'hr_staff',
-      'finance': 'finance_staff',
-      'purchasing': 'purchasing_staff',
-      'warehouse': 'warehouse_staff',
-      'pos': 'cashier'
-    };
-    const allowed = roleMap[division.id];
-
-    if (isSuper || currentUser.role === allowed) {
-      if (typeof setActiveTab === 'function') setActiveTab(targetTab);
-    } else {
-      if (typeof openAuthModal === 'function') {
-        openAuthModal(targetTab);
-      } else {
-        alert('Akses Terkunci: Modul ini memerlukan PIN otorisasi divisi terkait.');
-      }
-    }
+    handleOpenDivisionModule(division);
   };
 
   return (
-    <div id="home-module-container" className="w-full max-w-[1360px] mx-auto flex flex-col space-y-4 xl:space-y-5">
+    <div id="home-module-container" className="min-h-full bg-slate-100 dark:bg-slate-950 p-6 transition-colors w-full max-w-[1360px] mx-auto flex flex-col space-y-4 xl:space-y-5">
       {/* 1. DYNAMIC STORE BRANDING & OPERATIONAL HEADER */}
       <div
-        className={`relative overflow-hidden rounded-2xl border p-4 sm:p-5 transition duration-200 flex items-start sm:items-center justify-between gap-4 ${
-          isLight
-            ? 'bg-white border-slate-200 shadow-sm'
-            : 'bg-[#161b22] border-[#30363d]'
-        }`}
+        className="relative overflow-hidden rounded-2xl p-4 sm:p-5 transition duration-200 flex items-start sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 border-2 border-blue-500 dark:border-slate-800 shadow-sm"
       >
-        {(() => {
-          const companyName =
-            (businessProfile as any)?.companyName?.trim() ||
-            businessProfile?.name?.trim() ||
-            'KHANSA SWALAYAN';
-          const companyAddress =
-            businessProfile?.address?.trim() ||
-            '{businessProfile?.address || "{businessProfile?.address || "{businessProfile?.address || "Alamat Belum Dikonfigurasi"}"}"} No. 1, Paccerakkang, Makassar';
-
-          return (
-            <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-              {businessProfile?.logoUrl ? (
-                <img
-                  src={businessProfile.logoUrl}
-                  alt={companyName}
-                  className="w-12 h-12 object-contain rounded-xl border border-slate-700/50 bg-slate-800/40 p-1 shrink-0 shadow-sm"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 text-white font-black text-xl flex items-center justify-center shrink-0 shadow-md">
-                  {companyName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className="space-y-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap mt-0.5 mb-2">
-                  <div className="bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs px-2.5 py-1 rounded-md inline-flex items-center gap-1.5 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>
-                      {isEn
-                        ? '6 Core Operational Divisions'
-                        : '6 Divisi Operasional Terpadu'}
-                    </span>
-                  </div>
-                  <span className="bg-slate-100 border border-slate-300 text-slate-800 font-bold text-xs px-2.5 py-1 rounded-md dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200">
-                    {businessProfile?.category || (isEn ? 'Modern Retail & Multi-Industry' : '{businessProfile?.industryCategory || "Ritel Modern"}')}
-                  </span>
-                </div>
-                <h1
-                  className={`text-xl sm:text-2xl font-black tracking-tight ${
-                    isLight ? 'text-slate-900' : 'text-white'
-                  }`}
-                  style={{ fontFamily: "'Outfit', 'Plus Jakarta Sans', sans-serif" }}
-                >
-                  {companyName}
-                </h1>
-                <p className="text-slate-900 font-extrabold text-xs mt-0.5 dark:text-white">{businessProfile?.address || "{businessProfile?.address || "{businessProfile?.address || "Alamat Belum Dikonfigurasi"}"}"}</p>
-              </div>
-            </div>
-          );
-        })()}
+        <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+          <img
+            src="/logo-jacs-enterprise.png"
+            alt="JacS Enterprise"
+            className="w-8 h-8 object-contain drop-shadow-md"
+          />
+          <div className="flex flex-col min-w-0">
+            <h1
+              className={`font-bold text-xs tracking-wide ${
+                isLight ? 'text-slate-900' : 'text-white'
+              }`}
+            >
+              JacS Enterprise
+            </h1>
+            <p className="text-[9px] text-slate-500 dark:text-slate-400">Enterprise Software Solution & Technology</p>
+          </div>
+        </div>
       </div>
 
       {/* 2. KARTU BAR NEON INTERAKTIF BERBEDA WARNA DENGAN HOVER GLOW REACTIVE */}
@@ -587,7 +434,7 @@ const HomeModule: React.FC = () => {
               onMouseEnter={() => setHoveredRoleId(role.id)}
               onMouseLeave={() => setHoveredRoleId(null)}
               style={activeStyle}
-              className="group relative p-4 xl:p-5 rounded-2xl text-left transition-all duration-150 ease-out cursor-pointer overflow-hidden flex flex-col justify-between h-full min-h-[165px] xl:min-h-[185px] focus:outline-hidden border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+              className="group relative p-4 xl:p-5 rounded-2xl text-left transition-all duration-150 ease-out cursor-pointer overflow-hidden flex flex-col justify-between h-full min-h-[165px] xl:min-h-[185px] focus:outline-hidden bg-white dark:bg-slate-900 dark:border-slate-800"
             >
               {/* Top Accent Neon Bar Strip */}
               <div
@@ -600,21 +447,13 @@ const HomeModule: React.FC = () => {
 
               {/* Upper Content Group */}
               <div className="w-full space-y-2.5 xl:space-y-3">
-                {/* Icon & Gembok Terkunci (Tanpa Badge Angka 01-06) */}
+                {/* Icon Solid Tanpa Border Box */}
                 <div className="flex items-center justify-between w-full pt-0.5">
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="w-9 h-9 xl:w-10 xl:h-10 rounded-xl flex items-center justify-center transition-transform duration-200 group-hover:scale-105 shrink-0"
-                      style={{
-                        backgroundColor: `${role.colorHex}20`,
-                        border: `1px solid ${role.colorHex}45`,
-                      }}
-                    >
-                      <Icon
-                        className="w-4 h-4 xl:w-5 xl:h-5"
-                        style={{ color: role.colorHex }}
-                      />
-                    </div>
+                  <div className="flex items-center gap-2.5">
+                    <Icon
+                      className="w-7 h-7 xl:w-8 xl:h-8 shrink-0 transition-transform duration-200 group-hover:scale-110"
+                      style={{ color: role.colorHex }}
+                    />
                     {isLocked && (
                       <span
                         className="bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[10px] px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 dark:bg-amber-950 dark:text-amber-300"
@@ -629,37 +468,16 @@ const HomeModule: React.FC = () => {
 
                 {/* Clean Role Title & Sub-judul */}
                 <div className="space-y-1">
-                  <h3
-                    className="text-base xl:text-lg font-semibold leading-snug transition-colors line-clamp-1"
-                    style={{
-                      color: isSelected ? role.colorHex : isLight ? '#0F172A' : '#e6edf3',
-                    }}
-                  >
+                  <h3 className="text-base xl:text-lg font-bold leading-snug line-clamp-1 text-slate-900 dark:text-white">
                     {divisionInfo.name}
                   </h3>
-                  <p className="text-slate-900 font-bold text-xs mt-1 dark:text-slate-200">{mod.description}</p>
+                  <p className="text-slate-700 dark:text-slate-300 font-medium text-xs mt-1 leading-snug">{mod.description}</p>
                 </div>
               </div>
 
-              {/* Bottom Action Links: Selalu rata di dasar kartu */}
-              <div className="w-full pt-2.5 xl:pt-3 mt-2.5 xl:mt-3 border-t border-slate-200 dark:border-gray-700/30 flex items-center justify-between text-xs xl:text-sm">
-                <span className="text-slate-500 font-mono text-[11px] dark:text-slate-400">
-                  {isEn ? 'Operational Juklak & SOP' : 'Juklak & SOP Operasional'}
-                </span>
-                <button
-                  type="button"
-                  id={`btn-home-view-sop-${role.id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleCardClick(role);
-                  }}
-                  className="text-cyan-600 hover:text-cyan-700 font-bold dark:text-cyan-400 dark:hover:text-cyan-300 flex items-center gap-1 transition-colors cursor-pointer py-0.5"
-                  title={isEn ? 'Buka Modul Guidelines' : 'Lihat Juklak & SOP Operasional'}
-                >
-                  <span className="hover:underline">{isEn ? 'Open Module' : 'Buka Modul'}</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+                {/* Bottom Action Info: Non-interactive Operational */}
+                <div className="w-full pt-2.5 xl:pt-3 mt-2.5 xl:mt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs xl:text-sm">
+                </div>
             </div>
           );
         })}
@@ -699,19 +517,10 @@ const HomeModule: React.FC = () => {
               }`}
             >
               <div className="flex items-center gap-3.5">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    backgroundColor: `${activeRole.colorHex}25`,
-                    border: `1.5px solid ${activeRole.colorHex}60`,
-                    boxShadow: `0 0 16px ${activeRole.colorHex}40`,
-                  }}
-                >
-                  {React.createElement(activeRole.icon, {
-                    className: 'w-6 h-6',
-                    style: { color: activeRole.colorHex },
-                  })}
-                </div>
+                {React.createElement(activeRole.icon, {
+                  className: 'w-8 h-8 shrink-0 drop-shadow-xs',
+                  style: { color: activeRole.colorHex },
+                })}
                 <div>
                   <div className="flex items-center gap-2">
                     <span
@@ -751,36 +560,6 @@ const HomeModule: React.FC = () => {
               </button>
             </div>
 
-            {/* Quick Switch Pills between the 6 Roles inside modal */}
-            <div
-              className={`px-4 sm:px-6 py-2 border-b flex gap-1.5 overflow-x-auto text-xs ${
-                isLight ? 'border-slate-200 bg-white' : 'border-[#30363d] bg-[#0d1117]'
-              }`}
-            >
-              {ROLE_MODULES.map((r) => {
-                const active = r.id === activeRole.id;
-                const rInfo = DIVISIONS_TRANSLATIONS[language][r.id] || { name: r.title };
-                return (
-                  <button
-                    key={r.id}
-                    onClick={() => setActiveNeonCard('home', r.id)}
-                    className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
-                      active
-                        ? 'text-white font-bold shadow-sm'
-                        : isLight
-                        ? 'text-slate-600 hover:bg-slate-100'
-                        : 'text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]'
-                    }`}
-                    style={{
-                      backgroundColor: active ? r.colorHex : 'transparent',
-                    }}
-                  >
-                    <span className="font-mono text-[10px]">{r.order}</span>
-                    <span>{rInfo.name}</span>
-                  </button>
-                );
-              })}
-            </div>
 
             {/* Modal Body (Scrollable) */}
             <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1 text-xs sm:text-sm leading-relaxed">
@@ -836,83 +615,29 @@ const HomeModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* 2. SOP Alur Kerja Terstruktur */}
-              <div className="space-y-2.5">
-                <h4
-                  className={`text-xs uppercase font-bold tracking-wider flex items-center gap-1.5 ${
-                    isLight ? 'text-slate-900' : 'text-gray-200'
-                  }`}
-                >
-                  <BookOpen className="w-4 h-4" style={{ color: activeRole.colorHex }} />
-                  <span>Standard Operating Procedure (SOP) Langkah Kerja</span>
+              {/* 2. SOP & Panduan Operasional */}
+              <div className="space-y-4">
+                <h4 className={`text-xs uppercase font-bold tracking-wider ${isLight ? 'text-slate-900' : 'text-gray-200'}`}>
+                  Panduan Operasional & Prosedur
                 </h4>
-                <div className="space-y-2">
-                  {activeRole.sopSteps.map((step) => (
-                    <div
-                      key={step.step}
-                      className={`p-3.5 rounded-xl border flex items-start gap-3 transition ${
-                        isLight
-                          ? 'bg-slate-50 border-slate-200'
-                          : 'bg-[#0d1117] border-[#30363d]'
-                      }`}
-                    >
-                      <div
-                        className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs font-mono shrink-0 shadow-xs"
-                        style={{
-                          backgroundColor: `${activeRole.colorHex}25`,
-                          color: activeRole.colorHex,
-                          border: `1px solid ${activeRole.colorHex}45`,
-                        }}
-                      >
-                        {step.step}
-                      </div>
-                      <div>
-                        <h5
-                          className="font-bold text-xs sm:text-sm"
-                          style={{ color: activeRole.colorHex }}
-                        >
-                          {step.title}
-                        </h5>
-                        <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-[#8b949e]'}`}>
-                          {step.desc}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                <div className="space-y-4">
+                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                    <h5 className="font-bold text-sm mb-2" style={{color: activeRole.colorHex}}>Prosedur Operasional Standar (SOP)</h5>
+                    <ul className="text-xs list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-400">
+                      {activeRole.sopSteps.map(step => <li key={step.step}><strong>{step.title}:</strong> {step.desc}</li>)}
+                    </ul>
+                   </div>
+                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                    <h5 className="font-bold text-sm mb-2" style={{color: activeRole.colorHex}}>Panduan Teknis & Fitur</h5>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">Gunakan fitur utama melalui dashboard {activeRole.title}. Pastikan data diinput secara akurat pada setiap periode kerja untuk menjamin validitas pelaporan.</p>
+                   </div>
+                   <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50">
+                    <h5 className="font-bold text-sm mb-2 text-rose-700 dark:text-rose-400">Keamanan & Kepatuhan</h5>
+                    <p className="text-xs text-rose-800/70 dark:text-rose-200/70">Segera laporkan anomali sistem, selisih kas, atau ketidaksesuaian data ke pimpinan eksekutif. Hindari manipulasi data tanpa otorisasi sistem.</p>
+                   </div>
                 </div>
               </div>
 
-              {/* 3. Relasi Sinkronisasi Database */}
-              <div className="space-y-2">
-                <h4
-                  className={`text-xs uppercase font-bold tracking-wider flex items-center gap-1.5 ${
-                    isLight ? 'text-slate-900' : 'text-gray-200'
-                  }`}
-                >
-                  <Database className="w-4 h-4 text-[#00f2fe]" />
-                  <span>Integrasi Data Google Sheets & Modul Lain</span>
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {activeRole.dataIntegration.map((integ, idx) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-xl border ${
-                        isLight
-                          ? 'bg-slate-50 border-slate-200'
-                          : 'bg-[#0d1117] border-[#30363d]'
-                      }`}
-                    >
-                      <div className="font-mono font-bold text-xs text-cyan-400 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                        {integ.target}
-                      </div>
-                      <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-[#8b949e]'}`}>
-                        {integ.desc}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
 
             {/* Modal Footer */}
@@ -928,62 +653,15 @@ const HomeModule: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsDetailModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl text-gray-400 hover:text-white transition cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition cursor-pointer shadow-sm"
                 >
-                  {isEn ? 'Close' : 'Tutup'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOpenModule(activeRole.id, activeDivisionInfo.name);
-                    if (isSuperAdmin) {
-                      setIsDetailModalOpen(false);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl text-slate-950 font-bold cursor-pointer shadow-md transition hover:brightness-110 flex items-center gap-1.5"
-                  style={{ backgroundColor: activeRole.colorHex }}
-                >
-                  {['executive', 'hr', 'finance', 'warehouse', 'purchasing'].includes(activeRole.id) && !isSuperAdmin && (
-                    <Lock className="w-4 h-4 text-slate-950 shrink-0" />
-                  )}
-                  <span>{isEn ? `Open ${activeDivisionInfo.name}` : `Buka Modul ${activeDivisionInfo.name}`}</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isEn ? 'Close Guide' : 'Tutup Panduan'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Modal Otorisasi Ringkas Akses Modul */}
-      <QuickAuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => {
-          setIsAuthModalOpen(false);
-          setPendingNav(null);
-        }}
-        onSuccess={() => {
-          if (pendingNav) {
-            unlockModule(pendingNav);
-            setActiveNav(pendingNav);
-            setPendingNav(null);
-          }
-          setIsAuthModalOpen(false);
-          setIsDetailModalOpen(false);
-        }}
-        moduleTitle={pendingNavTitle}
-        targetModule={pendingNav || undefined}
-        requireMasterPassword={pendingNav === 'admin'}
-        subtitle={
-          pendingNav === 'admin'
-            ? (isEn
-                ? 'PIN (1234) or Master Password to access Super Admin'
-                : 'Masukkan PIN (1234) atau Sandi Master Super Admin')
-            : isEn
-            ? `Enter PIN (1234) to access ${pendingNavTitle}`
-            : `Masukkan PIN (1234) untuk mengakses ${pendingNavTitle}`
-        }
-      />
     </div>
   );
 };

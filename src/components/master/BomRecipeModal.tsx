@@ -528,7 +528,9 @@ export const BomRecipeModal: React.FC<BomRecipeModalProps> = ({
                   }`}
                 >
                   <option value="gr">Gram (gr)</option>
+                  <option value="kg">Kilogram (Kg)</option>
                   <option value="ml">Mililiter (ml)</option>
+                  <option value="Liter">Liter (L)</option>
                   <option value="pcs">Pieces (pcs)</option>
                   <option value="slice">Slice / Lembar</option>
                   <option value="porsi">Porsi</option>

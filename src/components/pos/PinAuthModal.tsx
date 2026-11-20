@@ -224,17 +224,17 @@ export const PinAuthModal: React.FC = () => {
     >
       <div
         id="modal-division-auth-card"
-        className={`w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl border shadow-[0_25px_60px_rgba(0,0,0,0.85)] relative overflow-hidden transition-all ${
+        className={`w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl border relative overflow-hidden transition-all ${
           isLight
-            ? 'bg-white border-slate-200 text-slate-800'
-            : 'bg-[#161b22] border-[#30363d] text-white'
+            ? 'bg-white border-cyan-500/70 shadow-[0_0_24px_rgba(6,182,212,0.22)] text-slate-800'
+            : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_24px_rgba(6,182,212,0.12)] text-white'
         } ${isShake ? 'animate-bounce' : 'animate-in zoom-in-95 duration-150'}`}
       >
         {/* Tombol Tutup Pojok Kanan Atas */}
         <button
           type="button"
           onClick={closePinAuth}
-          className={`absolute top-4 right-4 z-10 p-2 rounded-xl transition cursor-pointer ${
+          className={`absolute top-4 right-4 z-10 p-2 rounded-xl transition cursor-pointer active:scale-[0.99] ${
             isLight
               ? 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
               : 'text-gray-400 hover:text-white hover:bg-[#21262d]'
@@ -254,15 +254,15 @@ export const PinAuthModal: React.FC = () => {
             <JacSLogo size="md" imgOnly={true} className="shrink-0 drop-shadow-md" />
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black tracking-tight leading-tight">
+                <h2 className="text-base sm:text-lg font-medium tracking-tight leading-tight">
                   Login &amp; Switch Akun Karyawan
                 </h2>
-                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-normal bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
                   <Shield className="w-3 h-3 text-cyan-400" />
                   <span>MASTER DATA SDM</span>
                 </span>
               </div>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className="text-xs text-gray-400 mt-0.5 font-normal">
                 Validasi kata sandi &amp; PIN staf divisi terintegrasi langsung dengan Master Data Karyawan
               </p>
             </div>
@@ -288,11 +288,11 @@ export const PinAuthModal: React.FC = () => {
                       key={tab.id}
                       type="button"
                       onClick={() => setSelectedDivision(tab.id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer shrink-0 ${
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-normal transition whitespace-nowrap cursor-pointer shrink-0 active:scale-[0.99] ${
                         isTabActive
                           ? isLight
-                            ? 'bg-cyan-600 text-white shadow-sm'
-                            : 'bg-cyan-500 text-slate-950 font-black shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                            ? 'bg-cyan-600 text-white shadow-sm font-medium'
+                            : 'bg-cyan-500 text-slate-950 font-medium shadow-[0_0_12px_rgba(6,182,212,0.4)]'
                           : isLight
                           ? 'bg-white text-slate-700 hover:bg-slate-200/80 border border-slate-200'
                           : 'bg-[#161b22] text-gray-300 hover:bg-[#21262d] border border-[#30363d]'
@@ -308,19 +308,19 @@ export const PinAuthModal: React.FC = () => {
 
             {/* List Akun Karyawan Berdasarkan Divisi */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-gray-400 font-semibold px-1 mb-1">
+              <div className="flex items-center justify-between text-[11px] text-gray-400 font-mono font-normal px-1 mb-1">
                 <span>PILIH AKUN STAF DIVISI ({filteredUsers.length}):</span>
-                <span className="text-[10px] text-cyan-400">Klik untuk otentikasi</span>
+                <span className="text-[10px] text-cyan-400 font-normal">Klik untuk otentikasi</span>
               </div>
 
-              {filteredUsers.map((user) => {
+              {filteredUsers.map((user, uIdx) => {
                 const isSelected = selectedUser?.user_id === user.user_id;
                 const isCurrentActive = activeUser?.user_id === user.user_id;
                 const empInfo = getEmployeeInfo(user);
 
                 return (
                   <div
-                    key={user.user_id}
+                    key={user.user_id || (user as any).id || `pin-user-${uIdx}`}
                     onClick={() => {
                       setSelectedUser(user);
                       setPinInput('');
@@ -447,12 +447,12 @@ export const PinAuthModal: React.FC = () => {
                       </div>
                     )}
                     <div className="min-w-0">
-                      <p className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-wider">
+                      <p className="text-[10px] text-cyan-400 font-mono font-normal uppercase tracking-wider">
                         Verifikasi Akun Karyawan
                       </p>
-                      <h4 className="text-xs sm:text-sm font-black truncate">{selectedUser.name}</h4>
-                      <p className="text-[10px] text-gray-400 font-medium">
-                        Role: <strong>{selectedUser.role}</strong>
+                      <h4 className="text-xs sm:text-sm font-medium truncate">{selectedUser.name}</h4>
+                      <p className="text-[10px] text-gray-400 font-normal">
+                        Role: <span className="font-medium text-gray-300">{selectedUser.role}</span>
                       </p>
                     </div>
                   </>
@@ -462,8 +462,8 @@ export const PinAuthModal: React.FC = () => {
                       <KeyRound className="w-6 h-6" />
                     </div>
                     <div>
-                      <h4 className="text-xs sm:text-sm font-bold">Autentikasi PIN Cepat</h4>
-                      <p className="text-[10px] text-gray-400">
+                      <h4 className="text-xs sm:text-sm font-medium">Autentikasi PIN Cepat</h4>
+                      <p className="text-[10px] text-gray-400 font-normal">
                         Ketik 4 digit PIN atau pilih akun di samping
                       </p>
                     </div>
@@ -492,7 +492,7 @@ export const PinAuthModal: React.FC = () => {
 
               {/* Error message badge */}
               {errorMessage && (
-                <div className="mb-3 text-center text-xs font-semibold text-rose-400 bg-rose-500/10 border border-rose-500/30 py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 animate-fadeIn">
+                <div className="mb-3 text-center text-xs font-normal text-rose-400 bg-rose-500/10 border border-rose-500/30 py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 animate-fadeIn">
                   <ShieldAlert className="w-4 h-4 shrink-0" />
                   <span>{errorMessage}</span>
                 </div>
@@ -505,7 +505,7 @@ export const PinAuthModal: React.FC = () => {
                     key={num}
                     type="button"
                     onClick={() => handleKeyPress(num)}
-                    className={`h-12 sm:h-13 rounded-2xl font-black text-lg border transition cursor-pointer active:scale-95 ${
+                    className={`h-12 sm:h-13 rounded-2xl font-mono font-normal text-base border transition cursor-pointer active:scale-[0.99] ${
                       isLight
                         ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 shadow-xs'
                         : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d] hover:border-cyan-400/50 shadow-xs'
@@ -517,7 +517,7 @@ export const PinAuthModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleClear}
-                  className={`h-12 sm:h-13 rounded-2xl text-xs font-bold transition flex items-center justify-center border cursor-pointer ${
+                  className={`h-12 sm:h-13 rounded-2xl text-xs font-normal transition flex items-center justify-center border cursor-pointer active:scale-[0.99] ${
                     isLight
                       ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
                       : 'bg-[#21262d]/50 hover:bg-[#21262d] text-gray-400 hover:text-white border-[#30363d]'
@@ -528,7 +528,7 @@ export const PinAuthModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleKeyPress('0')}
-                  className={`h-12 sm:h-13 rounded-2xl font-black text-lg border transition cursor-pointer active:scale-95 ${
+                  className={`h-12 sm:h-13 rounded-2xl font-mono font-normal text-base border transition cursor-pointer active:scale-[0.99] ${
                     isLight
                       ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 shadow-xs'
                       : 'bg-[#21262d] hover:bg-[#30363d] text-white border-[#30363d] hover:border-cyan-400/50 shadow-xs'
@@ -539,7 +539,7 @@ export const PinAuthModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleDelete}
-                  className={`h-12 sm:h-13 rounded-2xl transition flex items-center justify-center border cursor-pointer active:scale-95 ${
+                  className={`h-12 sm:h-13 rounded-2xl transition flex items-center justify-center border cursor-pointer active:scale-[0.99] ${
                     isLight
                       ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-rose-600 border-slate-300'
                       : 'bg-[#21262d]/50 hover:bg-[#21262d] text-gray-400 hover:text-rose-400 border-[#30363d]'
