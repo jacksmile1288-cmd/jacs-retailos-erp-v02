@@ -18,6 +18,8 @@ import {
   Loader2,
   ShieldCheck,
   Sparkles,
+  ChevronDown,
+  MonitorPlay,
 } from 'lucide-react';
 import { User } from '../../types';
 import { signSessionPayload } from '../../utils/securityUtils';
@@ -86,6 +88,10 @@ const GATEWAY_MODULES: ModuleCardConfig[] = [
   },
 ];
 
+// Default latar lorong swalayan modern (dapat ditimpa foto toko sendiri dari SuperAdmin)
+const DEFAULT_SUPERMARKET_BG =
+  'https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1920&q=80';
+
 export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) => {
   const {
     showToast,
@@ -99,7 +105,13 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     theme,
     toggleTheme,
     openAiAssistant,
+    businessProfile,
   } = useApp();
+
+  // State Interactive 3D Brand Cover
+  const [isCoverVisible, setIsCoverVisible] = useState<boolean>(true);
+  const [tiltCoords, setTiltCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const coverPointerStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const [showSuperAdminModal, setShowSuperAdminModal] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState<string>('pos');
@@ -118,6 +130,43 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
   const [focusedField, setFocusedField] = useState<'username' | 'pin' | null>(null);
 
   const pinInputRef = useRef<HTMLInputElement>(null);
+
+  // Judul Utama Bersih: KHANSA SWALAYAN
+  const primaryStoreTitle = 'KHANSA';
+  const secondaryStoreTitle = 'SWALAYAN';
+  const displayStoreLabel = 'KHANSA SWALAYAN';
+
+  const customCoverBgUrl =
+    (businessProfile as any)?.welcomeCoverImageUrl ||
+    (businessProfile as any)?.storePhotoUrl ||
+    DEFAULT_SUPERMARKET_BG;
+
+  const dismissWelcomeCover = () => {
+    if (!isCoverVisible) return;
+    setIsCoverVisible(false);
+    coverPointerStartRef.current = null;
+    setTimeout(() => {
+      pinInputRef.current?.focus();
+    }, 320);
+  };
+
+  const handleCoverMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const { innerWidth, innerHeight } = window;
+    const normX = (e.clientX / innerWidth - 0.5) * 2;
+    const normY = (e.clientY / innerHeight - 0.5) * 2;
+    setTiltCoords({ x: normX * 6, y: -normY * 6 });
+
+    if (!coverPointerStartRef.current) {
+      coverPointerStartRef.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    const deltaX = Math.abs(e.clientX - coverPointerStartRef.current.x);
+    const deltaY = Math.abs(e.clientY - coverPointerStartRef.current.y);
+    if (deltaX + deltaY > 38) {
+      dismissWelcomeCover();
+    }
+  };
 
   const selectedModule =
     GATEWAY_MODULES.find((m) => m.id === selectedModuleId) || GATEWAY_MODULES[3];
@@ -313,9 +362,234 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
       : 'translate-x-0';
 
   return (
-    <div className={`relative h-screen w-screen overflow-hidden text-slate-900 dark:text-white transition-colors duration-300 flex flex-col justify-between font-sans select-none ${
-      theme === 'light' ? 'bg-gradient-to-br from-[#F8FBFF] via-[#EDF6FF] to-[#F0FDFA]' : 'bg-slate-100 dark:bg-[#070d1e]'
-    }`}>
+    <div
+      className={`relative h-screen w-screen overflow-hidden text-slate-900 dark:text-white transition-colors duration-300 flex flex-col justify-between font-sans select-none ${
+        theme === 'light'
+          ? 'bg-gradient-to-br from-[#F8FBFF] via-[#EDF6FF] to-[#F0FDFA]'
+          : 'bg-slate-100 dark:bg-[#070d1e]'
+      }`}
+    >
+      {/* ========================================================================
+          INTERACTIVE 3D BRAND COVER — KHANSA SWALAYAN
+      ======================================================================== */}
+      <div
+        id="welcome-3d-brand-cover"
+        onClick={dismissWelcomeCover}
+        onMouseMove={handleCoverMouseMove}
+        onTouchStart={dismissWelcomeCover}
+        className={`fixed inset-0 z-[90] flex flex-col justify-between p-5 sm:p-8 cursor-pointer transition-all duration-700 ease-out overflow-hidden bg-[#030b1a] ${
+          isCoverVisible
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 -translate-y-full pointer-events-none'
+        }`}
+      >
+        {/* 1. Foto Latar Lorong Swalayan Samar (Blur + Vignette) */}
+        <div
+          className="pointer-events-none absolute inset-0 bg-cover bg-center scale-105 blur-[6px] opacity-45 transition-transform duration-700"
+          style={{ backgroundImage: `url(${customCoverBgUrl})` }}
+        />
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(circle at 50% 48%, rgba(6, 40, 75, 0.55) 0%, rgba(3, 14, 34, 0.85) 65%, rgba(2, 8, 20, 0.96) 100%)',
+          }}
+        />
+
+        {/* Lantai Grid Digital Cyber-Cyan di Bagian Bawah */}
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-56 opacity-45"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, rgba(34,211,238,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(34,211,238,0.22) 1px, transparent 1px)',
+            backgroundSize: '44px 28px',
+            transform: 'perspective(500px) rotateX(62deg)',
+            transformOrigin: 'bottom',
+            maskImage: 'linear-gradient(to top, black 25%, transparent 95%)',
+          }}
+        />
+
+        {/* Partikel Cahaya & Bintang Berpendar */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute top-[22%] left-[18%] w-2 h-2 rounded-full bg-cyan-300 shadow-[0_0_12px_#22d3ee] animate-ping" />
+          <div className="absolute top-[28%] right-[22%] w-1.5 h-1.5 rounded-full bg-emerald-300 shadow-[0_0_10px_#34d399] animate-pulse" />
+          <div className="absolute bottom-[32%] left-[26%] w-1.5 h-1.5 rounded-full bg-sky-300 shadow-[0_0_10px_#38bdf8] animate-pulse" />
+          <div className="absolute bottom-[28%] right-[28%] w-2 h-2 rounded-full bg-teal-300 shadow-[0_0_12px_#2dd4bf] animate-ping" />
+        </div>
+
+        {/* 2. SUDUT KIRI ATAS: Watermark Tunggal Logo + Nama Developer */}
+        <div className="relative z-20 flex items-center justify-between">
+          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-950/50 border border-cyan-400/25 backdrop-blur-md shadow-lg">
+            <img
+              src="/logo-jacs-enterprise.png"
+              alt="JacS Enterprise"
+              className="h-7 w-7 object-contain rounded"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = 'none';
+              }}
+            />
+            <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm tracking-wider text-white/95">
+              JacS Enterprise
+            </span>
+          </div>
+
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-emerald-300 text-[11px] font-mono backdrop-blur-md">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <span>POS READY</span>
+          </div>
+        </div>
+
+        {/* 3. TENGAH: Kartu Kaca 3D + Keranjang Belanja (Kiri) + Troli Belanja (Kanan) + Cincin Orbital */}
+        <div className="relative z-10 flex-1 flex items-center justify-center px-2">
+          <div
+            className="relative w-full max-w-4xl flex items-center justify-center transition-transform duration-200 ease-out"
+            style={{
+              transform: `perspective(1200px) rotateY(${tiltCoords.x}deg) rotateX(${tiltCoords.y}deg)`,
+            }}
+          >
+            {/* Cincin Orbital Hologram Cyber-Cyan & Emerald Mengelilingi Dasar Kartu */}
+            <div
+              className="pointer-events-none absolute -bottom-7 w-[104%] max-w-[920px] h-28 rounded-[100%] border-2 border-cyan-300/70"
+              style={{
+                boxShadow:
+                  '0 0 35px rgba(34,211,238,0.65), inset 0 0 25px rgba(16,185,129,0.55)',
+              }}
+            />
+            <div
+              className="pointer-events-none absolute -bottom-9 w-[96%] max-w-[850px] h-24 rounded-[100%] border border-emerald-400/60"
+              style={{
+                boxShadow: '0 0 30px rgba(16,185,129,0.55)',
+              }}
+            />
+
+            {/* Bingkai Utama Glassmorphism 3D */}
+            <div
+              className="relative w-full max-w-3xl rounded-[2rem] border-2 border-cyan-300/75 bg-gradient-to-b from-sky-950/65 via-slate-900/70 to-emerald-950/65 backdrop-blur-xl px-6 py-12 sm:px-14 sm:py-16 text-center"
+              style={{
+                boxShadow:
+                  '0 25px 70px -10px rgba(0, 0, 0, 0.85), 0 0 45px rgba(56, 189, 248, 0.45), inset 0 0 30px rgba(34, 211, 238, 0.22)',
+              }}
+            >
+              {/* Kilau Lens Flare di Puncak Bingkai */}
+              <div className="pointer-events-none absolute -top-1.5 left-1/2 -translate-x-1/2 w-56 h-3 rounded-full bg-cyan-200 blur-md opacity-90" />
+              <div className="pointer-events-none absolute -top-[2px] left-1/2 -translate-x-1/2 w-72 h-[3px] bg-gradient-to-r from-transparent via-white to-transparent" />
+
+              {/* VISUAL 3D KIRI: Keranjang Belanja Biru Berisi Bahan Pokok */}
+              <div className="hidden md:flex flex-col items-center justify-center absolute -left-24 bottom-2 w-44 h-44 pointer-events-none drop-shadow-[0_18px_24px_rgba(0,0,0,0.85)]">
+                <svg viewBox="0 0 200 180" className="w-full h-full overflow-visible">
+                  <defs>
+                    <linearGradient id="basketBlue" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#38bdf8" />
+                      <stop offset="50%" stopColor="#0284c7" />
+                      <stop offset="100%" stopColor="#1e3a8a" />
+                    </linearGradient>
+                    <linearGradient id="breadGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#fbbf24" />
+                      <stop offset="100%" stopColor="#b45309" />
+                    </linearGradient>
+                    <linearGradient id="milkGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ffffff" />
+                      <stop offset="100%" stopColor="#cbd5e1" />
+                    </linearGradient>
+                  </defs>
+                  {/* Roti Baguette */}
+                  <ellipse cx="62" cy="68" rx="16" ry="36" transform="rotate(-24 62 68)" fill="url(#breadGrad)" stroke="#fde68a" strokeWidth="1.5" />
+                  {/* Sayuran Hijau */}
+                  <circle cx="95" cy="64" r="22" fill="#22c55e" />
+                  <circle cx="84" cy="58" r="14" fill="#4ade80" />
+                  <circle cx="106" cy="60" r="15" fill="#16a34a" />
+                  {/* Botol Susu */}
+                  <rect x="116" y="42" width="26" height="52" rx="8" fill="url(#milkGrad)" />
+                  <rect x="121" y="34" width="16" height="10" rx="3" fill="#2563eb" />
+                  {/* Tomat Merah */}
+                  <circle cx="96" cy="84" r="15" fill="#ef4444" />
+                  <circle cx="91" cy="79" r="4" fill="#fca5a5" opacity="0.7" />
+                  {/* Badan Keranjang Belanja 3D */}
+                  <polygon points="32,84 168,84 152,148 48,148" fill="url(#basketBlue)" stroke="#7dd3fc" strokeWidth="2.5" strokeLinejoin="round" />
+                  <rect x="26" y="78" width="148" height="10" rx="5" fill="#0ea5e9" stroke="#bae6fd" strokeWidth="1.5" />
+                  {/* Kisi-kisi Keranjang */}
+                  <line x1="60" y1="96" x2="66" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
+                  <line x1="82" y1="96" x2="85" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
+                  <line x1="104" y1="96" x2="104" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
+                  <line x1="126" y1="96" x2="123" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
+                  <line x1="146" y1="96" x2="140" y2="138" stroke="#0c4a6e" strokeWidth="5" strokeLinecap="round" />
+                </svg>
+              </div>
+
+              {/* VISUAL 3D KANAN: Troli Belanja Krom Perak Berkilau */}
+              <div className="hidden md:flex flex-col items-center justify-center absolute -right-24 bottom-2 w-44 h-44 pointer-events-none drop-shadow-[0_18px_24px_rgba(0,0,0,0.85)]">
+                <svg viewBox="0 0 200 180" className="w-full h-full overflow-visible">
+                  <defs>
+                    <linearGradient id="chromeMetal" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#ffffff" />
+                      <stop offset="45%" stopColor="#bae6fd" />
+                      <stop offset="100%" stopColor="#38bdf8" />
+                    </linearGradient>
+                  </defs>
+                  {/* Gagang Dorong Troli */}
+                  <path d="M148 42 L172 34 L160 72" fill="none" stroke="url(#chromeMetal)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+                  <rect x="166" y="30" width="16" height="8" rx="4" fill="#0284c7" />
+                  {/* Keranjang Troli */}
+                  <polygon points="36,64 156,56 142,114 52,114" fill="rgba(56,189,248,0.14)" stroke="url(#chromeMetal)" strokeWidth="4.5" strokeLinejoin="round" />
+                  <line x1="42" y1="82" x2="151" y2="76" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  <line x1="47" y1="98" x2="146" y2="94" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  <line x1="68" y1="62" x2="74" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  <line x1="98" y1="60" x2="100" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  <line x1="128" y1="58" x2="124" y2="114" stroke="url(#chromeMetal)" strokeWidth="2.5" />
+                  {/* Rangka Bawah & Roda */}
+                  <path d="M56 114 L48 134 L144 134" fill="none" stroke="url(#chromeMetal)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="62" cy="146" r="10" fill="#0f172a" stroke="#7dd3fc" strokeWidth="3.5" />
+                  <circle cx="132" cy="146" r="10" fill="#0f172a" stroke="#7dd3fc" strokeWidth="3.5" />
+                </svg>
+              </div>
+
+              {/* JUDUL UTAMA 3D BERSIH: KHANSA SWALAYAN */}
+              <div className="space-y-1 sm:space-y-2">
+                <h1
+                  className="font-['Plus_Jakarta_Sans'] font-black text-5xl sm:text-7xl md:text-8xl tracking-tight uppercase leading-none bg-gradient-to-b from-white via-slate-100 to-sky-300 bg-clip-text text-transparent"
+                  style={{
+                    filter:
+                      'drop-shadow(0 3px 0 #475569) drop-shadow(0 6px 0 #1e293b) drop-shadow(0 14px 22px rgba(0,0,0,0.85))',
+                  }}
+                >
+                  {primaryStoreTitle}
+                </h1>
+
+                <div
+                  className="font-['Plus_Jakarta_Sans'] font-black text-4xl sm:text-6xl md:text-7xl tracking-tight uppercase leading-none bg-gradient-to-b from-lime-200 via-emerald-400 to-emerald-600 bg-clip-text text-transparent"
+                  style={{
+                    filter:
+                      'drop-shadow(0 3px 0 #065f46) drop-shadow(0 6px 0 #022c22) drop-shadow(0 14px 22px rgba(0,0,0,0.85))',
+                  }}
+                >
+                  {secondaryStoreTitle}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. BAWAH: Panah Ganda & Pil Tombol Masuk Interaktif */}
+        <div className="relative z-20 flex flex-col items-center gap-1.5 pb-1">
+          <div className="flex flex-col items-center -space-y-3 text-cyan-300 animate-bounce">
+            <ChevronDown className="w-6 h-6 stroke-[3]" />
+            <ChevronDown className="w-6 h-6 stroke-[3] text-white" />
+          </div>
+
+          <div
+            className="px-7 py-2.5 rounded-full bg-gradient-to-r from-sky-900/90 via-cyan-800/90 to-sky-900/90 border-2 border-cyan-300/80 backdrop-blur-md"
+            style={{
+              boxShadow:
+                '0 0 28px rgba(56, 189, 248, 0.65), inset 0 1px 4px rgba(255,255,255,0.4)',
+            }}
+          >
+            <span className="font-['Plus_Jakarta_Sans'] font-semibold text-xs sm:text-sm text-white tracking-wide">
+              Gerakkan kursor atau ketuk layar untuk masuk ke sistem kasir
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Bioluminescent Glass Aquarium Visual Background (Light Mode Only) */}
       {theme === 'light' && (
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
@@ -337,6 +611,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
           </div>
         </div>
       )}
+
       {/* Ambient Radial Glow Background */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
         <div
@@ -375,13 +650,26 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
               JacS Enterprise
             </span>
             <p className="text-[10px] text-cyan-600 dark:text-cyan-400 font-['JetBrains_Mono'] leading-tight">
-              RetailOS ERP Architect
+              {displayStoreLabel}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Tombol Tanya AI */}
+          <button
+            type="button"
+            id="btn-gateway-show-cover"
+            onClick={() => {
+              coverPointerStartRef.current = null;
+              setIsCoverVisible(true);
+            }}
+            className="px-2.5 py-1.5 rounded-xl bg-[#F6F8FB]/90 dark:bg-slate-900/70 backdrop-blur-md border border-slate-300/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-400/50 transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs font-medium font-['Plus_Jakarta_Sans']"
+            title="Tampilkan Jeda Layar Toko (Welcome Cover 3D)"
+          >
+            <MonitorPlay className="w-3.5 h-3.5 text-cyan-500" />
+            <span className="hidden sm:inline">Cover 3D</span>
+          </button>
+
           <button
             type="button"
             id="btn-gateway-ask-ai"
@@ -415,11 +703,11 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             Selamat datang di RetailOS ERP
           </h1>
           <p className="text-slate-600 dark:text-slate-400 text-xs mt-0.5">
-            Pilih Divisi Operasional & Masukkan Kredensial Sesi
+            {displayStoreLabel} • Pilih Divisi Operasional &amp; Masukkan Kredensial Sesi
           </p>
         </div>
 
-        {/* Grid 6 Divisi (3x2 Presisi) */}
+        {/* Grid 6 Divisi */}
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 w-full">
           {GATEWAY_MODULES.map((mod) => {
             const Icon = mod.icon;
@@ -457,7 +745,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
                     : `0 4px 14px -4px rgba(0,0,0,0.25), 0 0 8px ${mod.colorHex}1f`,
                 }}
               >
-                {/* Top Neon Bar */}
                 <div
                   className="absolute top-0 left-0 right-0 h-1 transition-all duration-300"
                   style={{
@@ -466,7 +753,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
                   }}
                 />
 
-                {/* Subtle Radial Tint on Card */}
                 <div
                   className="pointer-events-none absolute inset-0 transition-opacity duration-300"
                   style={{
@@ -512,11 +798,10 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
           })}
         </div>
 
-        {/* Floating Pill Inputs & Actions (Tanpa Kotak Pembungkus) */}
+        {/* Floating Pill Inputs & Actions */}
         <div
           className={`mx-auto w-full max-w-sm flex flex-col gap-3 mt-1 transition-transform duration-75 ${shakeTransformClass}`}
         >
-          {/* Floating Pill: Username Operator */}
           <div
             className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
             style={{
@@ -555,7 +840,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             />
           </div>
 
-          {/* Floating Pill: PIN Divisi */}
           <div
             className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
             style={{
@@ -622,7 +906,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             </div>
           )}
 
-          {/* Floating Pill: Tombol MASUK */}
           <button
             type="button"
             id="btn-public-gateway-login"
@@ -646,7 +929,6 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
             )}
           </button>
 
-          {/* Subtle Floating Pill: SuperAdmin Access */}
           <button
             type="button"
             onClick={() => {
@@ -660,7 +942,7 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
           </button>
         </div>
 
-        {/* Super Admin Auth Modal (Non-Password Input) */}
+        {/* Super Admin Auth Modal */}
         {showSuperAdminModal && (
           <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity duration-200">
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 p-5 rounded-2xl w-full max-w-xs shadow-[0_0_35px_rgba(6,182,212,0.25)] space-y-3 transition-all duration-300">
