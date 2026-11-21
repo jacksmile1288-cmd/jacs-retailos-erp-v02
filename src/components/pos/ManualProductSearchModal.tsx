@@ -287,7 +287,50 @@ export const ManualProductSearchModal: React.FC<ManualProductSearchModalProps> =
                 const isHighlighted = highlightedIndex === pIdx;
                 const qty = quantities[prod.id] || 1;
                 const unit = selectedUnits[prod.id] || prod.unit || 'Pcs';
-                
+
+                const rawCode = String(prod.barcode || prod.sku || prod.id || '').toUpperCase();
+                const rawCat = String(prod.category || '').toLowerCase();
+                const rawName = String(prod.name || '').toLowerCase();
+
+                const isFefoItem =
+                  rawCode.startsWith('200-EXP-') ||
+                  rawCat.includes('fefo') ||
+                  rawCat.includes('clearance') ||
+                  rawName.includes('fefo') ||
+                  rawName.includes('clearance');
+
+                const isBundlingItem =
+                  !isFefoItem &&
+                  (rawCode.startsWith('200-BND-') ||
+                    rawCat.includes('bundling') ||
+                    rawCat.includes('paket') ||
+                    rawName.includes('bundling') ||
+                    rawName.includes('paket'));
+
+                const isPromoItem =
+                  !isFefoItem &&
+                  !isBundlingItem &&
+                  (rawCat.includes('promo') ||
+                    rawName.includes('promo') ||
+                    rawName.includes('diskon') ||
+                    Boolean(prod.fashionPromo?.clearanceActive || prod.fashionPromo?.bundleActive));
+
+                const promoRowClass = isFefoItem
+                  ? isLight
+                    ? 'border-l-4 border-l-amber-500 bg-amber-50/90 border-amber-300/80 hover:bg-amber-100/80'
+                    : 'border-l-4 border-l-amber-400 bg-amber-500/12 border-amber-500/40 hover:bg-amber-500/20'
+                  : isBundlingItem
+                  ? isLight
+                    ? 'border-l-4 border-l-violet-500 bg-violet-50/90 border-violet-300/80 hover:bg-violet-100/80'
+                    : 'border-l-4 border-l-violet-400 bg-violet-500/12 border-violet-500/40 hover:bg-violet-500/20'
+                  : isPromoItem
+                  ? isLight
+                    ? 'border-l-4 border-l-emerald-500 bg-emerald-50/90 border-emerald-300/80 hover:bg-emerald-100/80'
+                    : 'border-l-4 border-l-emerald-400 bg-emerald-500/12 border-emerald-500/40 hover:bg-emerald-500/20'
+                  : isLight
+                  ? 'border-transparent hover:bg-slate-50'
+                  : 'border-transparent hover:bg-slate-800/50';
+
                 return (
                   <div
                     key={`f1-prod-${prod.id || prod.barcode || 'item'}-${pIdx}`}
@@ -297,14 +340,27 @@ export const ManualProductSearchModal: React.FC<ManualProductSearchModalProps> =
                         ? isLight
                           ? 'bg-cyan-50 border-cyan-400 shadow-xs'
                           : 'bg-cyan-500/15 border-cyan-500/60 shadow-xs'
-                        : isLight
-                        ? 'border-transparent hover:bg-slate-50'
-                        : 'border-transparent hover:bg-slate-800/50'
+                        : promoRowClass
                     }`}
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-sm leading-5 font-normal truncate text-slate-900 dark:text-white flex flex-wrap items-center gap-1.5">
                         <span>{prod.name}</span>
+                        {isFefoItem && (
+                          <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/50">
+                            FEFO / CLEARANCE
+                          </span>
+                        )}
+                        {isBundlingItem && (
+                          <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 border border-violet-500/50">
+                            PAKET BUNDLING
+                          </span>
+                        )}
+                        {isPromoItem && (
+                          <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/50">
+                            PROMO
+                          </span>
+                        )}
                         {effectiveServiceMode && (() => {
                           const fmtMeta = getServiceFormatMeta(prod);
                           return (

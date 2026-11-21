@@ -47,8 +47,6 @@ import {
 } from './DigitalScaleModal';
 import { triggerCashDrawer } from '../../utils/cashDrawerUtils';
 import {
-  ACTIVE_POS_TYPE_OPTIONS,
-  getActivePosTypeOption,
   getPosIdentityIdForBusinessModel,
   getAllowedPosIdentityIds,
   getBusinessModelDefinition,
@@ -77,8 +75,6 @@ import {
   Plus,
   Trash2,
   UserCheck,
-  CreditCard,
-  QrCode,
   Tag,
   Package,
   Lock,
@@ -88,7 +84,6 @@ import {
   ChefHat,
   UtensilsCrossed,
   ShoppingBag,
-  Smartphone,
   X,
   Sun,
   Moon,
@@ -102,7 +97,6 @@ import {
   RefreshCw,
   ShoppingCart,
   Shirt,
-  Wrench,
   HardHat,
   Scissors,
   ArrowRight,
@@ -117,7 +111,6 @@ import {
   Keyboard,
   Monitor,
   Unlock,
-  BarChart3,
   ClipboardList,
   Coffee,
   Play,
@@ -157,228 +150,6 @@ interface PosIdentityCard {
   isHybrid?: boolean;
 }
 
-const POS_NINE_IDENTITIES: Omit<PosIdentityCard, 'stationCode' | 'receiptPrefixTag' | 'posTypeLabel'>[] = [
-  {
-    id: 'T-01',
-    code: 'POS-RETAIL',
-    posName: 'POS Retail',
-    modelType: 'retail',
-    emoji: '🛒',
-    icon: ShoppingCart,
-  },
-  {
-    id: 'T-02',
-    code: 'POS-FNB',
-    posName: 'POS F&B (Resto & Cafe)',
-    modelType: 'fnb',
-    emoji: '🍳',
-    icon: UtensilsCrossed,
-    isHybrid: true,
-  },
-  {
-    id: 'T-03',
-    code: 'POS-GROSIR',
-    posName: 'POS Grosir & Distribusi',
-    modelType: 'retail',
-    emoji: '📦',
-    icon: Store,
-  },
-  {
-    id: 'T-04',
-    code: 'POS-FASHION',
-    posName: 'Fashion & Butik',
-    modelType: 'fashion',
-    emoji: '👗',
-    icon: Shirt,
-  },
-  {
-    id: 'T-05',
-    code: 'POS-BUILD',
-    posName: 'POS Bahan Bangunan & Material',
-    modelType: 'building',
-    emoji: '🏗️',
-    icon: HardHat,
-  },
-  {
-    id: 'T-06',
-    code: 'POS-GADGET',
-    posName: 'Elektronik & Gadget',
-    modelType: 'electronics',
-    emoji: '📱',
-    icon: Smartphone,
-  },
-  {
-    id: 'T-07',
-    code: 'POS-AUTO',
-    posName: 'Bengkel & Otomotif',
-    modelType: 'workshop',
-    emoji: '🔧',
-    icon: Wrench,
-  },
-  {
-    id: 'T-08',
-    code: 'POS-SERVICE',
-    posName: 'POS Jasa & Layanan',
-    modelType: 'salon',
-    emoji: '💈',
-    icon: Scissors,
-  },
-];
-
-interface CashierSlotAccent {
-  borderClass: string;
-  glowClass: string;
-  bgClassLight: string;
-  bgClassDark: string;
-  iconBgLight: string;
-  iconBgDark: string;
-  iconBorder: string;
-  iconColor: string;
-  badgeBg: string;
-  badgeText: string;
-  badgeBorder: string;
-  buttonColor: string;
-  ringClass: string;
-}
-
-const CASHIER_SLOT_ACCENTS: CashierSlotAccent[] = [
-  {
-    borderClass: 'border-cyan-500 hover:border-cyan-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(6,182,212,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-cyan-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-cyan-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-cyan-100/80',
-    iconBgDark: 'bg-cyan-950/60',
-    iconBorder: 'border-cyan-500/50',
-    iconColor: 'text-cyan-600 dark:text-cyan-400',
-    badgeBg: 'bg-cyan-500/15',
-    badgeText: 'text-cyan-700 dark:text-cyan-300',
-    badgeBorder: 'border-cyan-500/30',
-    buttonColor: 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(6,182,212,0.4)]',
-    ringClass: 'ring-2 ring-cyan-400',
-  },
-  {
-    borderClass: 'border-amber-500 hover:border-amber-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(245,158,11,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-amber-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-amber-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-amber-100/80',
-    iconBgDark: 'bg-amber-950/60',
-    iconBorder: 'border-amber-500/50',
-    iconColor: 'text-amber-600 dark:text-amber-400',
-    badgeBg: 'bg-amber-500/15',
-    badgeText: 'text-amber-700 dark:text-amber-300',
-    badgeBorder: 'border-amber-500/30',
-    buttonColor: 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
-    ringClass: 'ring-2 ring-amber-400',
-  },
-  {
-    borderClass: 'border-emerald-500 hover:border-emerald-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(16,185,129,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-emerald-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-emerald-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-emerald-100/80',
-    iconBgDark: 'bg-emerald-950/60',
-    iconBorder: 'border-emerald-500/50',
-    iconColor: 'text-emerald-600 dark:text-emerald-400',
-    badgeBg: 'bg-emerald-500/15',
-    badgeText: 'text-emerald-700 dark:text-emerald-300',
-    badgeBorder: 'border-emerald-500/30',
-    buttonColor: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
-    ringClass: 'ring-2 ring-emerald-400',
-  },
-  {
-    borderClass: 'border-purple-500 hover:border-purple-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(168,85,247,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-purple-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-purple-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-purple-100/80',
-    iconBgDark: 'bg-purple-950/60',
-    iconBorder: 'border-purple-500/50',
-    iconColor: 'text-purple-600 dark:text-purple-400',
-    badgeBg: 'bg-purple-500/15',
-    badgeText: 'text-purple-700 dark:text-purple-300',
-    badgeBorder: 'border-purple-500/30',
-    buttonColor: 'bg-purple-500 hover:bg-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]',
-    ringClass: 'ring-2 ring-purple-400',
-  },
-  {
-    borderClass: 'border-rose-500 hover:border-rose-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(244,63,94,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-rose-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-rose-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-rose-100/80',
-    iconBgDark: 'bg-rose-950/60',
-    iconBorder: 'border-rose-500/50',
-    iconColor: 'text-rose-600 dark:text-rose-400',
-    badgeBg: 'bg-rose-500/15',
-    badgeText: 'text-rose-700 dark:text-rose-300',
-    badgeBorder: 'border-rose-500/30',
-    buttonColor: 'bg-rose-500 hover:bg-rose-400 text-white shadow-[0_0_12px_rgba(244,63,94,0.4)]',
-    ringClass: 'ring-2 ring-rose-400',
-  },
-  {
-    borderClass: 'border-blue-500 hover:border-blue-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(59,130,246,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-blue-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-blue-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-blue-100/80',
-    iconBgDark: 'bg-blue-950/60',
-    iconBorder: 'border-blue-500/50',
-    iconColor: 'text-blue-600 dark:text-blue-400',
-    badgeBg: 'bg-blue-500/15',
-    badgeText: 'text-blue-700 dark:text-blue-300',
-    badgeBorder: 'border-blue-500/30',
-    buttonColor: 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_12px_rgba(59,130,246,0.4)]',
-    ringClass: 'ring-2 ring-blue-400',
-  },
-  {
-    borderClass: 'border-orange-500 hover:border-orange-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(249,115,22,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-orange-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-orange-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-orange-100/80',
-    iconBgDark: 'bg-orange-950/60',
-    iconBorder: 'border-orange-500/50',
-    iconColor: 'text-orange-600 dark:text-orange-400',
-    badgeBg: 'bg-orange-500/15',
-    badgeText: 'text-orange-700 dark:text-orange-300',
-    badgeBorder: 'border-orange-500/30',
-    buttonColor: 'bg-orange-500 hover:bg-orange-400 text-white shadow-[0_0_12px_rgba(249,115,22,0.4)]',
-    ringClass: 'ring-2 ring-orange-400',
-  },
-  {
-    borderClass: 'border-teal-500 hover:border-teal-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(20,184,166,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-teal-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-teal-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-teal-100/80',
-    iconBgDark: 'bg-teal-950/60',
-    iconBorder: 'border-teal-500/50',
-    iconColor: 'text-teal-600 dark:text-teal-400',
-    badgeBg: 'bg-teal-500/15',
-    badgeText: 'text-teal-700 dark:text-teal-300',
-    badgeBorder: 'border-teal-500/30',
-    buttonColor: 'bg-teal-500 hover:bg-teal-400 text-slate-950 shadow-[0_0_12px_rgba(20,184,166,0.4)]',
-    ringClass: 'ring-2 ring-teal-400',
-  },
-  {
-    borderClass: 'border-pink-500 hover:border-pink-400',
-    glowClass: 'hover:shadow-[0_0_20px_rgba(236,72,153,0.35)]',
-    bgClassLight: 'bg-gradient-to-b from-pink-50/70 to-white',
-    bgClassDark: 'bg-gradient-to-b from-pink-950/20 to-[#0d1527]',
-    iconBgLight: 'bg-pink-100/80',
-    iconBgDark: 'bg-pink-950/60',
-    iconBorder: 'border-pink-500/50',
-    iconColor: 'text-pink-600 dark:text-pink-400',
-    badgeBg: 'bg-pink-500/15',
-    badgeText: 'text-pink-700 dark:text-pink-300',
-    badgeBorder: 'border-pink-500/30',
-    buttonColor: 'bg-pink-500 hover:bg-pink-400 text-white shadow-[0_0_12px_rgba(236,72,153,0.4)]',
-    ringClass: 'ring-2 ring-pink-400',
-  },
-];
-
 export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   returnToRegisterSignal = 0,
 }) => {
@@ -389,7 +160,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     activeUser,
     currentUser,
     products,
-    addProduct,
     customers,
     sales,
     processPayment,
@@ -401,7 +171,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     addAuditLog,
     users,
     language: globalLanguage,
-    activeShift,
     getOpenShiftForStation,
     toggleStationBreak,
     verifyManagementAuthPin,
@@ -465,10 +234,11 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       ),
     [businessDomainConfig.primaryBusinessModel, businessProfile?.category]
   );
-  const allowedPosIdentityIds = useMemo(
+  const _allowedPosIdentityIds = useMemo(
     () => getAllowedPosIdentityIds(businessDomainConfig, businessProfile?.category),
     [businessDomainConfig, businessProfile?.category]
   );
+  void _allowedPosIdentityIds;
 
   const visiblePosIdentities = useMemo(() => {
     const iconByPosType: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -607,7 +377,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     }
   }, [activeStationShift, hasExplicitLobbyReturn, isStationPickerOpen, isRegisterOpen]);
 
-  // Proteksi PIN Otorisasi Manajemen untuk "Ganti Loket PC" & navigasi ke modul manajemen
   const [pendingPosAuthAction, setPendingPosAuthAction] = useState<
     | { type: 'SWITCH_STATION' }
     | { type: 'NAVIGATE_MODULE'; moduleId: ActiveNavModule; label: string }
@@ -695,14 +464,14 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') return parsed;
       }
-    } catch (e) {}
+    } catch {}
     return {};
   });
 
   useEffect(() => {
     try {
       localStorage.setItem('jacs_pos_station_carts_v1', JSON.stringify(stationWorkspaces));
-    } catch (e) {}
+    } catch {}
   }, [stationWorkspaces]);
 
   const activeStationWorkspace = stationWorkspaces[activeStationCode] || DEFAULT_STATION_WORKSPACE;
@@ -871,7 +640,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   const [deliveryDestination, setDeliveryDestination] = useState<string>('');
   const [shippingFee, setShippingFee] = useState<number>(0);
 
-  // Menu Backend / ERP Khusus Hybrid
   const [isHybridMenuOpen, setIsHybridMenuOpen] = useState(false);
   const hybridMenuRef = useRef<HTMLDivElement>(null);
 
@@ -894,7 +662,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     openPosMgmtPinPrompt({ type: 'NAVIGATE_MODULE', moduleId: mod.id, label: mod.label });
   };
 
-  // Shift & Rekonsiliasi Kas
   const [isOpenShiftModalOpen, setIsOpenShiftModalOpen] = useState(false);
   const [isCloseShiftModalOpen, setIsCloseShiftModalOpen] = useState(false);
   const [isQuickZReportOpen, setIsQuickZReportOpen] = useState(false);
@@ -911,7 +678,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
   const [isFnbPhotoMenuMode, setIsFnbPhotoMenuMode] = useState<boolean>(false);
 
-  // Search & Barcode Input
   const [barcodeInput, setBarcodeInput] = useState('');
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const cashInputRef = useRef<HTMLInputElement>(null);
@@ -976,7 +742,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         (item?.product?.variantMatrix && item.product.variantMatrix.length > 0)
     );
 
-  const resolvePosCartIndustry = (term?: Terminal | null): TerminalIndustry => {
+  const _resolvePosCartIndustry = (term?: Terminal | null): TerminalIndustry => {
     if (isBusinessLaundryPrimary) return 'laundry';
     if (isBusinessFashionPrimary) return 'fashion';
     if (
@@ -1000,8 +766,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     }
     return detected;
   };
-
-  // Cart & Pricing State (isolated per activeStationCode above; starts empty without demo auto-seeding)
+  void _resolvePosCartIndustry;
 
   const [deliveryMethod, setDeliveryMethod] = useState<'DIRECT' | 'FLEET_DELIVERY'>('DIRECT');
   const [workshopPlateNumber] = useState<string>('DD 4589 XY');
@@ -1341,14 +1106,14 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') return parsed;
       }
-    } catch (e) {}
+    } catch {}
     return {};
   });
 
   useEffect(() => {
     try {
       localStorage.setItem('jacs_pos_held_orders_by_station_v1', JSON.stringify(heldOrdersByStation));
-    } catch (e) {}
+    } catch {}
   }, [heldOrdersByStation]);
 
   const heldOrders = useMemo(
@@ -1420,7 +1185,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     });
   }, [employees]);
 
-  // Fashion & Butik States
   const [fashionAdvisorId, setFashionAdvisorId] = useState<string>('');
   const [variantPickerState, setVariantPickerState] = useState<{
     product: Product;
@@ -1591,9 +1355,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     );
   }, [activeTerminal, isHybridMode, isFashion, isBusinessFashionPrimary]);
 
-  // Visibilitas Kontekstual Tombol "Kasbon / DP":
-  // HANYA aktif pada BUILDING (Bahan Bangunan), SERVICE sub-profil Laundry, atau RETAIL mode Grosir/B2B.
-  // Disembunyikan pada FNB (Resto/Cafe), FASHION, dan SERVICE Barbershop & Salon.
   const isWholesaleRetailMode = useMemo(() => {
     if (
       !isRetail ||
@@ -1713,24 +1474,53 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     return isMasterCatalogWiped ? [] : LAUNDRY_SERVICE_SEEDS;
   }, [products, isMasterCatalogWiped]);
 
+  // Satu sumber pencarian [F3]: menyatukan Master Data (products), katalog/paket terminal aktif,
+  // serta item/varian yang sudah ada tanpa membuat set data dummy baru.
   const manualSearchProducts = useMemo(() => {
     if (isSalonServiceTerminal) {
-      return salonServiceCatalogSource;
+      const seenSalon = new Set<string>();
+      const salonList: Product[] = [];
+      for (const p of [...salonServiceCatalogSource, ...activeProducts, ...(products || [])]) {
+        if (!p || p.itemType === 'RAW_MATERIAL') continue;
+        const key = String(p.id || p.sku || p.barcode || p.name || '').trim().toLowerCase();
+        if (key && !seenSalon.has(key)) {
+          seenSalon.add(key);
+          salonList.push(p);
+        }
+      }
+      return salonList;
     }
     if (isLaundryTerminal) {
-      return laundryCatalogSource;
+      const seenLaundry = new Set<string>();
+      const laundryList: Product[] = [];
+      for (const p of [...laundryCatalogSource, ...activeProducts, ...(products || [])]) {
+        if (!p || p.itemType === 'RAW_MATERIAL') continue;
+        const key = String(p.id || p.sku || p.barcode || p.name || '').trim().toLowerCase();
+        if (key && !seenLaundry.has(key)) {
+          seenLaundry.add(key);
+          laundryList.push(p);
+        }
+      }
+      return laundryList;
     }
+
     const pkgProds = isFnbTerminal ? [] : getActivePackageProducts(activeProducts, domainPromoCampaigns);
     const seen = new Set<string>();
     const combined: Product[] = [];
-    for (const p of [...pkgProds, ...activeProducts]) {
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        combined.push(p);
+    for (const p of [...pkgProds, ...activeProducts, ...(products || [])]) {
+      if (!p || p.itemType === 'RAW_MATERIAL') continue;
+      const idKey = String(p.id || '').trim().toLowerCase();
+      const barcodeKey = String(p.barcode || p.sku || '').trim().toLowerCase();
+      if ((idKey && seen.has(idKey)) || (barcodeKey && seen.has(`bc:${barcodeKey}`))) {
+        continue;
       }
+      if (idKey) seen.add(idKey);
+      if (barcodeKey) seen.add(`bc:${barcodeKey}`);
+      combined.push(p);
     }
     return combined;
   }, [
+    products,
     activeProducts,
     isFnbTerminal,
     isSalonServiceTerminal,
@@ -1879,7 +1669,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         ? Number(canonical.cost_price)
         : Math.round((Number(canonical.sell_price) || 0) * 0.78);
 
-      // Handle manual discount on building item while still evaluating Margin Floor Guard & Cubic Conversion
       if (item.promoBadge === '[MANUAL DISC]') {
         const manualEffectivePrice = Math.max(0, (item.product.sell_price || 0) - (item.itemDiscount || 0));
         const manualMarginEval = evaluateTierMarginGuard(manualEffectivePrice, effectiveUnitCost);
@@ -2612,7 +2401,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     if (delta < 0) {
       if (isFnbModeActive) {
         if (!isItemSentToKot(currentItem)) {
-          // Item F&B status draft (belum dikirim ke KOT Dapur): kurangi/hapus langsung tanpa PIN Supervisor
           if (nextQty <= 0) {
             handleRemoveItem(index);
             return;
@@ -2625,10 +2413,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
           });
           return;
         }
-        // Item F&B SUDAH dikirim ke KOT Dapur
         const sentQty = currentItem.kotSentQty ?? currentItem.quantity;
         if (nextQty >= sentQty) {
-          // Hanya mengurangi tambahan draft (Add-on) di atas qty yang sudah terkirim ke dapur
           setCart((prev) => {
             const updated = prev.map((item, idx) =>
               idx === index ? { ...item, quantity: nextQty } : item
@@ -2637,12 +2423,10 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
           });
           return;
         }
-        // Cek batas waktu grace period 5 menit setelah KOT dikirim
         if (checkKotExpiredNow()) {
           showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
           return;
         }
-        // Masih dalam <= 5 menit -> wajib PIN Supervisor (1234 / 8888)
         setVoidingCartItem({
           item: currentItem,
           index,
@@ -2704,8 +2488,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     if (!variantPickerState || selections.length === 0) return;
     const { product, mode, cartIndex } = variantPickerState;
     const campaigns = loadPromoCampaignsForDomain(businessDomainConfig, activeTerminal?.modelType);
-    const unitPrice = getProductPriceByTier(product, selectedPriceTier);
-    const prodWithPrice: Product = { ...product, sell_price: unitPrice, price: unitPrice };
 
     if (mode === 'CHANGE' && cartIndex !== undefined && cart[cartIndex]) {
       const chosen = selections[0];
@@ -2717,7 +2499,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
 
     let zeroStockPicked = false;
     setCart((prev) => {
-      let draft = [...prev];
+      const draft = [...prev];
       for (const sel of selections) {
         const cell = product.variantMatrix?.find(
           (c) => c.size === sel.size && c.color === sel.color
@@ -2831,14 +2613,12 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     const targetItem = cart[index];
     if (!targetItem) return;
 
-    // Mode F&B: item draft (belum dikirim ke KOT Dapur) langsung dihapus tanpa PIN Supervisor
     if (isFnbModeActive && !isItemSentToKot(targetItem)) {
       handleRemoveItem(index);
       showToast(`Item draft "${targetItem.product.name}" dihapus dari keranjang.`);
       return;
     }
 
-    // Mode F&B: item SUDAH dikirim ke KOT Dapur & melewati batas waktu 5 menit -> blokir hapus
     if (isFnbModeActive && isItemSentToKot(targetItem) && checkKotExpiredNow()) {
       showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
       return;
@@ -2855,11 +2635,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         showToast(KOT_EXPIRED_LOCK_MESSAGE, 'error');
         return;
       }
-      // Masih dalam <= 5 menit sejak KOT dikirim -> wajib Otorisasi PIN Supervisor (1234 / 8888)
       setVoidingCartItem(null);
       setIsSupervisorVoidModalOpen(true);
     } else {
-      // Belum ada item terkirim ke KOT Dapur -> konfirmasi ringan tanpa memblokir kasir
       setIsVoidConfirmOpen(true);
     }
   };
@@ -2922,7 +2700,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     if (!targetItem) return;
 
     if (!isItemSentToKot(targetItem)) {
-      // Item draft (belum dikirim ke KOT): langsung simpan tanpa PIN Supervisor
       applyToppingResultToCartItem(idx, result);
       showToast(
         `Topping & catatan "${targetItem.product.name}" diperbarui (${result.summaryText}).`
@@ -2930,13 +2707,11 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    // Item sudah masuk KOT: periksa lagi grace period 5 menit
     if (checkKotExpiredNow()) {
       showToast(KOT_TOPPING_LOCK_MESSAGE, 'error');
       return;
     }
 
-    // Masih dalam <= 5 menit -> wajib PIN Supervisor (1234 / 8888) & picu [REVISI KOT]
     setVoidingCartItem({
       item: targetItem,
       index: idx,
@@ -2952,7 +2727,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     supervisorName: string,
     reason: string
   ) => {
-    // Kasus 0: Revisi Topping / Catatan item yang SUDAH dikirim ke KOT Dapur (<= 5 menit)
     if (
       item &&
       index !== null &&
@@ -2984,7 +2758,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    // Kasus 1: Full-cart void (pembatalan seluruh pesanan yang sudah masuk KOT Dapur)
     if (!item || index === null) {
       const totalValue = grandTotal;
       const orderDesc = isFnbModeActive
@@ -3005,7 +2778,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    // Kasus 2: Pengurangan qty item yang SUDAH dikirim ke KOT Dapur
     if (voidingCartItem?.mode === 'REDUCE_QTY' && typeof voidingCartItem.targetQty === 'number') {
       const targetQty = Math.max(1, voidingCartItem.targetQty);
       const prevSentQty = item.kotSentQty ?? item.quantity;
@@ -3044,7 +2816,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    // Kasus 3: Penghapusan penuh item (KOT-sent atau non-F&B void)
     const wasSentToKot = isItemSentToKot(item);
     if (wasSentToKot) {
       const voidLabel = `${item.product.name} (${item.kotSentQty ?? item.quantity}x)`;
@@ -3208,7 +2979,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    const pkgResolved = resolvePackageBarcodePromo(q, activeProducts, domainPromoCampaigns);
+    const searchPool = manualSearchProducts.length > 0 ? manualSearchProducts : activeProducts;
+
+    const pkgResolved = resolvePackageBarcodePromo(q, searchPool, domainPromoCampaigns);
     if (pkgResolved) {
       if (pkgResolved.insufficientStockComponents.length > 0) {
         showToast(`⚠️ Stok komponen paket tidak mencukupi: ${pkgResolved.insufficientStockComponents.join(', ')}`, 'warning');
@@ -3219,12 +2992,11 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       return;
     }
 
-    // Support scanning/typing bulk material barcode or PLU with fleet suffix (-PKP, -ENG, -TRK, -SAK)
     const upperQ = q.toUpperCase();
     const fleetSuffixMatch = DEFAULT_FLEET_OPTIONS.find((f) => upperQ.endsWith(f.suffix));
     if (fleetSuffixMatch) {
       const baseQuery = q.slice(0, q.length - fleetSuffixMatch.suffix.length).trim();
-      const baseProduct = activeProducts.find(
+      const baseProduct = searchPool.find(
         (p) =>
           (p.barcode && p.barcode.toLowerCase() === baseQuery.toLowerCase()) ||
           (p.plu && p.plu.toLowerCase() === baseQuery.toLowerCase()) ||
@@ -3253,8 +3025,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       }
     }
 
-    // Check exact barcode/sku variant in Fashion matrix first (1-scan exact size x color match)
-    for (const prod of activeProducts) {
+    for (const prod of searchPool) {
       if (Array.isArray(prod.variantMatrix) && prod.variantMatrix.length > 0) {
         const matchedCell = prod.variantMatrix.find(
           (cell) =>
@@ -3300,9 +3071,10 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       }
     }
 
-    const match = activeProducts.find(
+    const match = searchPool.find(
       (p) =>
         (p.barcode && p.barcode.toLowerCase() === q.toLowerCase()) ||
+        (p.sku && p.sku.toLowerCase() === q.toLowerCase()) ||
         (p.plu && p.plu.toLowerCase() === q.toLowerCase()) ||
         (p.id && p.id.toLowerCase() === q.toLowerCase()) ||
         (p.name && p.name.toLowerCase() === q.toLowerCase())
@@ -3321,9 +3093,10 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       setBarcodeInput('');
       focusBarcodeInput();
     } else {
-      const partial = activeProducts.find(
+      const partial = searchPool.find(
         (p) =>
           (p.name && p.name.toLowerCase().includes(q.toLowerCase())) ||
+          (p.sku && p.sku.toLowerCase().includes(q.toLowerCase())) ||
           (p.plu && p.plu.toLowerCase().includes(q.toLowerCase())) ||
           (p.barcode && p.barcode.includes(q))
       );
@@ -3414,7 +3187,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         !(p.id || '').startsWith('ING-')
     );
 
-    // Pastikan seluruh 18 Menu F&B (FNB_MENU_ITEMS) selalu tersedia lengkap
     const mergedMap = new Map<string, Product>();
     FNB_MENU_ITEMS.forEach((item) => mergedMap.set(item.id, item));
     FNB_RESTAURANT_PRODUCTS.forEach((item) => mergedMap.set(item.id, item));
@@ -3490,7 +3262,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   const changeAmount = useMemo(() => (paymentMethod === 'CASH' ? Math.max(0, cashGiven - grandTotal) : 0), [cashGiven, grandTotal, paymentMethod]);
   const totalCartItemCount = useMemo(() => cart.reduce((acc, i) => acc + (i?.quantity || 0), 0), [cart]);
 
-  // Kalkulasi Real-Time Split Payment & Kasbon/DP (+14 Hari)
   const splitTotalEntered = useMemo(
     () => Math.max(0, Math.round((Number(splitCashAmount) || 0) + (Number(splitNonCashAmount) || 0))),
     [splitCashAmount, splitNonCashAmount]
@@ -3630,7 +3401,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     showToast(`Diskon nota diterapkan (${approver})`, 'success');
   };
 
-  // Langsung membuka terminal POS + Penguncian Perangkat (Station Binding via localStorage)
   const handleTerminalCardClick = (term: Terminal) => {
     const targetStationCode = normalizeStationCode(term.stationCode || term.id || term.code);
     const matchingStation = activeStations.find((s) => s.stationCode === targetStationCode);
@@ -3730,7 +3500,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       ? 'Truk Engkel (±3.0 m³)'
       : 'Pick-up (±1.2 m³)';
 
-  // Akuntansi Manajemen Depo Bangunan: Margin Floor Guard & Pemisahan Jurnal Logistik
   const buildingCartAccounting = useMemo(() => {
     const isFleetOrder = deliveryFleetActive || deliveryMethod === 'FLEET_DELIVERY' || deliveryPolicy === 'FRANGKO';
     const itemsBelowMarginFloor = cart.filter(
@@ -3783,6 +3552,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     deliveryPolicy,
     selectedFleetType,
     grandTotal,
+    resolvedFleetLabel,
   ]);
 
   const handleAutoFixCartSafeMargin = () => {
@@ -4176,7 +3946,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       }
       if (paymentMethod === 'CASH') {
         const inputNum = Number(e.currentTarget?.value) || 0;
-        let effectiveCash = inputNum > 0 ? inputNum : cashGiven || grandTotal;
+        const effectiveCash = inputNum > 0 ? inputNum : cashGiven || grandTotal;
         setCashGiven(effectiveCash);
         if (effectiveCash < grandTotal) {
           setIsCashUnderpaid(true);
@@ -4257,9 +4027,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
           : 'space-y-3 relative'
       }`}
     >
-      {/* ========================================================= */}
-      {/* 1. HALAMAN DEPAN: 1 KARTU TERMINAL UTUH PERANGKAT AKTIF    */}
-      {/* ========================================================= */}
       {!isRegisterOpen ? (
         (() => {
           const hasValidDeviceBinding = Boolean(
@@ -4274,542 +4041,496 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
           const singleActiveIdentities = activeDeviceIdentity ? [activeDeviceIdentity] : [];
 
           return (
-        <div className="space-y-4 animate-in fade-in duration-150">
-          {/* Header Bar Ringkas */}
-          <div
-            className={`px-3.5 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition-all duration-200 ${
-              isLight
-                ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] text-slate-900'
-                : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-white'
-            }`}
-          >
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-mono font-normal text-xs shrink-0">
-                POS
-              </div>
-              <div>
-                <h2 className="text-base leading-6 font-medium tracking-tight">
-                  {language === 'ID' ? 'Terminal Point of Sale' : 'Point of Sale Terminals'}
-                </h2>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Arsitektur: <strong className="text-emerald-600 dark:text-emerald-400">{getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}</strong>
-                  {' • '}
-                  Loket Perangkat: <strong className="font-mono text-cyan-600 dark:text-cyan-300">{activeDeviceIdentity?.stationCode || 'POS-01'}</strong>
-                  {visiblePosIdentities.length > 1 ? ` (dari ${visiblePosIdentities.length} loket terdaftar)` : ''}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {hasValidDeviceBinding && boundStation && (
-                <span
-                  className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-semibold border flex items-center gap-1.5 ${
-                    isLight
-                      ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
-                      : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
-                  }`}
-                >
-                  <Monitor className="w-3 h-3" />
-                  <span>PC Terikat: {boundStation.stationCode}</span>
-                </span>
-              )}
-
-              {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
-                <button
-                  type="button"
-                  id="btn-switch-pc-station"
-                  onClick={() => openPosMgmtPinPrompt({ type: 'SWITCH_STATION' })}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] leading-4 font-semibold border flex items-center gap-1.5 cursor-pointer transition ${
-                    isLight
-                      ? 'bg-slate-100 hover:bg-cyan-50 text-slate-800 hover:text-cyan-800 border-slate-300 hover:border-cyan-400'
-                      : 'bg-slate-800 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 border-slate-700 hover:border-cyan-500/40'
-                  }`}
-                >
-                  <ArrowLeftRight className="w-3 h-3 text-cyan-500" />
-                  <span>Ganti Loket PC</span>
-                </button>
-              )}
-
+            <div className="space-y-4 animate-in fade-in duration-150">
               <div
-                className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-normal tracking-widest border flex items-center gap-1.5 select-none ${
-                  isLight ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40'
+                className={`px-3.5 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 transition-all duration-200 ${
+                  isLight
+                    ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.16)] text-slate-900'
+                    : 'bg-slate-900 border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] text-white'
                 }`}
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>
-                  {`${visiblePosIdentities.length} LOKET TERDAFTAR`}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* 1 Kartu Terminal Utuh Milik Perangkat Aktif (Tanpa Kartu Terkunci Lain di Bawahnya) */}
-          <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto pt-2">
-            {singleActiveIdentities.map((item) => {
-              const isSelected = activeTerminal?.id === item.stationCode || activeTerminal?.stationCode === item.stationCode;
-              const isHovered = hoveredTerminalId === item.stationCode;
-              const isFocused = isSelected || isHovered;
-              const isSplitWideLayout = true;
-
-              const isThisDeviceStation = hasValidDeviceBinding && boundStation?.stationCode === item.stationCode;
-              const isLockedToOtherStation = false;
-
-              const termObj: Terminal = {
-                id: item.stationCode,
-                stationCode: item.stationCode,
-                name: item.posName,
-                code: item.stationCode,
-                location: item.posTypeLabel,
-                isActive: true,
-                activeOrdersToday: 0,
-                businessModel: item.posTypeLabel,
-                businessType: item.posTypeLabel,
-                modelType: item.modelType,
-                isLocked: isLockedToOtherStation,
-                role: item.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
-                terminalType: item.isHybrid ? 'BACK_END' : 'FRONT_END',
-              };
-
-              const skuCount =
-                item.modelType === 'fnb'
-                  ? Math.max(
-                      FNB_MENU_ITEMS.length,
-                      filterProductsByTerminal(products, termObj, false).length
-                    )
-                  : filterProductsByTerminal(products, termObj, false).length;
-
-              const primaryModel = businessDomainConfig.primaryBusinessModel;
-
-              let descriptiveSubtitle =
-                'Terminal Transaksi Ritel Terpadu • Pemindaian Barcode Cepat, Kontrol Stok Unit/Box & Cetak Struk 80mm';
-              let featureBadges: string[] = [
-                'Barcode Scanner',
-                'Multi-Satuan',
-                'Real-Time Stok',
-              ];
-              let quickShortcuts = 'F2 Scan · F3 Cari · F10 Bayar';
-
-              if (item.code === 'POS-GROSIR' || item.id === 'T-03') {
-                descriptiveSubtitle =
-                  'Terminal Grosir & Distribusi B2B • Multi-Tier Harga Karton/Dus, Aturan MOQ & Penjualan Kredit/Tempo';
-                featureBadges = [
-                  'Multi-Tier Grosir',
-                  'Aturan MOQ & Tempo',
-                  'Satuan Pcs/Box/Karton',
-                ];
-                quickShortcuts = 'F2 Scan · F3 Katalog · F10 Checkout';
-              } else if (item.modelType === 'fnb' || item.code === 'POS-FNB' || item.id === 'T-02') {
-                descriptiveSubtitle =
-                  'Terminal Kasir Kuliner F&B Terpadu • Menu Foto Interaktif, Dine-In/Takeaway, Nomor Meja & Resep BOM';
-                featureBadges = [
-                  'Menu Foto Cepat',
-                  'Meja & Dine-In',
-                  'Potong BOM Otomatis',
-                ];
-                quickShortcuts = 'F3 Menu · KOT Dapur · F10 Bayar';
-              } else if (item.modelType === 'building' || item.code === 'POS-BUILD' || item.id === 'T-05') {
-                descriptiveSubtitle =
-                  'Terminal Depo Bahan Bangunan & Material • Konversi Curah m³/Ret Armada, DO Frangko/Loco & Proteksi Margin';
-                featureBadges = [
-                  'Konversi Curah m³/Ret',
-                  'Armada DO Frangko',
-                  'Guardrail Margin',
-                ];
-                quickShortcuts = 'F3 Material · Mode Kontraktor · F10 DO';
-              } else if (item.modelType === 'laundry' || primaryModel === 'LAUNDRY') {
-                descriptiveSubtitle =
-                  'Terminal Kasir Laundry & Binatu Multi-Satuan • Timbangan Digital USB/HID, Potong Tare, Min. Berat & Durasi SLA';
-                featureBadges = [
-                  'Timbangan Digital',
-                  '4 Satuan (kg/pcs/psg/m²)',
-                  'Auto Min. & SLA',
-                ];
-                quickShortcuts = 'Timbang USB/HID · F3 Layanan · F10 Bayar';
-              } else if (item.modelType === 'salon' || item.code === 'POS-SERVICE' || item.id === 'T-08') {
-                descriptiveSubtitle =
-                  'Terminal Jasa & Layanan Profesional • Order Pelanggan, Penugasan Stylist/Petugas & Cetak Nota Layanan';
-                featureBadges = [
-                  'Order Jasa & Nota',
-                  'Penugasan Stylist/Staf',
-                  'Real-Time Layanan',
-                ];
-                quickShortcuts = 'F3 Layanan · Input Staf · F10 Bayar';
-              } else if (item.modelType === 'fashion' || primaryModel === 'FASHION_BUTIK') {
-                descriptiveSubtitle =
-                  'Terminal Butik & Fashion Terpadu • Pemilih Varian Ukuran/Warna, Scan Hangtag & Cetak Struk 80mm';
-                featureBadges = [
-                  'Scan Hangtag',
-                  'Varian Ukuran/Warna',
-                  'Real-Time Stok',
-                ];
-              } else if (primaryModel === 'TOKO_OBAT_KESEHATAN') {
-                descriptiveSubtitle =
-                  'Terminal Transaksi Ritel Terpadu • Pemindaian Barcode Cepat, Kontrol Stok Unit/Box & Cetak Struk 80mm';
-                featureBadges = [
-                  'Barcode Scanner',
-                  'Multi-Satuan',
-                  'Real-Time Stok',
-                ];
-              } else if (primaryModel === 'TOKO_KOSMETIK_KECANTIKAN') {
-                descriptiveSubtitle =
-                  'Terminal Ritel Kosmetik & Kecantikan • Pemindaian Barcode Cepat, Kontrol Expired FEFO & Promo Bundling';
-                featureBadges = [
-                  'Barcode Scanner',
-                  'Multi-Satuan',
-                  'Real-Time Stok',
-                ];
-              } else if (primaryModel === 'TOKO_ATK') {
-                descriptiveSubtitle =
-                  'Terminal Ritel Alat Tulis & Kantor • Transaksi Cepat Satuan/Pak, Diskon Member & Cetak Struk 80mm';
-                featureBadges = [
-                  'Barcode Scanner',
-                  'Multi-Satuan',
-                  'Real-Time Stok',
-                ];
-              } else if (primaryModel === 'PET_SHOP') {
-                descriptiveSubtitle =
-                  'Terminal Pet Shop & Kebutuhan Hewan • Pemindaian SKU Pakan & Aksesoris, Multi-Satuan & Riwayat Member';
-                featureBadges = [
-                  'Barcode Scanner',
-                  'Multi-Satuan',
-                  'Real-Time Stok',
-                ];
-              }
-
-              const stationShift = getOpenShiftForStation(item.stationCode);
-              const isShiftOpen = Boolean(stationShift && stationShift.status === 'OPEN');
-
-              return (
-                <div
-                  key={item.stationCode}
-                  onMouseEnter={() => setHoveredTerminalId(item.stationCode)}
-                  onMouseLeave={() => setHoveredTerminalId(null)}
-                  onClick={() => handleTerminalCardClick(termObj)}
-                  className={`group relative border rounded-2xl select-none transition-all duration-300 ${
-                    isLockedToOtherStation
-                      ? 'opacity-65 cursor-not-allowed'
-                      : 'cursor-pointer hover:-translate-y-0.5'
-                  } ${
-                    isSplitWideLayout
-                      ? 'w-full max-w-5xl mx-auto p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8'
-                      : 'p-5 flex flex-col justify-between gap-4'
-                  } ${
-                    isLight
-                      ? isThisDeviceStation
-                        ? 'bg-emerald-50/40 border-emerald-500 shadow-[0_0_24px_rgba(16,185,129,0.18)]'
-                        : isFocused
-                        ? 'bg-white border-cyan-500 shadow-[0_0_28px_rgba(6,182,212,0.24)]'
-                        : 'bg-white border-cyan-500/45 shadow-[0_4px_20px_rgba(6,182,212,0.10)] hover:border-cyan-500 hover:shadow-[0_0_28px_rgba(6,182,212,0.24)]'
-                      : isThisDeviceStation
-                      ? 'bg-slate-900/95 border-emerald-400/75 shadow-[0_0_28px_rgba(16,185,129,0.20)]'
-                      : isFocused
-                      ? 'bg-slate-900/95 border-cyan-400/70 shadow-[0_0_32px_rgba(34,211,238,0.20)]'
-                      : 'bg-slate-900/95 border-cyan-500/30 shadow-[0_6px_24px_rgba(6,182,212,0.07)] hover:border-cyan-400/65 hover:shadow-[0_0_32px_rgba(34,211,238,0.18)]'
-                  }`}
-                >
-                  {/* SISI KIRI: Identitas Terminal, Sub-Judul Deskriptif & 3 Badge Fitur Aktif */}
-                  <div className="flex-1 min-w-0 space-y-4">
-                    {/* Baris Atas: Kapsul Kode Loket POS-XX, Jenis Usaha, & Status Binding */}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`text-xs leading-4 px-2.5 py-1 rounded-lg border font-mono font-bold tracking-wider transition-colors duration-200 ${
-                            isThisDeviceStation
-                              ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                              : isFocused
-                              ? isLight
-                                ? 'bg-cyan-50 text-cyan-700 border-cyan-400/80'
-                                : 'bg-cyan-500/15 text-cyan-300 border-cyan-400/60'
-                              : isLight
-                              ? 'bg-slate-100 text-slate-700 border-slate-300'
-                              : 'bg-slate-800/90 text-slate-300 border-slate-700'
-                          }`}
-                        >
-                          {item.stationCode}
-                        </span>
-                        <span
-                          className={`text-[11px] leading-4 px-2 py-1 rounded-lg border font-mono font-medium ${
-                            isLight
-                              ? 'bg-slate-50 text-slate-600 border-slate-200'
-                              : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
-                          }`}
-                        >
-                          INV-{item.receiptPrefixTag}-...
-                        </span>
-                        <span
-                          className={`text-[11px] leading-4 px-2.5 py-1 rounded-lg border font-medium ${
-                            isLight
-                              ? 'bg-slate-50 text-slate-700 border-slate-200'
-                              : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
-                          }`}
-                        >
-                          {activeBusinessModelDef.label}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {isThisDeviceStation && (
-                          <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35 font-mono">
-                            PC INI
-                          </span>
-                        )}
-                        {item.isHybrid && (
-                          <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-mono">
-                            HYBRID
-                          </span>
-                        )}
-                        {stationShift && stationShift.status === 'OPEN' && stationShift.isPaused ? (
-                          <span className="text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/35 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
-                            <Coffee className="w-3 h-3" />
-                            ISTIRAHAT
-                          </span>
-                        ) : stationShift && stationShift.status === 'OPEN' ? (
-                          <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            ONLINE
-                          </span>
-                        ) : (
-                          <span className="text-slate-600 dark:text-slate-300 bg-slate-500/10 border border-slate-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
-                            <Clock className="w-3 h-3" />
-                            BELUM BUKA SHIFT
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Ikon Besar + Judul Terminal + Sub-judul Deskriptif */}
-                    <div className="flex items-start gap-4">
-                      <div
-                        className={`w-14 h-14 rounded-2xl shrink-0 border flex items-center justify-center transition-all duration-300 ${
-                          isFocused
-                            ? isLight
-                              ? 'bg-cyan-50 border-cyan-400/80 shadow-[0_0_18px_rgba(34,211,238,0.28)]'
-                              : 'bg-cyan-500/15 border-cyan-400/60 shadow-[0_0_20px_rgba(34,211,238,0.28)]'
-                            : isLight
-                            ? 'bg-slate-100 border-slate-200'
-                            : 'bg-slate-800/80 border-slate-700/80'
-                        }`}
-                      >
-                        <span className="text-2xl select-none transition-transform duration-300 group-hover:scale-110" role="img">
-                          {item.emoji}
-                        </span>
-                      </div>
-
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <h3
-                          className={`font-semibold tracking-tight transition-colors duration-200 ${
-                            isSplitWideLayout ? 'text-xl sm:text-2xl leading-tight' : 'text-lg leading-6'
-                          } ${
-                            isLight
-                              ? isFocused
-                                ? 'text-cyan-950'
-                                : 'text-slate-900'
-                              : isFocused
-                              ? 'text-white'
-                              : 'text-slate-100'
-                          }`}
-                        >
-                          {item.posName}
-                        </h3>
-                        <p
-                          className={`text-xs sm:text-sm leading-relaxed ${
-                            isLight ? 'text-slate-600' : 'text-slate-300/90'
-                          }`}
-                        >
-                          {descriptiveSubtitle}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* 3 Badge Fitur Aktif */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      {featureBadges.map((badgeLabel, badgeIdx) => {
-                        const BadgeIcon =
-                          badgeIdx === 0 ? Barcode : badgeIdx === 1 ? Layers : Boxes;
-                        return (
-                          <span
-                            key={badgeLabel}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-medium transition-colors ${
-                              isLight
-                                ? 'bg-cyan-50/80 text-cyan-800 border-cyan-200 group-hover:border-cyan-300'
-                                : 'bg-cyan-500/10 text-cyan-200 border-cyan-500/25 group-hover:border-cyan-400/45'
-                            }`}
-                          >
-                            <BadgeIcon className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                            <span>{badgeLabel}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-mono font-normal text-xs shrink-0">
+                    POS
                   </div>
-
-                  {/* SISI KANAN: Panel Metrik Mini + Tombol Buka Terminal Besar & Menonjol */}
-                  <div
-                    className={`shrink-0 flex flex-col justify-between gap-3.5 ${
-                      isSplitWideLayout
-                        ? 'w-full lg:w-[340px] lg:border-l lg:pl-7 border-slate-200 dark:border-slate-800'
-                        : 'w-full border-t pt-3.5 border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    {/* Panel Metrik Mini */}
-                    <div
-                      className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
-                        isLight
-                          ? 'bg-slate-50/90 border-slate-200/90'
-                          : 'bg-slate-950/75 border-slate-800/90'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                          <Clock className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                          <span>Status Shift</span>
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold border ${
-                            isShiftOpen && stationShift?.isPaused
-                              ? isLight
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
-                              : isShiftOpen
-                              ? isLight
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
-                              : isLight
-                              ? 'bg-slate-100 text-slate-700 border-slate-300'
-                              : 'bg-slate-800/80 text-slate-300 border-slate-700'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              isShiftOpen && stationShift?.isPaused
-                                ? 'bg-amber-500'
-                                : isShiftOpen
-                                ? 'bg-emerald-500 animate-pulse'
-                                : 'bg-slate-400'
-                            }`}
-                          />
-                          {isShiftOpen && stationShift?.isPaused
-                            ? `Istirahat (${stationShift?.cashierName || 'Kasir'})`
-                            : isShiftOpen
-                            ? `Aktif (${stationShift?.cashierName || 'Kasir'})`
-                            : 'Siap Buka Shift'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                          <Package className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                          <span>Katalog SKU Aktif</span>
-                        </span>
-                        <span className={`font-mono font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                          {skuCount.toLocaleString('id-ID')} SKU
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-800/80">
-                        <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                          <Keyboard className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                          <span>Pintasan Cepat</span>
-                        </span>
-                        <span
-                          className={`font-mono text-[11px] font-medium ${
-                            isLight ? 'text-cyan-700' : 'text-cyan-300'
-                          }`}
-                        >
-                          {quickShortcuts}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Tombol Buka Terminal + Pintasan Istirahat & Ganti Loket */}
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        disabled={isLockedToOtherStation}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleTerminalCardClick(termObj);
-                        }}
-                        className={`w-full py-3.5 px-6 rounded-xl text-sm leading-5 font-semibold transition-all duration-200 text-center flex items-center justify-center gap-2 ${
-                          isLockedToOtherStation
-                            ? 'bg-slate-300 dark:bg-slate-800 text-slate-500 cursor-not-allowed'
-                            : isFocused
-                            ? 'bg-gradient-to-r from-cyan-400 to-sky-400 text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
-                            : 'bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 shadow-[0_0_16px_rgba(6,182,212,0.32)] group-hover:shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
-                        }`}
-                      >
-                        <span>
-                          {language === 'ID'
-                            ? `Buka ${item.stationCode} →`
-                            : `Open ${item.stationCode} →`}
-                        </span>
-                      </button>
-
-                      {(isShiftOpen || visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
-                        <div className="flex items-center gap-2">
-                          {isShiftOpen && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleStationBreak(item.stationCode);
-                              }}
-                              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                                stationShift?.isPaused
-                                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400'
-                                  : isLight
-                                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
-                                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/35'
-                              }`}
-                            >
-                              {stationShift?.isPaused ? (
-                                <>
-                                  <Play className="w-3.5 h-3.5" />
-                                  <span>Lanjut Online</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Coffee className="w-3.5 h-3.5" />
-                                  <span>Istirahat</span>
-                                </>
-                              )}
-                            </button>
-                          )}
-
-                          {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openPosMgmtPinPrompt({ type: 'SWITCH_STATION' });
-                              }}
-                              className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                                isLight
-                                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                                  : 'bg-slate-800/80 hover:bg-slate-800 text-slate-200 border-slate-700'
-                              }`}
-                            >
-                              <ArrowLeftRight className="w-3.5 h-3.5 text-cyan-500" />
-                              <span>Ganti Loket PC</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                  <div>
+                    <h2 className="text-base leading-6 font-medium tracking-tight">
+                      {language === 'ID' ? 'Terminal Point of Sale' : 'Point of Sale Terminals'}
+                    </h2>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Arsitektur: <strong className="text-emerald-600 dark:text-emerald-400">{getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}</strong>
+                      {' • '}
+                      Loket Perangkat: <strong className="font-mono text-cyan-600 dark:text-cyan-300">{activeDeviceIdentity?.stationCode || 'POS-01'}</strong>
+                      {visiblePosIdentities.length > 1 ? ` (dari ${visiblePosIdentities.length} loket terdaftar)` : ''}
+                    </p>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  {hasValidDeviceBinding && boundStation && (
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-semibold border flex items-center gap-1.5 ${
+                        isLight
+                          ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
+                          : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
+                      }`}
+                    >
+                      <Monitor className="w-3 h-3" />
+                      <span>PC Terikat: {boundStation.stationCode}</span>
+                    </span>
+                  )}
+
+                  {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                    <button
+                      type="button"
+                      id="btn-switch-pc-station"
+                      onClick={() => openPosMgmtPinPrompt({ type: 'SWITCH_STATION' })}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] leading-4 font-semibold border flex items-center gap-1.5 cursor-pointer transition ${
+                        isLight
+                          ? 'bg-slate-100 hover:bg-cyan-50 text-slate-800 hover:text-cyan-800 border-slate-300 hover:border-cyan-400'
+                          : 'bg-slate-800 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-300 border-slate-700 hover:border-cyan-500/40'
+                      }`}
+                    >
+                      <ArrowLeftRight className="w-3 h-3 text-cyan-500" />
+                      <span>Ganti Loket PC</span>
+                    </button>
+                  )}
+
+                  <div
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-normal tracking-widest border flex items-center gap-1.5 select-none ${
+                      isLight ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>{`${visiblePosIdentities.length} LOKET TERDAFTAR`}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto pt-2">
+                {singleActiveIdentities.map((item) => {
+                  const isSelected = activeTerminal?.id === item.stationCode || activeTerminal?.stationCode === item.stationCode;
+                  const isHovered = hoveredTerminalId === item.stationCode;
+                  const isFocused = isSelected || isHovered;
+                  const isThisDeviceStation = hasValidDeviceBinding && boundStation?.stationCode === item.stationCode;
+
+                  const termObj: Terminal = {
+                    id: item.stationCode,
+                    stationCode: item.stationCode,
+                    name: item.posName,
+                    code: item.stationCode,
+                    location: item.posTypeLabel,
+                    isActive: true,
+                    activeOrdersToday: 0,
+                    businessModel: item.posTypeLabel,
+                    businessType: item.posTypeLabel,
+                    modelType: item.modelType,
+                    isLocked: false,
+                    role: item.isHybrid ? 'HYBRID_BACKEND' : 'FRONT_END_ONLY',
+                    terminalType: item.isHybrid ? 'BACK_END' : 'FRONT_END',
+                  };
+
+                 const skuCount =
+                    item.modelType === 'fnb'
+                      ? Math.max(
+                          FNB_MENU_ITEMS.length,
+                          filterProductsByTerminal(products, termObj, false).length
+                        )
+                      : (() => {
+                          const seenSku = new Set<string>();
+                          const mergedCatalog = [
+                            ...filterProductsByTerminal(products, termObj, false),
+                            ...(products || []),
+                          ];
+                          for (const p of mergedCatalog) {
+                            if (!p || p.itemType === 'RAW_MATERIAL') continue;
+                            const idKey = String(p.id || '').trim().toLowerCase();
+                            const bcKey = String(p.barcode || p.sku || '').trim().toLowerCase();
+                            const uniqueKey = idKey || (bcKey ? `bc:${bcKey}` : '');
+                            if (uniqueKey) seenSku.add(uniqueKey);
+                          }
+                          return seenSku.size;
+                        })();
+
+                  const primaryModel = businessDomainConfig.primaryBusinessModel;
+
+                  let descriptiveSubtitle =
+                    'Terminal Transaksi Ritel Terpadu • Pemindaian Barcode Cepat, Kontrol Stok Unit/Box & Cetak Struk 80mm';
+                  let featureBadges: string[] = [
+                    'Barcode Scanner',
+                    'Multi-Satuan',
+                    'Real-Time Stok',
+                  ];
+                  let quickShortcuts = 'F2 Scan · F3 Cari · F10 Bayar';
+
+                  if (item.code === 'POS-GROSIR' || item.id === 'T-03') {
+                    descriptiveSubtitle =
+                      'Terminal Grosir & Distribusi B2B • Multi-Tier Harga Karton/Dus, Aturan MOQ & Penjualan Kredit/Tempo';
+                    featureBadges = [
+                      'Multi-Tier Grosir',
+                      'Aturan MOQ & Tempo',
+                      'Satuan Pcs/Box/Karton',
+                    ];
+                    quickShortcuts = 'F2 Scan · F3 Katalog · F10 Checkout';
+                  } else if (item.modelType === 'fnb' || item.code === 'POS-FNB' || item.id === 'T-02') {
+                    descriptiveSubtitle =
+                      'Terminal Kasir Kuliner F&B Terpadu • Menu Foto Interaktif, Dine-In/Takeaway, Nomor Meja & Resep BOM';
+                    featureBadges = [
+                      'Menu Foto Cepat',
+                      'Meja & Dine-In',
+                      'Potong BOM Otomatis',
+                    ];
+                    quickShortcuts = 'F3 Menu · KOT Dapur · F10 Bayar';
+                  } else if (item.modelType === 'building' || item.code === 'POS-BUILD' || item.id === 'T-05') {
+                    descriptiveSubtitle =
+                      'Terminal Depo Bahan Bangunan & Material • Konversi Curah m³/Ret Armada, DO Frangko/Loco & Proteksi Margin';
+                    featureBadges = [
+                      'Konversi Curah m³/Ret',
+                      'Armada DO Frangko',
+                      'Guardrail Margin',
+                    ];
+                    quickShortcuts = 'F3 Material · Mode Kontraktor · F10 DO';
+                  } else if (item.modelType === 'laundry' || primaryModel === 'LAUNDRY') {
+                    descriptiveSubtitle =
+                      'Terminal Kasir Laundry & Binatu Multi-Satuan • Timbangan Digital USB/HID, Potong Tare, Min. Berat & Durasi SLA';
+                    featureBadges = [
+                      'Timbangan Digital',
+                      '4 Satuan (kg/pcs/psg/m²)',
+                      'Auto Min. & SLA',
+                    ];
+                    quickShortcuts = 'Timbang USB/HID · F3 Layanan · F10 Bayar';
+                  } else if (item.modelType === 'salon' || item.code === 'POS-SERVICE' || item.id === 'T-08') {
+                    descriptiveSubtitle =
+                      'Terminal Jasa & Layanan Profesional • Order Pelanggan, Penugasan Stylist/Petugas & Cetak Nota Layanan';
+                    featureBadges = [
+                      'Order Jasa & Nota',
+                      'Penugasan Stylist/Staf',
+                      'Real-Time Layanan',
+                    ];
+                    quickShortcuts = 'F3 Layanan · Input Staf · F10 Bayar';
+                  } else if (item.modelType === 'fashion' || primaryModel === 'FASHION_BUTIK') {
+                    descriptiveSubtitle =
+                      'Terminal Butik & Fashion Terpadu • Pemilih Varian Ukuran/Warna, Scan Hangtag & Cetak Struk 80mm';
+                    featureBadges = [
+                      'Scan Hangtag',
+                      'Varian Ukuran/Warna',
+                      'Real-Time Stok',
+                    ];
+                  } else if (primaryModel === 'TOKO_KOSMETIK_KECANTIKAN') {
+                    descriptiveSubtitle =
+                      'Terminal Ritel Kosmetik & Kecantikan • Pemindaian Barcode Cepat, Kontrol Expired FEFO & Promo Bundling';
+                  } else if (primaryModel === 'TOKO_ATK') {
+                    descriptiveSubtitle =
+                      'Terminal Ritel Alat Tulis & Kantor • Transaksi Cepat Satuan/Pak, Diskon Member & Cetak Struk 80mm';
+                  } else if (primaryModel === 'PET_SHOP') {
+                    descriptiveSubtitle =
+                      'Terminal Pet Shop & Kebutuhan Hewan • Pemindaian SKU Pakan & Aksesoris, Multi-Satuan & Riwayat Member';
+                  }
+
+                  const stationShift = getOpenShiftForStation(item.stationCode);
+                  const isShiftOpen = Boolean(stationShift && stationShift.status === 'OPEN');
+
+                  return (
+                    <div
+                      key={item.stationCode}
+                      onMouseEnter={() => setHoveredTerminalId(item.stationCode)}
+                      onMouseLeave={() => setHoveredTerminalId(null)}
+                      onClick={() => handleTerminalCardClick(termObj)}
+                      className={`group relative border rounded-2xl select-none transition-all duration-300 cursor-pointer hover:-translate-y-0.5 w-full max-w-5xl mx-auto p-6 sm:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8 ${
+                        isLight
+                          ? isThisDeviceStation
+                            ? 'bg-emerald-50/40 border-emerald-500 shadow-[0_0_24px_rgba(16,185,129,0.18)]'
+                            : isFocused
+                            ? 'bg-white border-cyan-500 shadow-[0_0_28px_rgba(6,182,212,0.24)]'
+                            : 'bg-white border-cyan-500/45 shadow-[0_4px_20px_rgba(6,182,212,0.10)] hover:border-cyan-500 hover:shadow-[0_0_28px_rgba(6,182,212,0.24)]'
+                          : isThisDeviceStation
+                          ? 'bg-slate-900/95 border-emerald-400/75 shadow-[0_0_28px_rgba(16,185,129,0.20)]'
+                          : isFocused
+                          ? 'bg-slate-900/95 border-cyan-400/70 shadow-[0_0_32px_rgba(34,211,238,0.20)]'
+                          : 'bg-slate-900/95 border-cyan-500/30 shadow-[0_6px_24px_rgba(6,182,212,0.07)] hover:border-cyan-400/65 hover:shadow-[0_0_32px_rgba(34,211,238,0.18)]'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-xs leading-4 px-2.5 py-1 rounded-lg border font-mono font-bold tracking-wider transition-colors duration-200 ${
+                                isThisDeviceStation
+                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                  : isFocused
+                                  ? isLight
+                                    ? 'bg-cyan-50 text-cyan-700 border-cyan-400/80'
+                                    : 'bg-cyan-500/15 text-cyan-300 border-cyan-400/60'
+                                  : isLight
+                                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                  : 'bg-slate-800/90 text-slate-300 border-slate-700'
+                              }`}
+                            >
+                              {item.stationCode}
+                            </span>
+                            <span
+                              className={`text-[11px] leading-4 px-2 py-1 rounded-lg border font-mono font-medium ${
+                                isLight
+                                  ? 'bg-slate-50 text-slate-600 border-slate-200'
+                                  : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
+                              }`}
+                            >
+                              INV-{item.receiptPrefixTag}-...
+                            </span>
+                            <span
+                              className={`text-[11px] leading-4 px-2.5 py-1 rounded-lg border font-medium ${
+                                isLight
+                                  ? 'bg-slate-50 text-slate-700 border-slate-200'
+                                  : 'bg-slate-800/60 text-slate-300 border-slate-700/80'
+                              }`}
+                            >
+                              {activeBusinessModelDef.label}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {isThisDeviceStation && (
+                              <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35 font-mono">
+                                PC INI
+                              </span>
+                            )}
+                            {item.isHybrid && (
+                              <span className="text-[10px] leading-4 px-2 py-0.5 font-semibold rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-mono">
+                                HYBRID
+                              </span>
+                            )}
+                            {stationShift && stationShift.status === 'OPEN' && stationShift.isPaused ? (
+                              <span className="text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/35 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                                <Coffee className="w-3 h-3" />
+                                ISTIRAHAT
+                              </span>
+                            ) : stationShift && stationShift.status === 'OPEN' ? (
+                              <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                ONLINE
+                              </span>
+                            ) : (
+                              <span className="text-slate-600 dark:text-slate-300 bg-slate-500/10 border border-slate-500/30 font-semibold text-[10px] leading-4 px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 font-mono">
+                                <Clock className="w-3 h-3" />
+                                BELUM BUKA SHIFT
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-start gap-4">
+                          <div
+                            className={`w-14 h-14 rounded-2xl shrink-0 border flex items-center justify-center transition-all duration-300 ${
+                              isFocused
+                                ? isLight
+                                  ? 'bg-cyan-50 border-cyan-400/80 shadow-[0_0_18px_rgba(34,211,238,0.28)]'
+                                  : 'bg-cyan-500/15 border-cyan-400/60 shadow-[0_0_20px_rgba(34,211,238,0.28)]'
+                                : isLight
+                                ? 'bg-slate-100 border-slate-200'
+                                : 'bg-slate-800/80 border-slate-700/80'
+                            }`}
+                          >
+                            <span className="text-2xl select-none transition-transform duration-300 group-hover:scale-110" role="img">
+                              {item.emoji}
+                            </span>
+                          </div>
+
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            <h3
+                              className={`font-semibold tracking-tight transition-colors duration-200 text-xl sm:text-2xl leading-tight ${
+                                isLight
+                                  ? isFocused
+                                    ? 'text-cyan-950'
+                                    : 'text-slate-900'
+                                  : isFocused
+                                  ? 'text-white'
+                                  : 'text-slate-100'
+                              }`}
+                            >
+                              {item.posName}
+                            </h3>
+                            <p
+                              className={`text-xs sm:text-sm leading-relaxed ${
+                                isLight ? 'text-slate-600' : 'text-slate-300/90'
+                              }`}
+                            >
+                              {descriptiveSubtitle}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {featureBadges.map((badgeLabel, badgeIdx) => {
+                            const BadgeIcon =
+                              badgeIdx === 0 ? Barcode : badgeIdx === 1 ? Layers : Boxes;
+                            return (
+                              <span
+                                key={badgeLabel}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-medium transition-colors ${
+                                  isLight
+                                    ? 'bg-cyan-50/80 text-cyan-800 border-cyan-200 group-hover:border-cyan-300'
+                                    : 'bg-cyan-500/10 text-cyan-200 border-cyan-500/25 group-hover:border-cyan-400/45'
+                                }`}
+                              >
+                                <BadgeIcon className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                                <span>{badgeLabel}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex flex-col justify-between gap-3.5 w-full lg:w-[340px] lg:border-l lg:pl-7 border-slate-200 dark:border-slate-800">
+                        <div
+                          className={`p-3.5 rounded-xl border space-y-2.5 text-xs ${
+                            isLight
+                              ? 'bg-slate-50/90 border-slate-200/90'
+                              : 'bg-slate-950/75 border-slate-800/90'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                              <Clock className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                              <span>Status Shift</span>
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold border ${
+                                isShiftOpen && stationShift?.isPaused
+                                  ? isLight
+                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                    : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                                  : isShiftOpen
+                                  ? isLight
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                                  : isLight
+                                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                  : 'bg-slate-800/80 text-slate-300 border-slate-700'
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isShiftOpen && stationShift?.isPaused
+                                    ? 'bg-amber-500'
+                                    : isShiftOpen
+                                    ? 'bg-emerald-500 animate-pulse'
+                                    : 'bg-slate-400'
+                                }`}
+                              />
+                              {isShiftOpen && stationShift?.isPaused
+                                ? `Istirahat (${stationShift?.cashierName || 'Kasir'})`
+                                : isShiftOpen
+                                ? `Aktif (${stationShift?.cashierName || 'Kasir'})`
+                                : 'Siap Buka Shift'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                              <Package className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                              <span>Katalog SKU Aktif</span>
+                            </span>
+                            <span className={`font-mono font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                              {skuCount.toLocaleString('id-ID')} SKU
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-200/80 dark:border-slate-800/80">
+                            <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                              <Keyboard className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+                              <span>Pintasan Cepat</span>
+                            </span>
+                            <span
+                              className={`font-mono text-[11px] font-medium ${
+                                isLight ? 'text-cyan-700' : 'text-cyan-300'
+                              }`}
+                            >
+                              {quickShortcuts}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTerminalCardClick(termObj);
+                            }}
+                            className={`w-full py-3.5 px-6 rounded-xl text-sm leading-5 font-semibold transition-all duration-200 text-center flex items-center justify-center gap-2 ${
+                              isFocused
+                                ? 'bg-gradient-to-r from-cyan-400 to-sky-400 text-slate-950 shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
+                                : 'bg-gradient-to-r from-cyan-500 to-sky-500 hover:from-cyan-400 hover:to-sky-400 text-slate-950 shadow-[0_0_16px_rgba(6,182,212,0.32)] group-hover:shadow-[0_0_24px_rgba(34,211,238,0.45)] cursor-pointer active:scale-[0.99]'
+                            }`}
+                          >
+                            <span>
+                              {language === 'ID'
+                                ? `Buka ${item.stationCode} →`
+                                : `Open ${item.stationCode} →`}
+                            </span>
+                          </button>
+
+                          {(isShiftOpen || visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                            <div className="flex items-center gap-2">
+                              {isShiftOpen && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleStationBreak(item.stationCode);
+                                  }}
+                                  className={`flex-1 py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                                    stationShift?.isPaused
+                                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400'
+                                      : isLight
+                                      ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300'
+                                      : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/35'
+                                  }`}
+                                >
+                                  {stationShift?.isPaused ? (
+                                    <>
+                                      <Play className="w-3.5 h-3.5" />
+                                      <span>Lanjut Online</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Coffee className="w-3.5 h-3.5" />
+                                      <span>Istirahat</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+
+                              {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openPosMgmtPinPrompt({ type: 'SWITCH_STATION' });
+                                  }}
+                                  className={`flex-1 py-2 px-3 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                                    isLight
+                                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                      : 'bg-slate-800/80 hover:bg-slate-800 text-slate-200 border-slate-700'
+                                  }`}
+                                >
+                                  <ArrowLeftRight className="w-3.5 h-3.5 text-cyan-500" />
+                                  <span>Ganti Loket PC</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           );
         })()
       ) : (
-        /* ========================================================================= */
-        /* 2. ARSITEKTUR LAYAR KERJA KASIR (ZERO SCROLL VIEWPORT 1 LAYAR PENUH)      */
-        /* ========================================================================= */
         <div className="h-full flex flex-col overflow-hidden w-full">
-          {/* BILAH ATAS */}
           <div
             id="bar-pos-top-control"
             className={`min-h-11 flex-shrink-0 mb-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border flex flex-wrap items-center justify-between gap-1.5 transition-all duration-200 select-none ${
@@ -4913,7 +4634,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
               </div>
 
-              {/* Input Scan Barcode [F2] */}
               <form onSubmit={handleBarcodeSubmit} className="relative w-36 sm:w-44 xl:w-52 shrink-0">
                 <Barcode className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
@@ -4989,7 +4709,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       ? 'bg-slate-50 hover:bg-amber-50 border-slate-300 text-slate-800'
                       : 'bg-slate-950 hover:bg-slate-800 border-slate-700 text-slate-300'
                   }`}
-                  title="Aktifkan jika pelanggan proyek tetap berhak mendapat Harga Tier 3 meski mengambil tambahan item satuan"
                 >
                   <HardHat className={`w-3.5 h-3.5 ${isContractorMode ? 'text-amber-300' : 'text-amber-500'}`} />
                   <span>Mode Pelanggan Kontraktor</span>
@@ -5148,11 +4867,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
                     : 'border-amber-500/45 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300'
                 }`}
-                title={
-                  activeStationShift?.isPaused
-                    ? 'Akhiri mode istirahat dan kembalikan loket ke Online'
-                    : 'Masuk mode Istirahat (status di navbar otomatis berkurang)'
-                }
               >
                 {activeStationShift?.isPaused ? (
                   <>
@@ -5180,7 +4894,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 id="btn-pos-zreport-close-shift"
                 onClick={() => setIsQuickZReportOpen(true)}
                 className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] leading-4 font-medium flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99] shrink-0"
-                title="Ringkasan Tutup Shift (Z-Report) & Hitung Selisih Kas Laci"
               >
                 <FileSpreadsheet className="w-3 h-3" />
                 <span>Tutup Shift (Z-Report)</span>
@@ -5211,11 +4924,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             </div>
           </div>
 
-          {/* AREA TENGAH */}
           <div className={`flex-1 mb-1 flex flex-col ${isFnbPhotoMenuMode || isSalonServiceTerminal || isLaundryTerminal ? 'min-h-0 overflow-hidden' : 'min-h-0 overflow-y-auto'}`}>
             {isFnbPhotoMenuMode ? (
               <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden h-full">
-                {/* KOLOM KIRI: KATALOG MENU */}
                 <div className="w-full lg:w-[65%] flex flex-col h-full min-h-0 overflow-hidden">
                   <div className={`p-2.5 rounded-xl border flex flex-col gap-2 mb-2 shrink-0 ${isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'}`}>
                     <div className="flex items-center gap-2">
@@ -5322,9 +5033,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                   </div>
                 </div>
 
-                {/* KOLOM KANAN: KERANJANG & BAYAR */}
                 <div className={`w-full lg:w-[35%] flex flex-col h-full rounded-2xl border overflow-hidden ${isLight ? 'bg-white border-slate-300' : 'bg-[#161b22] border-[#30363d]'}`}>
-                  {/* HEADER KONTROL DINE-IN / TAKEAWAY / DELIVERY & PILIH MEJA */}
                   <div className={`p-2.5 border-b space-y-2 shrink-0 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'}`}>
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="grid grid-cols-3 gap-1 flex-1 bg-black/20 p-1 rounded-xl border border-slate-800">
@@ -5477,7 +5186,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 </span>
                               )}
                             </div>
-                            {/* Sub-baris Topping, Level Pedas / Gula-Es, & Catatan */}
                             {hasToppingsOrNotes && (
                               <div className="mt-0.5 pl-1.5 border-l-2 border-emerald-500/40 space-y-0.5 text-[10px] leading-snug">
                                 {mods?.toppings && mods.toppings.length > 0 && (
@@ -5627,7 +5335,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </span>
                     </div>
 
-                    {/* Input Nominal Ringkas F&B (Tunai / Split) — Tanpa Kasbon di F&B */}
                     {paymentMethod === 'SPLIT' ? (
                       <div className="p-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 space-y-1">
                         <div className="grid grid-cols-2 gap-1.5">
@@ -5668,7 +5375,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   setSplitNonCashChannel(next);
                                 }}
                                 className="text-[9px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
-                                title="Klik untuk ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
                               >
                                 Ubah
                               </button>
@@ -5695,7 +5401,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
                                 }
                                 className="h-7 px-1.5 rounded text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
-                                title="Isi otomatis sisa kekurangan"
                               >
                                 Sisa
                               </button>
@@ -5772,7 +5477,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     ) : null}
 
-                    {/* Tombol Metode Bayar F&B: Tunai, QRIS, Debit, Split (Tanpa Kasbon/DP) */}
                     <div
                       className={`grid grid-cols-4 p-0.5 rounded-lg border text-[11px] gap-0.5 ${
                         isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950 border-slate-800'
@@ -5851,9 +5555,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 </div>
               </div>
             ) : (isSalonServiceTerminal || isLaundryTerminal) ? (
-              /* SPLIT-SCREEN VERTIKAL 2 KOLOM SEKTOR SERVICE (BARBERSHOP & SALON / LAUNDRY) */
               <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-2.5 overflow-hidden h-full">
-                {/* KOLOM KIRI (~62%): PEMILIH STYLIST / INTAKE LAUNDRY & GRID KATALOG LAYANAN */}
                 <div
                   className={`w-full lg:w-[62%] flex flex-col h-full min-h-0 rounded-xl border overflow-hidden ${
                     isLight
@@ -5863,7 +5565,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 >
                   {isSalonServiceTerminal ? (
                     <>
-                      {/* Bar Atas Kolom Kiri: Pemilih Stylist Utama & Pil Filter Kategori Cepat */}
                       <div
                         className={`p-2.5 border-b space-y-2 shrink-0 ${
                           isLight ? 'bg-purple-50/60 border-purple-200' : 'bg-purple-500/10 border-purple-500/25'
@@ -5905,7 +5606,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           )}
                         </div>
 
-                        {/* Pil Filter Kategori Cepat: Semua, Satuan, Paket Bundling, Add-on, Retail */}
                         <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1 border-t border-purple-500/20">
                           <div className="flex items-center gap-1 flex-wrap">
                             {(
@@ -5942,7 +5642,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                         </div>
                       </div>
 
-                      {/* Grid Kartu Layanan & Produk Salon (2–3 Kolom Responsif dengan Scroll Internal) */}
                       <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
                         {filteredSalonServiceCatalog.length === 0 ? (
                           <div className="h-full flex flex-col items-center justify-center text-center text-xs text-slate-500 py-8">
@@ -5999,7 +5698,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     </>
                   ) : (
-                    /* KOLOM KIRI LAUNDRY: TAB TRANSAKSI/TRACKING, INTAKE CEPAT & GRID KATALOG LAUNDRY */
                     <>
                       <div
                         className={`px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 border-b shrink-0 ${
@@ -6126,7 +5824,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             </div>
                           </div>
 
-                          {/* Form Cepat Intake Pelanggan & Fisik Pakaian */}
                           <div
                             className={`px-2.5 py-1.5 border-t grid grid-cols-2 sm:grid-cols-6 gap-1.5 items-end shrink-0 ${
                               isLight ? 'bg-cyan-50/40 border-slate-200' : 'bg-slate-900/80 border-slate-800'
@@ -6254,7 +5951,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             </div>
                           </div>
 
-                          {/* Pil Filter Kategori Satuan Laundry */}
                           <div
                             className={`px-2.5 py-1.5 border-t border-b flex flex-wrap items-center justify-between gap-1.5 shrink-0 ${
                               isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-950/60 border-slate-800'
@@ -6291,7 +5987,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             </span>
                           </div>
 
-                          {/* Grid Kartu Layanan Laundry (2–3 Kolom Responsif dengan Scroll Internal) */}
                           <div className="flex-1 min-h-0 overflow-y-auto p-2.5">
                             <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
                               {filteredQuickLaundryServices.map((srv) => {
@@ -6340,7 +6035,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                             setIsDigitalScaleModalOpen(true);
                                           }}
                                           className="px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
-                                          title={`Timbang ${srv.name} (Min. ${minOrderVal || 2} kg)`}
                                         >
                                           <Scale className="w-2.5 h-2.5" />
                                           <span>Timbang</span>
@@ -6375,7 +6069,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                   )}
                 </div>
 
-                {/* KOLOM KANAN (~38%): DAFTAR BELANJA & PANEL PEMBAYARAN STRUK */}
                 <div
                   className={`w-full lg:w-[38%] flex flex-col h-full min-h-0 rounded-xl border overflow-hidden ${
                     isLight
@@ -6383,7 +6076,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       : 'bg-slate-900 border-cyan-500/35 text-white'
                   }`}
                 >
-                  {/* Header Daftar Belanja */}
                   <div
                     className={`px-3 py-2 border-b flex items-center justify-between text-xs shrink-0 ${
                       isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
@@ -6410,7 +6102,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     </button>
                   </div>
 
-                  {/* Daftar Item Keranjang Vertikal */}
                   <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
                     {cart.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-2">
@@ -6499,7 +6190,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                               ? 'bg-purple-50 border-purple-300 text-purple-800'
                                               : 'bg-purple-500/15 border-purple-500/35 text-purple-200'
                                           }`}
-                                          title="Pilih Stylist / Kapster untuk layanan ini"
                                         >
                                           {activeServiceStylists.map((st) => (
                                             <option key={st.id} value={st.id}>
@@ -6534,7 +6224,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 </div>
                               </div>
 
-                              {/* Kontrol +/- Qty, Subtotal & Hapus */}
                               <div
                                 className="flex flex-col items-end gap-1 shrink-0"
                                 onClick={(e) => e.stopPropagation()}
@@ -6597,13 +6286,11 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     )}
                   </div>
 
-                  {/* Panel Ringkasan Pembayaran Terkunci di Bawah Kolom Kanan */}
                   <div
                     className={`p-2.5 border-t space-y-2 shrink-0 ${
                       isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'
                     }`}
                   >
-                    {/* Baris Subtotal, PPN & TOTAL Besar */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="space-y-0.5 text-[11px]">
                         <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
@@ -6645,7 +6332,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     </div>
 
-                    {/* Opsi Status Bayar Khusus Laundry (Lunas Awal / DP / Bayar Ambil) */}
                     {isLaundryTerminal && (
                       <div
                         className={`grid grid-cols-3 p-0.5 rounded-lg border text-[11px] gap-0.5 ${
@@ -6686,7 +6372,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     )}
 
-                    {/* Input Diterima / Split / Kasbon DP */}
                     {paymentMethod === 'SPLIT' ? (
                       <div className="p-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 space-y-1">
                         <div className="grid grid-cols-2 gap-1.5">
@@ -6726,7 +6411,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   setSplitNonCashChannel(next);
                                 }}
                                 className="text-[9px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
-                                title="Klik untuk ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
                               >
                                 Ubah
                               </button>
@@ -6752,7 +6436,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
                                 }
                                 className="h-7 px-1.5 rounded text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
-                                title="Isi otomatis sisa kekurangan"
                               >
                                 Sisa
                               </button>
@@ -6908,7 +6591,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     )}
 
-                    {/* Metode Tunai / QRIS / Debit / Split / (Kasbon khusus Laundry) & Tombol Bayar [F10] */}
                     <div className="flex items-center gap-1.5 pt-0.5">
                       <div
                         className={`grid ${
@@ -7020,7 +6702,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 </div>
               </div>
             ) : (
-              /* TABEL GRID TRANSAKSI KASIR */
               <div
                 id="card-pos-cart-table"
                 className={`${
@@ -7033,7 +6714,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     : 'border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] bg-slate-900 text-white'
                 }`}
               >
-                {/* Terminal Contextual Operating Bar */}
                 {activeTerminal?.id === 'T-01' && (
                   <div className="px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/20 flex flex-wrap items-center justify-between gap-2 text-xs leading-5">
                     <span className="font-medium text-cyan-600 dark:text-cyan-400">
@@ -7046,7 +6726,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
                 {activeTerminal?.id === 'T-02' && (
                   <div className="px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2 text-xs leading-5">
-                    <span className="font-medium text-amber-600 dark:text-amber-400">F&B Mode:</span>
+                    <span className="font-medium text-amber-600 dark:text-amber-400">F&amp;B Mode:</span>
                     <button
                       type="button"
                       onClick={() =>
@@ -7091,7 +6771,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
                 {isFashionTerminal && (
                   <div className="border-b border-purple-500/25 shrink-0">
-                    {/* Fashion & Butik Operational Bar */}
                     <div
                       className={`px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs ${
                         isLight
@@ -7105,7 +6784,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           <span>POS Butik &amp; Fashion</span>
                         </span>
 
-                        {/* Pemilih Pramuniaga / Fashion Advisor */}
                         <div className="flex items-center gap-1">
                           <UserCheck className="w-3.5 h-3.5 text-purple-500 shrink-0" />
                           <select
@@ -7117,7 +6795,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 ? 'bg-white border-purple-300 text-slate-800'
                                 : 'bg-slate-950 border-purple-500/35 text-slate-100'
                             }`}
-                            title="Pilih Pramuniaga / Fashion Advisor untuk pencatatan komisi"
                           >
                             <option value="">Pramuniaga: Kasir Langsung</option>
                             {fashionAdvisorChoices.map((emp) => (
@@ -7211,7 +6888,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       </div>
                     </div>
 
-                    {/* Quick Fashion Article Matrix Bar */}
                     <div
                       className={`px-2.5 py-1 border-t flex items-center gap-1.5 overflow-x-auto ${
                         isLight ? 'bg-white border-slate-200' : 'bg-slate-900/70 border-slate-800'
@@ -7255,7 +6931,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       })}
                     </div>
 
-                    {/* Inline Quick Manual Nota Discount Panel (<= 15% Kasir Mandiri, > 15% PIN SPV) */}
                     {isQuickFashionDiscOpen && (
                       <div
                         className={`px-2.5 py-2 border-t flex flex-wrap items-center gap-2 text-xs ${
@@ -7436,7 +7111,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
                 {activeTerminal?.id === 'T-06' && (
                   <div className="px-3 py-1.5 bg-cyan-500/10 border-b border-cyan-500/20 flex items-center justify-between text-xs leading-5">
-                    <span className="font-medium text-cyan-600 dark:text-cyan-400">Elektronik & Gadget:</span>
+                    <span className="font-medium text-cyan-600 dark:text-cyan-400">Elektronik &amp; Gadget:</span>
                     <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">Input Nomor Seri / IMEI tercetak otomatis pada struk</span>
                   </div>
                 )}
@@ -7449,7 +7124,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
                 {isLaundryTerminal ? (
                   <div className="border-b border-cyan-500/25 shrink-0">
-                    {/* Sub-Tab Laundry: Transaksi & Input Order vs Tracking Cucian & Rak */}
                     <div
                       className={`px-2.5 py-1 flex flex-wrap items-center justify-between gap-1.5 border-b ${
                         isLight
@@ -7511,404 +7185,399 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
 
                     {laundryActiveTab === 'ORDER' && (
                       <>
-                    <div className="px-2.5 py-1 bg-cyan-500/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px] leading-4">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-1">
-                          <span>🧺</span>
-                          <span>Kasir Laundry Multi-Satuan</span>
-                        </span>
-                        <input
-                          type="text"
-                          value={stylistName}
-                          onChange={(e) => setStylistName(e.target.value)}
-                          placeholder="Rak / Petugas..."
-                          className={`w-28 h-6 px-2 py-0 rounded-md border text-[11px] outline-none ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900'
-                              : 'bg-slate-900 border-slate-700 text-white'
-                          }`}
-                        />
-                        {scaleLiveState.connected && (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>
-                              Serial: {scaleLiveState.netKg.toFixed(2)} kg (Tare {scaleLiveState.tareKg.toFixed(2)})
+                        <div className="px-2.5 py-1 bg-cyan-500/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px] leading-4">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-1">
+                              <span>🧺</span>
+                              <span>Kasir Laundry Multi-Satuan</span>
                             </span>
-                          </span>
-                        )}
-                      </div>
+                            <input
+                              type="text"
+                              value={stylistName}
+                              onChange={(e) => setStylistName(e.target.value)}
+                              placeholder="Rak / Petugas..."
+                              className={`w-28 h-6 px-2 py-0 rounded-md border text-[11px] outline-none ${
+                                isLight
+                                  ? 'bg-white border-slate-300 text-slate-900'
+                                  : 'bg-slate-900 border-slate-700 text-white'
+                              }`}
+                            />
+                            {scaleLiveState.connected && (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-mono flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span>
+                                  Serial: {scaleLiveState.netKg.toFixed(2)} kg (Tare {scaleLiveState.tareKg.toFixed(2)})
+                                </span>
+                              </span>
+                            )}
+                          </div>
 
-                      <div className="flex items-center gap-1.5">
-                        {luasLaundryServices.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAreaTargetCartIndex(null);
-                              setAreaModalService(luasLaundryServices[0]);
-                            }}
-                            className="px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
-                          >
-                            <Maximize2 className="w-3 h-3" />
-                            <span>Hitung P×L (m²)</span>
-                          </button>
-                        )}
-                        <button
-                          id="btn-open-digital-scale"
-                          type="button"
-                          onClick={() => {
-                            const selectedRow =
-                              selectedCartIndex !== null ? cart[selectedCartIndex] : undefined;
-                            const defaultKiloan =
-                              selectedRow && selectedRow.product.laundryUnitType === 'KILOAN'
-                                ? selectedRow.product
-                                : kiloanLaundryServices[0] || null;
-                            setScaleTargetService(defaultKiloan);
-                            setIsDigitalScaleModalOpen(true);
-                          }}
-                          className="px-2.5 py-0.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
-                        >
-                          <Scale className="w-3 h-3" />
-                          <span>Timbangan Digital</span>
-                          {scaleLiveState.netKg > 0 && (
-                            <span className="px-1 py-0 rounded bg-black/25 font-mono text-[10px]">
-                              {scaleLiveState.netKg.toFixed(2)} kg
-                            </span>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Form Cepat Intake & Pencegahan Tertukar */}
-                    <div
-                      className={`px-2.5 py-1 border-t grid grid-cols-1 md:grid-cols-12 gap-1.5 items-end ${
-                        isLight ? 'bg-cyan-50/40 border-slate-200' : 'bg-slate-900/80 border-slate-800'
-                      }`}
-                    >
-                      <div className="md:col-span-2">
-                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
-                          Nama Pelanggan
-                        </label>
-                        <input
-                          id="input-laundry-customer-name"
-                          type="text"
-                          value={selectedCustomer?.name || laundryCustomerName}
-                          onChange={(e) => {
-                            if (selectedCustomer) handleClearCustomer();
-                            setLaundryCustomerName(e.target.value);
-                          }}
-                          placeholder="Walk-in / Nama..."
-                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
-                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                          }`}
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
-                          No. WhatsApp
-                        </label>
-                        <input
-                          id="input-laundry-customer-wa"
-                          type="tel"
-                          value={selectedCustomer?.phone || laundryCustomerPhone}
-                          onChange={(e) => setLaundryCustomerPhone(e.target.value)}
-                          placeholder="0812xxxx..."
-                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] font-mono outline-none ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
-                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                          }`}
-                        />
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
-                          Fisik Pakaian (Total Pcs)
-                        </label>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setLaundryTotalPieces((p) => Math.max(1, p - 1))}
-                            className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
-                              isLight
-                                ? 'bg-white border-slate-300 text-slate-700'
-                                : 'bg-slate-950 border-slate-700 text-slate-200'
-                            }`}
-                          >
-                            <Minus className="w-2.5 h-2.5" />
-                          </button>
-                          <input
-                            id="input-laundry-total-pcs"
-                            type="number"
-                            min={1}
-                            value={laundryTotalPieces}
-                            onChange={(e) =>
-                              setLaundryTotalPieces(Math.max(1, parseInt(e.target.value, 10) || 1))
-                            }
-                            className={`w-full h-7 text-center rounded-md border text-[11px] font-mono font-bold outline-none ${
-                              isLight
-                                ? 'bg-white border-slate-300 text-slate-900'
-                                : 'bg-slate-950 border-slate-700 text-white'
-                            }`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setLaundryTotalPieces((p) => p + 1)}
-                            className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
-                              isLight
-                                ? 'bg-white border-slate-300 text-slate-700'
-                                : 'bg-slate-950 border-slate-700 text-slate-200'
-                            }`}
-                          >
-                            <Plus className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="md:col-span-4">
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <label className="text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 truncate">
-                            Catatan Kondisi Awal
-                          </label>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {['Pisah Putih', 'Ada Noda', 'Kancing Longgar'].map((chip) => (
+                          <div className="flex items-center gap-1.5">
+                            {luasLaundryServices.length > 0 && (
                               <button
-                                key={chip}
                                 type="button"
-                                onClick={() =>
-                                  setLaundryConditionNotes((prev) =>
-                                    prev.trim()
-                                      ? prev.includes(chip)
-                                        ? prev
-                                        : `${prev}, ${chip}`
-                                      : chip
-                                  )
-                                }
-                                className={`px-1 py-0 rounded text-[9px] leading-3.5 border cursor-pointer ${
-                                  isLight
-                                    ? 'bg-white border-amber-300 text-amber-800 hover:bg-amber-50'
-                                    : 'bg-amber-500/10 border-amber-500/35 text-amber-300 hover:bg-amber-500/20'
-                                }`}
+                                onClick={() => {
+                                  setAreaTargetCartIndex(null);
+                                  setAreaModalService(luasLaundryServices[0]);
+                                }}
+                                className="px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
                               >
-                                +{chip}
+                                <Maximize2 className="w-3 h-3" />
+                                <span>Hitung P×L (m²)</span>
                               </button>
-                            ))}
+                            )}
+                            <button
+                              id="btn-open-digital-scale"
+                              type="button"
+                              onClick={() => {
+                                const selectedRow =
+                                  selectedCartIndex !== null ? cart[selectedCartIndex] : undefined;
+                                const defaultKiloan =
+                                  selectedRow && selectedRow.product.laundryUnitType === 'KILOAN'
+                                    ? selectedRow.product
+                                    : kiloanLaundryServices[0] || null;
+                                setScaleTargetService(defaultKiloan);
+                                setIsDigitalScaleModalOpen(true);
+                              }}
+                              className="px-2.5 py-0.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-sm transition active:scale-[0.99]"
+                            >
+                              <Scale className="w-3 h-3" />
+                              <span>Timbangan Digital</span>
+                              {scaleLiveState.netKg > 0 && (
+                                <span className="px-1 py-0 rounded bg-black/25 font-mono text-[10px]">
+                                  {scaleLiveState.netKg.toFixed(2)} kg
+                                </span>
+                              )}
+                            </button>
                           </div>
                         </div>
-                        <input
-                          id="input-laundry-condition-notes"
-                          type="text"
-                          value={laundryConditionNotes}
-                          onChange={(e) => setLaundryConditionNotes(e.target.value)}
-                          placeholder="Misal: Kemeja putih pisah warna, noda kerah..."
-                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
-                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                          }`}
-                        />
-                      </div>
 
-                      <div className="md:col-span-2">
-                        <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
-                          Paket SLA Selesai
-                        </label>
-                        <select
-                          value={String(laundrySlaOverrideHours)}
-                          onChange={(e) =>
-                            setLaundrySlaOverrideHours(
-                              e.target.value === 'AUTO' ? 'AUTO' : Number(e.target.value)
-                            )
-                          }
-                          className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none cursor-pointer ${
-                            isLight
-                              ? 'bg-white border-indigo-300 text-indigo-900'
-                              : 'bg-slate-950 border-indigo-500/40 text-indigo-200'
+                        <div
+                          className={`px-2.5 py-1 border-t grid grid-cols-1 md:grid-cols-12 gap-1.5 items-end ${
+                            isLight ? 'bg-cyan-50/40 border-slate-200' : 'bg-slate-900/80 border-slate-800'
                           }`}
                         >
-                          <option value="AUTO">Auto Layanan ({computedLaundrySla.hours}j)</option>
-                          <option value="6">Express 6 Jam</option>
-                          <option value="24">Kilat 24 Jam</option>
-                          <option value="48">Reguler 48 Jam</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Penugasan Awal Petugas Produksi (Opsional - Non-Blocking, Sinkron Komisi HR) */}
-                    <div
-                      className={`px-2.5 py-1 border-t flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
-                        isLight ? 'bg-indigo-50/40 border-slate-200 text-slate-700' : 'bg-slate-900/60 border-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold">
-                        <UserCheck className="w-3 h-3" />
-                        <span>Petugas Produksi (Opsional):</span>
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Op. Cuci:</span>
-                        <select
-                          value={laundryWasherId}
-                          onChange={(e) => setLaundryWasherId(e.target.value)}
-                          aria-label="Pilih Operator Cuci Awal"
-                          className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
-                              : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                          }`}
-                        >
-                          <option value="">-- Otomatis / Isi di Tracking --</option>
-                          {laundryStaffChoices.map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.role})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400">Teknisi Sepatu/Karpet:</span>
-                        <select
-                          value={laundrySpecialistId}
-                          onChange={(e) => setLaundrySpecialistId(e.target.value)}
-                          aria-label="Pilih Teknisi Sepatu atau Karpet Awal"
-                          className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
-                            isLight
-                              ? 'bg-white border-slate-300 text-slate-900 focus:border-amber-500'
-                              : 'bg-slate-950 border-slate-700 text-white focus:border-amber-400'
-                          }`}
-                        >
-                          <option value="">-- Opsional --</option>
-                          {laundryStaffChoices.map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.role})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Katalog Cepat Layanan Laundry 4 Satuan */}
-                    <div
-                      className={`px-2.5 py-1.5 border-t space-y-1 ${
-                        isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-950/60 border-slate-800'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {(
-                            [
-                              { id: 'ALL', label: 'Semua Layanan' },
-                              { id: 'KILOAN', label: 'Kiloan (kg)' },
-                              { id: 'SATUAN', label: 'Satuan (pcs/stel)' },
-                              { id: 'PASANG', label: 'Pasang' },
-                              { id: 'LUAS', label: 'Luas (m²)' },
-                            ] as const
-                          ).map((tab) => (
-                            <button
-                              key={tab.id}
-                              type="button"
-                              onClick={() => setLaundryCatalogFilter(tab.id)}
-                              className={`px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer transition ${
-                                laundryCatalogFilter === tab.id
-                                  ? 'bg-cyan-600 text-white border-cyan-500'
-                                  : isLight
-                                  ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                                  : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
-                              }`}
-                            >
-                              {tab.label}
-                            </button>
-                          ))}
-                        </div>
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono hidden sm:inline">
-                          Klik layanan untuk tambah • Min. Berat &amp; SLA otomatis tercatat
-                        </span>
-                      </div>
-
-                      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                        {filteredQuickLaundryServices.map((srv) => {
-                          const isKiloan =
-                            srv.laundryUnitType === 'KILOAN' ||
-                            (srv.unit || '').toLowerCase() === 'kg';
-                          const isLuas =
-                            srv.laundryUnitType === 'LUAS' ||
-                            (srv.unit || '').toLowerCase().includes('m2');
-                          const minOrderVal = Number(srv.minOrderWeightKg ?? srv.minOrderQty ?? 0);
-                          return (
-                            <div
-                              key={srv.id}
-                              onClick={() => handleAddToCart(srv, 1)}
-                              className={`shrink-0 w-44 px-2 py-1.5 rounded-lg border cursor-pointer transition flex flex-col justify-between gap-0.5 ${
+                          <div className="md:col-span-2">
+                            <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                              Nama Pelanggan
+                            </label>
+                            <input
+                              id="input-laundry-customer-name"
+                              type="text"
+                              value={selectedCustomer?.name || laundryCustomerName}
+                              onChange={(e) => {
+                                if (selectedCustomer) handleClearCustomer();
+                                setLaundryCustomerName(e.target.value);
+                              }}
+                              placeholder="Walk-in / Nama..."
+                              className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
                                 isLight
-                                  ? 'bg-white hover:border-cyan-500 border-slate-200 shadow-2xs'
-                                  : 'bg-slate-900 hover:border-cyan-400/60 border-slate-800'
+                                  ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
                               }`}
-                            >
-                              <div className="space-y-0.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[9px] font-mono uppercase px-1 py-0 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
-                                    {srv.laundryUnitType || srv.unit}
-                                  </span>
-                                  {srv.slaDuration && (
-                                    <span className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300 truncate">
-                                      ⏱ {srv.slaDuration}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[11px] font-semibold leading-tight line-clamp-1">
-                                  {srv.name}
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-slate-200/70 dark:border-slate-800">
-                                <div className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                  Rp {srv.sell_price.toLocaleString('id-ID')}/{srv.unit}
-                                </div>
-                                {isKiloan ? (
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                              No. WhatsApp
+                            </label>
+                            <input
+                              id="input-laundry-customer-wa"
+                              type="tel"
+                              value={selectedCustomer?.phone || laundryCustomerPhone}
+                              onChange={(e) => setLaundryCustomerPhone(e.target.value)}
+                              placeholder="0812xxxx..."
+                              className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] font-mono outline-none ${
+                                isLight
+                                  ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                              }`}
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                              Fisik Pakaian (Total Pcs)
+                            </label>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setLaundryTotalPieces((p) => Math.max(1, p - 1))}
+                                className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-700'
+                                    : 'bg-slate-950 border-slate-700 text-slate-200'
+                                }`}
+                              >
+                                <Minus className="w-2.5 h-2.5" />
+                              </button>
+                              <input
+                                id="input-laundry-total-pcs"
+                                type="number"
+                                min={1}
+                                value={laundryTotalPieces}
+                                onChange={(e) =>
+                                  setLaundryTotalPieces(Math.max(1, parseInt(e.target.value, 10) || 1))
+                                }
+                                className={`w-full h-7 text-center rounded-md border text-[11px] font-mono font-bold outline-none ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-900'
+                                    : 'bg-slate-950 border-slate-700 text-white'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setLaundryTotalPieces((p) => p + 1)}
+                                className={`w-6 h-7 rounded-md border flex items-center justify-center cursor-pointer ${
+                                  isLight
+                                    ? 'bg-white border-slate-300 text-slate-700'
+                                    : 'bg-slate-950 border-slate-700 text-slate-200'
+                                }`}
+                              >
+                                <Plus className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="md:col-span-4">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <label className="text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 truncate">
+                                Catatan Kondisi Awal
+                              </label>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {['Pisah Putih', 'Ada Noda', 'Kancing Longgar'].map((chip) => (
                                   <button
+                                    key={chip}
                                     type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setScaleTargetService(srv);
-                                      setIsDigitalScaleModalOpen(true);
-                                    }}
-                                    className="px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
-                                    title={`Timbang ${srv.name} (Min. ${minOrderVal || 2} kg)`}
+                                    onClick={() =>
+                                      setLaundryConditionNotes((prev) =>
+                                        prev.trim()
+                                          ? prev.includes(chip)
+                                            ? prev
+                                            : `${prev}, ${chip}`
+                                          : chip
+                                      )
+                                    }
+                                    className={`px-1 py-0 rounded text-[9px] leading-3.5 border cursor-pointer ${
+                                      isLight
+                                        ? 'bg-white border-amber-300 text-amber-800 hover:bg-amber-50'
+                                        : 'bg-amber-500/10 border-amber-500/35 text-amber-300 hover:bg-amber-500/20'
+                                    }`}
                                   >
-                                    <Scale className="w-2.5 h-2.5" />
-                                    <span>Timbang</span>
+                                    +{chip}
                                   </button>
-                                ) : isLuas ? (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setAreaTargetCartIndex(null);
-                                      setAreaModalService(srv);
-                                    }}
-                                    className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
-                                  >
-                                    <Maximize2 className="w-2.5 h-2.5" />
-                                    <span>P×L</span>
-                                  </button>
-                                ) : minOrderVal > 1 ? (
-                                  <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400">
-                                    Min {minOrderVal}
-                                  </span>
-                                ) : null}
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
+                            <input
+                              id="input-laundry-condition-notes"
+                              type="text"
+                              value={laundryConditionNotes}
+                              onChange={(e) => setLaundryConditionNotes(e.target.value)}
+                              placeholder="Misal: Kemeja putih pisah warna, noda kerah..."
+                              className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none ${
+                                isLight
+                                  ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                              }`}
+                            />
+                          </div>
+
+                          <div className="md:col-span-2">
+                            <label className="block text-[9px] leading-3 font-mono uppercase text-slate-500 dark:text-slate-400 mb-0.5">
+                              Paket SLA Selesai
+                            </label>
+                            <select
+                              value={String(laundrySlaOverrideHours)}
+                              onChange={(e) =>
+                                setLaundrySlaOverrideHours(
+                                  e.target.value === 'AUTO' ? 'AUTO' : Number(e.target.value)
+                                )
+                              }
+                              className={`w-full h-7 px-2 py-0.5 rounded-md border text-[11px] outline-none cursor-pointer ${
+                                isLight
+                                  ? 'bg-white border-indigo-300 text-indigo-900'
+                                  : 'bg-slate-950 border-indigo-500/40 text-indigo-200'
+                              }`}
+                            >
+                              <option value="AUTO">Auto Layanan ({computedLaundrySla.hours}j)</option>
+                              <option value="6">Express 6 Jam</option>
+                              <option value="24">Kilat 24 Jam</option>
+                              <option value="48">Reguler 48 Jam</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`px-2.5 py-1 border-t flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] ${
+                            isLight ? 'bg-indigo-50/40 border-slate-200 text-slate-700' : 'bg-slate-900/60 border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-indigo-700 dark:text-indigo-300 font-semibold">
+                            <UserCheck className="w-3 h-3" />
+                            <span>Petugas Produksi (Opsional):</span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400">Op. Cuci:</span>
+                            <select
+                              value={laundryWasherId}
+                              onChange={(e) => setLaundryWasherId(e.target.value)}
+                              aria-label="Pilih Operator Cuci Awal"
+                              className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
+                                isLight
+                                  ? 'bg-white border-slate-300 text-slate-900 focus:border-cyan-500'
+                                  : 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                              }`}
+                            >
+                              <option value="">-- Otomatis / Isi di Tracking --</option>
+                              {laundryStaffChoices.map((emp) => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.name} ({emp.role})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400">Teknisi Sepatu/Karpet:</span>
+                            <select
+                              value={laundrySpecialistId}
+                              onChange={(e) => setLaundrySpecialistId(e.target.value)}
+                              aria-label="Pilih Teknisi Sepatu atau Karpet Awal"
+                              className={`h-6 px-1.5 py-0 rounded border text-[11px] outline-none cursor-pointer ${
+                                isLight
+                                  ? 'bg-white border-slate-300 text-slate-900 focus:border-amber-500'
+                                  : 'bg-slate-950 border-slate-700 text-white focus:border-amber-400'
+                              }`}
+                            >
+                              <option value="">-- Opsional --</option>
+                              {laundryStaffChoices.map((emp) => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.name} ({emp.role})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`px-2.5 py-1.5 border-t space-y-1 ${
+                            isLight ? 'bg-slate-50/80 border-slate-200' : 'bg-slate-950/60 border-slate-800'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {(
+                                [
+                                  { id: 'ALL', label: 'Semua Layanan' },
+                                  { id: 'KILOAN', label: 'Kiloan (kg)' },
+                                  { id: 'SATUAN', label: 'Satuan (pcs/stel)' },
+                                  { id: 'PASANG', label: 'Pasang' },
+                                  { id: 'LUAS', label: 'Luas (m²)' },
+                                ] as const
+                              ).map((tab) => (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() => setLaundryCatalogFilter(tab.id)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-medium border cursor-pointer transition ${
+                                    laundryCatalogFilter === tab.id
+                                      ? 'bg-cyan-600 text-white border-cyan-500'
+                                      : isLight
+                                      ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                                      : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  {tab.label}
+                                </button>
+                              ))}
+                            </div>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono hidden sm:inline">
+                              Klik layanan untuk tambah • Min. Berat &amp; SLA otomatis tercatat
+                            </span>
+                          </div>
+
+                          <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                            {filteredQuickLaundryServices.map((srv) => {
+                              const isKiloan =
+                                srv.laundryUnitType === 'KILOAN' ||
+                                (srv.unit || '').toLowerCase() === 'kg';
+                              const isLuas =
+                                srv.laundryUnitType === 'LUAS' ||
+                                (srv.unit || '').toLowerCase().includes('m2');
+                              const minOrderVal = Number(srv.minOrderWeightKg ?? srv.minOrderQty ?? 0);
+                              return (
+                                <div
+                                  key={srv.id}
+                                  onClick={() => handleAddToCart(srv, 1)}
+                                  className={`shrink-0 w-44 px-2 py-1.5 rounded-lg border cursor-pointer transition flex flex-col justify-between gap-0.5 ${
+                                    isLight
+                                      ? 'bg-white hover:border-cyan-500 border-slate-200 shadow-2xs'
+                                      : 'bg-slate-900 hover:border-cyan-400/60 border-slate-800'
+                                  }`}
+                                >
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[9px] font-mono uppercase px-1 py-0 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                        {srv.laundryUnitType || srv.unit}
+                                      </span>
+                                      {srv.slaDuration && (
+                                        <span className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300 truncate">
+                                          ⏱ {srv.slaDuration}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] font-semibold leading-tight line-clamp-1">
+                                      {srv.name}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-slate-200/70 dark:border-slate-800">
+                                    <div className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                      Rp {srv.sell_price.toLocaleString('id-ID')}/{srv.unit}
+                                    </div>
+                                    {isKiloan ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setScaleTargetService(srv);
+                                          setIsDigitalScaleModalOpen(true);
+                                        }}
+                                        className="px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                      >
+                                        <Scale className="w-2.5 h-2.5" />
+                                        <span>Timbang</span>
+                                      </button>
+                                    ) : isLuas ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setAreaTargetCartIndex(null);
+                                          setAreaModalService(srv);
+                                        }}
+                                        className="px-1.5 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-semibold flex items-center gap-0.5 cursor-pointer"
+                                      >
+                                        <Maximize2 className="w-2.5 h-2.5" />
+                                        <span>P×L</span>
+                                      </button>
+                                    ) : minOrderVal > 1 ? (
+                                      <span className="text-[9px] font-mono text-amber-600 dark:text-amber-400">
+                                        Min {minOrderVal}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
                       </>
                     )}
                   </div>
                 ) : (
                   isSalonServiceTerminal && (
                     <div className={`border-b ${isLight ? 'bg-purple-50/60 border-purple-200' : 'bg-purple-500/10 border-purple-500/25'}`}>
-                      {/* Bar Pilih Stylist / Kapster Utama dari Master Data */}
                       <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold text-purple-700 dark:text-purple-300">
@@ -7937,9 +7606,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                               ))
                             )}
                           </select>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400 hidden sm:inline">
-                            • Bisa pilih stylist berbeda per layanan di baris keranjang
-                          </span>
                         </div>
                         {serviceCartCommissionSummary && serviceCartCommissionSummary.totalCommission > 0 && (
                           <span className="px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/35">
@@ -7948,7 +7614,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                         )}
                       </div>
 
-                      {/* Quick Service Cards Grid (1-Klik Paket Layanan & Produk Salon dari Master Data) */}
                       <div className={`px-3 pb-2.5 pt-1 border-t ${isLight ? 'border-purple-200/70' : 'border-purple-500/20'}`}>
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[10px] font-mono uppercase tracking-wider text-purple-700 dark:text-purple-300 font-semibold">
@@ -7984,7 +7649,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   </div>
                                   {svc.packageDetails && (
                                     <div className="text-[10px] leading-snug text-amber-700 dark:text-amber-300/90 line-clamp-2">
-                                      {svc.packageDetails}
+                                      Isi: {svc.packageDetails}
                                     </div>
                                   )}
                                 </div>
@@ -8013,497 +7678,491 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                   </div>
                 ) : (
                   <>
-                <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs leading-5 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'}`}>
-                  <div className="flex items-center gap-2">
-                    <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                    <span className="font-medium text-sm leading-5">Daftar Belanja</span>
-                    <span className="font-mono text-[11px] leading-4 px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-normal">
-                      {cart.length} SKU • {Number.isInteger(totalCartItemCount) ? totalCartItemCount : totalCartItemCount.toFixed(2)} {isLaundryTerminal ? 'Unit' : isSalonServiceTerminal ? 'Item' : 'Pcs'}{totalFreeBonusCount > 0 ? ` (+${totalFreeBonusCount} Gratis)` : ''}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsManualSearchOpen(true)}
-                    className="text-cyan-600 dark:text-cyan-400 hover:underline font-normal text-xs cursor-pointer flex items-center gap-1 active:scale-[0.99] transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>{isSalonServiceTerminal || isLaundryTerminal ? 'Pilih Layanan [F3]' : 'Tambah Item [F3]'}</span>
-                  </button>
-                </div>
-
-                {/* Penawaran Tebus Murah (PWP_TEBUS_MURAH) */}
-                {pwpOffers.length > 0 && !isSalonServiceTerminal && !isLaundryTerminal && (
-                  <div className={`px-3 py-1.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs ${
-                    isLight ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/25 text-amber-200'
-                  }`}>
-                    {pwpOffers.slice(0, 2).map((offer, oIdx) => {
-                      const reachedCap = offer.maxQtyPerReceipt !== null && offer.alreadyInCartQty >= offer.maxQtyPerReceipt;
-                      return (
-                        <div key={`pwp-offer-${offer.campaign.id}-${oIdx}`} className="flex items-center justify-between gap-2 w-full sm:w-auto flex-1">
-                          <div className="min-w-0 truncate font-mono text-[11px] tabular-nums">
-                            {offer.isQualified ? (
-                              <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
-                                Tebus Murah Terbuka: {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
-                                {' '}· Normal Rp {offer.regularPrice.toLocaleString('id-ID')}
-                                {offer.maxQtyPerReceipt ? ` · Maks ${offer.maxQtyPerReceipt}/struk` : ' · Unlimited FEFO'}
-                              </span>
-                            ) : (
-                              <span>
-                                Belanja tambah Rp {offer.shortfallAmount.toLocaleString('id-ID')} lagi (min. Rp {offer.minCartSubtotal.toLocaleString('id-ID')}) untuk Tebus Murah {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
-                              </span>
-                            )}
-                          </div>
-                          {offer.isQualified && !reachedCap && (
-                            <button
-                              type="button"
-                              onClick={() => handleAddToCart(offer.product, 1)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] cursor-pointer whitespace-nowrap shrink-0 transition"
-                            >
-                              + Tebus Rp {offer.specialPrice.toLocaleString('id-ID')}
-                            </button>
-                          )}
-                          {offer.isQualified && reachedCap && (
-                            <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">
-                              Kuota Tebus Tercapai ({offer.alreadyInCartQty}/{offer.maxQtyPerReceipt})
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className={`overflow-x-auto flex-1 ${isLaundryTerminal ? 'min-h-[260px]' : 'min-h-0 overflow-y-auto'}`}>
-                  {cart.length === 0 ? (
-                    <div className={`h-full ${isLaundryTerminal ? 'min-h-[220px] py-6' : 'min-h-[180px] py-8'} flex flex-col items-center justify-center text-center space-y-2`}>
-                      <Barcode className="w-8 h-8 text-cyan-500/60" />
-                      <p className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400">
-                        {isSalonServiceTerminal
-                          ? 'Pilih kartu layanan di atas atau tekan [F3] untuk menambah jasa & produk salon'
-                          : 'Terminal Kasir Siap Melayani'}
-                      </p>
+                    <div className={`px-3 py-1.5 border-b flex items-center justify-between text-xs leading-5 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-slate-950 border-slate-800'}`}>
+                      <div className="flex items-center gap-2">
+                        <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                        <span className="font-medium text-sm leading-5">Daftar Belanja</span>
+                        <span className="font-mono text-[11px] leading-4 px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 font-normal">
+                          {cart.length} SKU • {Number.isInteger(totalCartItemCount) ? totalCartItemCount : totalCartItemCount.toFixed(2)} {isLaundryTerminal ? 'Unit' : isSalonServiceTerminal ? 'Item' : 'Pcs'}{totalFreeBonusCount > 0 ? ` (+${totalFreeBonusCount} Gratis)` : ''}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setIsManualSearchOpen(true)}
-                        className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-normal rounded-xl cursor-pointer active:scale-[0.99] transition-all shadow-sm"
+                        className="text-cyan-600 dark:text-cyan-400 hover:underline font-normal text-xs cursor-pointer flex items-center gap-1 active:scale-[0.99] transition-all"
                       >
-                        {isSalonServiceTerminal || isLaundryTerminal ? 'Cari Paket Layanan [F3]' : 'Cari Produk Manual [F3]'}
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isSalonServiceTerminal || isLaundryTerminal ? 'Pilih Layanan [F3]' : 'Tambah Item [F3]'}</span>
                       </button>
                     </div>
-                  ) : (
-                    <table className="w-full text-left border-collapse text-xs leading-5">
-                      <thead className={`border-b text-[11px] leading-4 font-mono font-normal tracking-widest uppercase sticky top-0 z-10 ${isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
-                        <tr>
-                          <th className="py-1.5 px-2 text-center w-10">No</th>
-                          <th className="py-1.5 px-2 w-36">CODE / BARCODE</th>
-                          <th className="py-1.5 px-2">Nama Produk</th>
-                          <th className="py-1.5 px-2 text-center w-24">Qty</th>
-                          <th className="py-1.5 px-2 text-right w-32">Harga Satuan</th>
-                          <th className="py-1.5 px-2 text-right w-36">Total</th>
-                          <th className="py-1.5 px-2 text-center w-24">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-normal">
-                        {cart.map((item, idx) => {
-                          const sizeOrVariant = getItemVariant(item);
-                          const itemCode = item.product?.barcode || item.product?.id || '-';
-                          const itemUnit = item.product?.unit || 'Pcs';
-                          const rawUnitPrice = item.isRetailUnit && item.product.priceSecondary ? item.product.priceSecondary : item.product.sell_price;
-                          const unitDisc = item.itemDiscount || 0;
-                          const effectiveUnitPrice = Math.max(0, rawUnitPrice - unitDisc);
-                          const linePromoSavings = item.promoSavings ?? (unitDisc * item.quantity);
-                          const comps = item.componentSkus || item.product?.componentSkus;
-                          const badgeTone =
-                            item.promoSourceType === 'FEFO_EXP'
-                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
-                              : item.promoSourceType === 'SUPPLIER_TPR'
-                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/35'
-                              : item.promoSourceType === 'SEASONAL'
-                              ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/35'
-                              : item.promoSourceType === 'STORE_BND'
-                              ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/35'
-                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/35';
 
+                    {pwpOffers.length > 0 && !isSalonServiceTerminal && !isLaundryTerminal && (
+                      <div className={`px-3 py-1.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs ${
+                        isLight ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-amber-500/10 border-amber-500/25 text-amber-200'
+                      }`}>
+                        {pwpOffers.slice(0, 2).map((offer, oIdx) => {
+                          const reachedCap = offer.maxQtyPerReceipt !== null && offer.alreadyInCartQty >= offer.maxQtyPerReceipt;
                           return (
-                            <tr
-                              key={`pos-row-${itemCode}-${idx}`}
-                              onClick={() => setSelectedCartIndex(idx)}
-                              className={`border-b border-slate-100 dark:border-slate-800/60 min-h-9 cursor-pointer transition-colors ${
-                                idx === selectedCartIndex 
-                                  ? 'bg-cyan-500/10 text-cyan-900 dark:text-cyan-200' 
-                                  : isLight 
-                                  ? 'hover:bg-slate-50 text-slate-800' 
-                                  : 'hover:bg-slate-800/40 text-slate-200'
-                              }`}
-                            >
-                              <td className="py-1.5 px-2 text-center font-mono text-xs text-slate-500">{String(idx + 1).padStart(2, '0')}</td>
-                              <td className="py-1.5 px-2 font-mono text-xs text-slate-500 dark:text-slate-400">{itemCode}</td>
-                              <td className="py-1.5 px-2 text-xs font-normal">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span>{item.product.name}</span>
-                                  {item.buildingTierBadge && (
-                                    <span
-                                      className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
-                                        item.buildingTierName === 'KONTRAKTOR'
-                                          ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
-                                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/40'
-                                      }`}
-                                    >
-                                      {item.buildingTierBadge}
-                                    </span>
-                                  )}
-                                  {item.promoBadge && (
-                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${badgeTone}`}>
-                                      {item.promoBadge}
-                                    </span>
-                                  )}
-                                  {isSalonServiceTerminal && (() => {
-                                    const fmtMeta = getServiceFormatMeta(item.product);
-                                    return (
-                                      <div
-                                        className="inline-flex flex-wrap items-center gap-1"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${fmtMeta.badgeClass}`}>
-                                          {fmtMeta.shortLabel}
-                                        </span>
-                                        {item.product.itemType === 'SERVICE' ? (
-                                          <select
-                                            value={item.stylistId || selectedServiceStylist?.id || ''}
-                                            onChange={(e) => {
-                                              const picked = activeServiceStylists.find((s) => s.id === e.target.value);
-                                              setCart((prev) =>
-                                                prev.map((row, rowIdx) =>
-                                                  rowIdx === idx
-                                                    ? {
-                                                        ...row,
-                                                        stylistId: picked?.id,
-                                                        stylistName: picked?.name,
-                                                        stylistCommissionRate: picked?.commissionRate,
-                                                      }
-                                                    : row
-                                                )
-                                              );
-                                            }}
-                                            className={`text-[10px] font-medium py-0.5 px-1.5 rounded border cursor-pointer outline-none ${
-                                              isLight
-                                                ? 'bg-purple-50 border-purple-300 text-purple-800'
-                                                : 'bg-purple-500/15 border-purple-500/35 text-purple-200'
-                                            }`}
-                                            title="Pilih Stylist / Kapster untuk layanan ini"
-                                          >
-                                            {activeServiceStylists.map((st) => (
-                                              <option key={st.id} value={st.id}>
-                                                ✂️ {st.name} ({st.commissionRate}%)
-                                              </option>
-                                            ))}
-                                          </select>
-                                        ) : (
-                                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
-                                            Non-Komisi
-                                          </span>
-                                        )}
-                                        {item.product.packageDetails && (
-                                          <span className="text-[10px] text-amber-700 dark:text-amber-300/90">
-                                            • Isi: {item.product.packageDetails}
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                  {(item.product.businessModel === 'fashion' || Boolean(item.product.variantMatrix?.length)) ? (() => {
-                                    const sizes = item.product.variantMatrix?.length
-                                      ? Array.from(new Set(item.product.variantMatrix.map((c) => c.size)))
-                                      : (item.product.variantSize || 'S, M, L, XL, XXL').split(',').map((s) => s.trim()).filter(Boolean);
-                                    const colors = item.product.variantMatrix?.length
-                                      ? Array.from(new Set(item.product.variantMatrix.map((c) => c.color)))
-                                      : (item.product.variantColor || 'Sage, Maroon, Hitam, Cream').split(',').map((c) => c.trim()).filter(Boolean);
-                                    const curSize = item.selectedFashionSize || sizes[0] || 'M';
-                                    const curColor = item.selectedFashionColor || colors[0] || 'Sage';
-                                    const matchedCell = item.product.variantMatrix?.find(
-                                      (c) => c.size === curSize && c.color === curColor
-                                    );
-                                    return (
-                                      <div
-                                        className="inline-flex items-center gap-1"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <select
-                                          value={curSize}
-                                          onChange={(e) => handleChangeFashionVariant(idx, e.target.value, curColor)}
-                                          className="text-[10px] font-mono font-semibold py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
-                                          title="Pilih Ukuran"
-                                        >
-                                          {sizes.map((sz) => (
-                                            <option key={sz} value={sz}>
-                                              Size {sz}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        <select
-                                          value={curColor}
-                                          onChange={(e) => handleChangeFashionVariant(idx, curSize, e.target.value)}
-                                          className="text-[10px] font-medium py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
-                                          title="Pilih Warna"
-                                        >
-                                          {colors.map((cl) => (
-                                            <option key={cl} value={cl}>
-                                              {cl}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        {matchedCell !== undefined && (
-                                          <span className={`text-[10px] font-mono px-1 rounded border ${
-                                            matchedCell.stock <= 0
-                                              ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
-                                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-700'
-                                          }`}>
-                                            Stok {matchedCell.stock}
-                                          </span>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setVariantPickerState({
-                                              product: item.product,
-                                              mode: 'CHANGE',
-                                              cartIndex: idx,
-                                              initialSize: curSize,
-                                              initialColor: curColor,
-                                            })
-                                          }
-                                          className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition"
-                                          title="Buka Matriks Ukuran × Warna"
-                                        >
-                                          Matriks
-                                        </button>
-                                      </div>
-                                    );
-                                  })() : (
-                                    sizeOrVariant && <span className="text-[10px] text-slate-400">({sizeOrVariant})</span>
-                                  )}
-                                  <span className="text-[10px] font-mono px-1 rounded border border-slate-300 dark:border-slate-700 text-slate-500">
-                                    {item.selectedUnit || itemUnit}
+                            <div key={`pwp-offer-${offer.campaign.id}-${oIdx}`} className="flex items-center justify-between gap-2 w-full sm:w-auto flex-1">
+                              <div className="min-w-0 truncate font-mono text-[11px] tabular-nums">
+                                {offer.isQualified ? (
+                                  <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
+                                    Tebus Murah Terbuka: {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
+                                    {' '}· Normal Rp {offer.regularPrice.toLocaleString('id-ID')}
+                                    {offer.maxQtyPerReceipt ? ` · Maks ${offer.maxQtyPerReceipt}/struk` : ' · Unlimited FEFO'}
                                   </span>
-                                  {Boolean(item.product.unitSecondary && item.product.priceSecondary) && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleToggleItemUnit(idx);
-                                      }}
-                                      className="text-[9px] font-normal px-1.5 rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 cursor-pointer active:scale-[0.99]"
-                                    >
-                                      ⇄ {item.isRetailUnit ? item.product.unit : item.product.unitSecondary}
-                                    </button>
-                                  )}
-                                  {Boolean(item.product.materialNature === 'BULK_CURAH' || (item.product.category || '').includes('PASIR')) && (
-                                    <select
-                                      value={item.product.bulkUnitType || 'PICKUP_RET'}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) => handleSelectFleetTier(idx, e.target.value)}
-                                      className="text-[10px] font-normal py-0.5 px-2 rounded-lg border bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
-                                    >
-                                      {DEFAULT_FLEET_OPTIONS.map((fleet) => (
-                                        <option key={fleet.id} value={fleet.id}>
-                                          {fleet.shortName} ({fleet.suffix} = {fleet.volumeM3} m³)
-                                        </option>
-                                      ))}
-                                    </select>
-                                  )}
-                                  {item.cubicConversionFactorM3 && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-semibold">
-                                      Potong Curah: {item.cubicDeductionM3 ?? Number((item.cubicConversionFactorM3 * item.quantity).toFixed(2))} m³ (@{item.cubicConversionFactorM3} m³)
-                                    </span>
-                                  )}
-                                  {item.grossMarginPercent !== undefined && (isBuildingTerminal || isBuildingMaterialProduct(item.product)) && (
-                                    <span
-                                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold ${
-                                        item.isMarginBelowFloor
-                                          ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
-                                          : 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
-                                      }`}
-                                    >
-                                      Margin {item.grossMarginPercent.toFixed(1)}%
-                                      {item.isMarginBelowFloor ? ' ⚠️ < 3%' : ''}
-                                    </span>
-                                  )}
-                                  {item.product.slaDuration && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
-                                      ⏱ {item.product.slaDuration}
-                                    </span>
-                                  )}
-                                  {item.laundryLengthM && item.laundryWidthM && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setAreaTargetCartIndex(idx);
-                                        setAreaModalService(item.product);
-                                      }}
-                                      className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 cursor-pointer hover:bg-purple-500/25"
-                                    >
-                                      📐 {item.laundryLengthM}m × {item.laundryWidthM}m
-                                    </button>
-                                  )}
-                                  {item.grossWeightKg !== undefined && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
-                                      ⚖️ Bruto {item.grossWeightKg.toFixed(2)} - Tare {(item.tareWeightKg || 0).toFixed(2)} = Netto {(item.actualNetWeightKg ?? item.quantity).toFixed(2)} kg
-                                    </span>
-                                  )}
-                                  {item.isMinWeightAdjusted && (
-                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-semibold">
-                                      Auto Min. {item.minWeightAppliedKg ?? item.quantity} {item.selectedUnit || itemUnit}
-                                    </span>
-                                  )}
-                                  {(item.product.laundryUnitType === 'KILOAN' || (isLaundryTerminal && (item.product.unit || '').toLowerCase() === 'kg')) && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedCartIndex(idx);
-                                        setScaleTargetService(item.product);
-                                        setIsDigitalScaleModalOpen(true);
-                                      }}
-                                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer flex items-center gap-0.5"
-                                    >
-                                      <Scale className="w-2.5 h-2.5" />
-                                      <span>Timbang</span>
-                                    </button>
-                                  )}
-                                </div>
-                                {Array.isArray(comps) && comps.length > 0 && (
-                                  <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
-                                    Komponen Paket ({comps.length} SKU): {comps.map(c => `${c.qty * (item.quantity + (item.freeBonusQty || 0))}x ${c.skuName}`).join(' • ')}
-                                  </div>
-                                )}
-                                {(item.freeBonusQty || 0) > 0 && (
-                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono font-semibold">
-                                    + Bonus Gratis: {item.freeBonusQty} unit ({item.freeBonusLabel || 'Beli X Gratis Y'})
-                                  </div>
-                                )}
-                                {(linePromoSavings > 0 || item.promoHint || item.manualDiscountReason) && (
-                                  <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono flex flex-wrap gap-x-2">
-                                    {linePromoSavings > 0 && (
-                                      <span>
-                                        {item.promoName ? `${item.promoName} • ` : item.buildingTierLabel ? `${item.buildingTierLabel} • ` : ''}
-                                        Hemat Rp {linePromoSavings.toLocaleString('id-ID')}
-                                      </span>
-                                    )}
-                                    {item.manualDiscountReason && (
-                                      <span className="text-amber-600 dark:text-amber-300">
-                                        ({item.manualDiscountReason}{item.manualDiscountAuthorizedBy ? ` • ${item.manualDiscountAuthorizedBy}` : ''})
-                                      </span>
-                                    )}
-                                    {item.promoHint && (
-                                      <span className={item.pwpQualified === false ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}>
-                                        {item.promoHint}
-                                      </span>
-                                    )}
-                                  {(item.overriddenPromosCount || 0) > 0 && (
-                                      <span className="text-slate-400">
-                                        (Anti-Tumpuk: {item.overriddenPromosCount} promo lain non-aktif)
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-1.5 px-2 text-center" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex flex-col items-center">
-                                  <div className="inline-flex items-center gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleUpdateQty(idx, -1)}
-                                      className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
-                                        isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
-                                      }`}
-                                      title="Kurangi Qty"
-                                    >
-                                      <Minus className="w-3 h-3" />
-                                    </button>
-                                    <input
-                                      id={`pos-qty-input-${idx}`}
-                                      type="number"
-                                      step="any"
-                                      value={item.quantity}
-                                      onChange={(e) => handleDirectQtyChange(idx, parseFloat(e.target.value) || 1)}
-                                      className="w-14 h-6 text-center font-mono font-normal text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleUpdateQty(idx, 1)}
-                                      className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
-                                        isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
-                                      }`}
-                                      title="Tambah Qty"
-                                    >
-                                      <Plus className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                  {(item.freeBonusQty || 0) > 0 && (
-                                    <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
-                                      +{item.freeBonusQty} Gratis
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-1.5 px-2 text-right font-mono text-xs">
-                                {unitDisc > 0 ? (
-                                  <div className="flex flex-col items-end leading-tight">
-                                    <span className="text-[10px] text-slate-400 line-through">
-                                      Rp {rawUnitPrice.toLocaleString('id-ID')}
-                                    </span>
-                                    <span className="text-emerald-600 dark:text-emerald-400">
-                                      Rp {effectiveUnitPrice.toLocaleString('id-ID')}
-                                    </span>
-                                  </div>
                                 ) : (
-                                  <span>Rp {rawUnitPrice.toLocaleString('id-ID')}</span>
+                                  <span>
+                                    Belanja tambah Rp {offer.shortfallAmount.toLocaleString('id-ID')} lagi (min. Rp {offer.minCartSubtotal.toLocaleString('id-ID')}) untuk Tebus Murah {offer.product.name} Rp {offer.specialPrice.toLocaleString('id-ID')}
+                                  </span>
                                 )}
-                              </td>
-                              <td className="py-1.5 px-2 text-right font-mono font-semibold text-xs text-emerald-600 dark:text-emerald-400">
-                                <div>Rp {item.subtotal.toLocaleString('id-ID')}</div>
-                                {linePromoSavings > 0 && (
-                                  <div className="text-[10px] font-normal text-emerald-500">
-                                    -Rp {linePromoSavings.toLocaleString('id-ID')}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="py-0.5 px-1.5 text-center">
-                                <div className="inline-flex gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingItemIndex(idx)}
-                                    className="w-6 h-6 flex items-center justify-center rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 cursor-pointer active:scale-[0.99] transition-all"
-                                  >
-                                    <Edit3 className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRequestRemoveItem(idx)}
-                                    className="w-6 h-6 flex items-center justify-center rounded border border-rose-500/40 bg-rose-500/10 text-rose-500 cursor-pointer active:scale-[0.99] transition-all"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
+                              </div>
+                              {offer.isQualified && !reachedCap && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddToCart(offer.product, 1)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] cursor-pointer whitespace-nowrap shrink-0 transition"
+                                >
+                                  + Tebus Rp {offer.specialPrice.toLocaleString('id-ID')}
+                                </button>
+                              )}
+                              {offer.isQualified && reachedCap && (
+                                <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 whitespace-nowrap shrink-0">
+                                  Kuota Tebus Tercapai ({offer.alreadyInCartQty}/{offer.maxQtyPerReceipt})
+                                </span>
+                              )}
+                            </div>
                           );
                         })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
+                      </div>
+                    )}
+
+                    <div className={`overflow-x-auto flex-1 ${isLaundryTerminal ? 'min-h-[260px]' : 'min-h-0 overflow-y-auto'}`}>
+                      {cart.length === 0 ? (
+                        <div className={`h-full ${isLaundryTerminal ? 'min-h-[220px] py-6' : 'min-h-[180px] py-8'} flex flex-col items-center justify-center text-center space-y-2`}>
+                          <Barcode className="w-8 h-8 text-cyan-500/60" />
+                          <p className="text-sm leading-5 font-normal text-slate-500 dark:text-slate-400">
+                            {isSalonServiceTerminal
+                              ? 'Pilih kartu layanan di atas atau tekan [F3] untuk menambah jasa & produk salon'
+                              : 'Terminal Kasir Siap Melayani'}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setIsManualSearchOpen(true)}
+                            className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-normal rounded-xl cursor-pointer active:scale-[0.99] transition-all shadow-sm"
+                          >
+                            {isSalonServiceTerminal || isLaundryTerminal ? 'Cari Paket Layanan [F3]' : 'Cari Produk Manual [F3]'}
+                          </button>
+                        </div>
+                      ) : (
+                        <table className="w-full text-left border-collapse text-xs leading-5">
+                          <thead className={`border-b text-[11px] leading-4 font-mono font-normal tracking-widest uppercase sticky top-0 z-10 ${isLight ? 'bg-slate-50 border-slate-200 text-slate-600' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
+                            <tr>
+                              <th className="py-1.5 px-2 text-center w-10">No</th>
+                              <th className="py-1.5 px-2 w-36">CODE / BARCODE</th>
+                              <th className="py-1.5 px-2">Nama Produk</th>
+                              <th className="py-1.5 px-2 text-center w-24">Qty</th>
+                              <th className="py-1.5 px-2 text-right w-32">Harga Satuan</th>
+                              <th className="py-1.5 px-2 text-right w-36">Total</th>
+                              <th className="py-1.5 px-2 text-center w-24">Aksi</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-normal">
+                            {cart.map((item, idx) => {
+                              const sizeOrVariant = getItemVariant(item);
+                              const itemCode = item.product?.barcode || item.product?.id || '-';
+                              const itemUnit = item.product?.unit || 'Pcs';
+                              const rawUnitPrice = item.isRetailUnit && item.product.priceSecondary ? item.product.priceSecondary : item.product.sell_price;
+                              const unitDisc = item.itemDiscount || 0;
+                              const effectiveUnitPrice = Math.max(0, rawUnitPrice - unitDisc);
+                              const linePromoSavings = item.promoSavings ?? (unitDisc * item.quantity);
+                              const comps = item.componentSkus || item.product?.componentSkus;
+                              const badgeTone =
+                                item.promoSourceType === 'FEFO_EXP'
+                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
+                                  : item.promoSourceType === 'SUPPLIER_TPR'
+                                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/35'
+                                  : item.promoSourceType === 'SEASONAL'
+                                  ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/35'
+                                  : item.promoSourceType === 'STORE_BND'
+                                  ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/35'
+                                  : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/35';
+
+                              return (
+                                <tr
+                                  key={`pos-row-${itemCode}-${idx}`}
+                                  onClick={() => setSelectedCartIndex(idx)}
+                                  className={`border-b border-slate-100 dark:border-slate-800/60 min-h-9 cursor-pointer transition-colors ${
+                                    idx === selectedCartIndex 
+                                      ? 'bg-cyan-500/10 text-cyan-900 dark:text-cyan-200' 
+                                      : isLight 
+                                      ? 'hover:bg-slate-50 text-slate-800' 
+                                      : 'hover:bg-slate-800/40 text-slate-200'
+                                  }`}
+                                >
+                                  <td className="py-1.5 px-2 text-center font-mono text-xs text-slate-500">{String(idx + 1).padStart(2, '0')}</td>
+                                  <td className="py-1.5 px-2 font-mono text-xs text-slate-500 dark:text-slate-400">{itemCode}</td>
+                                  <td className="py-1.5 px-2 text-xs font-normal">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span>{item.product.name}</span>
+                                      {item.buildingTierBadge && (
+                                        <span
+                                          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+                                            item.buildingTierName === 'KONTRAKTOR'
+                                              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40'
+                                              : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/40'
+                                          }`}
+                                        >
+                                          {item.buildingTierBadge}
+                                        </span>
+                                      )}
+                                      {item.promoBadge && (
+                                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${badgeTone}`}>
+                                          {item.promoBadge}
+                                        </span>
+                                      )}
+                                      {isSalonServiceTerminal && (() => {
+                                        const fmtMeta = getServiceFormatMeta(item.product);
+                                        return (
+                                          <div
+                                            className="inline-flex flex-wrap items-center gap-1"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${fmtMeta.badgeClass}`}>
+                                              {fmtMeta.shortLabel}
+                                            </span>
+                                            {item.product.itemType === 'SERVICE' ? (
+                                              <select
+                                                value={item.stylistId || selectedServiceStylist?.id || ''}
+                                                onChange={(e) => {
+                                                  const picked = activeServiceStylists.find((s) => s.id === e.target.value);
+                                                  setCart((prev) =>
+                                                    prev.map((row, rowIdx) =>
+                                                      rowIdx === idx
+                                                        ? {
+                                                            ...row,
+                                                            stylistId: picked?.id,
+                                                            stylistName: picked?.name,
+                                                            stylistCommissionRate: picked?.commissionRate,
+                                                          }
+                                                        : row
+                                                    )
+                                                  );
+                                                }}
+                                                className={`text-[10px] font-medium py-0.5 px-1.5 rounded border cursor-pointer outline-none ${
+                                                  isLight
+                                                    ? 'bg-purple-50 border-purple-300 text-purple-800'
+                                                    : 'bg-purple-500/15 border-purple-500/35 text-purple-200'
+                                                }`}
+                                              >
+                                                {activeServiceStylists.map((st) => (
+                                                  <option key={st.id} value={st.id}>
+                                                    ✂️ {st.name} ({st.commissionRate}%)
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            ) : (
+                                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                                                Non-Komisi
+                                              </span>
+                                            )}
+                                            {item.product.packageDetails && (
+                                              <span className="text-[10px] text-amber-700 dark:text-amber-300/90">
+                                                • Isi: {item.product.packageDetails}
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
+                                      {(item.product.businessModel === 'fashion' || Boolean(item.product.variantMatrix?.length)) ? (() => {
+                                        const sizes = item.product.variantMatrix?.length
+                                          ? Array.from(new Set(item.product.variantMatrix.map((c) => c.size)))
+                                          : (item.product.variantSize || 'S, M, L, XL, XXL').split(',').map((s) => s.trim()).filter(Boolean);
+                                        const colors = item.product.variantMatrix?.length
+                                          ? Array.from(new Set(item.product.variantMatrix.map((c) => c.color)))
+                                          : (item.product.variantColor || 'Sage, Maroon, Hitam, Cream').split(',').map((c) => c.trim()).filter(Boolean);
+                                        const curSize = item.selectedFashionSize || sizes[0] || 'M';
+                                        const curColor = item.selectedFashionColor || colors[0] || 'Sage';
+                                        const matchedCell = item.product.variantMatrix?.find(
+                                          (c) => c.size === curSize && c.color === curColor
+                                        );
+                                        return (
+                                          <div
+                                            className="inline-flex items-center gap-1"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <select
+                                              value={curSize}
+                                              onChange={(e) => handleChangeFashionVariant(idx, e.target.value, curColor)}
+                                              className="text-[10px] font-mono font-semibold py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
+                                            >
+                                              {sizes.map((sz) => (
+                                                <option key={sz} value={sz}>
+                                                  Size {sz}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            <select
+                                              value={curColor}
+                                              onChange={(e) => handleChangeFashionVariant(idx, curSize, e.target.value)}
+                                              className="text-[10px] font-medium py-0.5 px-1.5 rounded border bg-purple-500/10 border-purple-500/35 text-purple-700 dark:text-purple-300 cursor-pointer"
+                                            >
+                                              {colors.map((cl) => (
+                                                <option key={cl} value={cl}>
+                                                  {cl}
+                                                </option>
+                                              ))}
+                                            </select>
+                                            {matchedCell !== undefined && (
+                                              <span className={`text-[10px] font-mono px-1 rounded border ${
+                                                matchedCell.stock <= 0
+                                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border-rose-500/35'
+                                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-700'
+                                              }`}>
+                                                Stok {matchedCell.stock}
+                                              </span>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setVariantPickerState({
+                                                  product: item.product,
+                                                  mode: 'CHANGE',
+                                                  cartIndex: idx,
+                                                  initialSize: curSize,
+                                                  initialColor: curColor,
+                                                })
+                                              }
+                                              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition"
+                                            >
+                                              Matriks
+                                            </button>
+                                          </div>
+                                        );
+                                      })() : (
+                                        sizeOrVariant && <span className="text-[10px] text-slate-400">({sizeOrVariant})</span>
+                                      )}
+                                      <span className="text-[10px] font-mono px-1 rounded border border-slate-300 dark:border-slate-700 text-slate-500">
+                                        {item.selectedUnit || itemUnit}
+                                      </span>
+                                      {Boolean(item.product.unitSecondary && item.product.priceSecondary) && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleToggleItemUnit(idx);
+                                          }}
+                                          className="text-[9px] font-normal px-1.5 rounded border border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 cursor-pointer active:scale-[0.99]"
+                                        >
+                                          ⇄ {item.isRetailUnit ? item.product.unit : item.product.unitSecondary}
+                                        </button>
+                                      )}
+                                      {Boolean(item.product.materialNature === 'BULK_CURAH' || (item.product.category || '').includes('PASIR')) && (
+                                        <select
+                                          value={item.product.bulkUnitType || 'PICKUP_RET'}
+                                          onClick={(e) => e.stopPropagation()}
+                                          onChange={(e) => handleSelectFleetTier(idx, e.target.value)}
+                                          className="text-[10px] font-normal py-0.5 px-2 rounded-lg border bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                                        >
+                                          {DEFAULT_FLEET_OPTIONS.map((fleet) => (
+                                            <option key={fleet.id} value={fleet.id}>
+                                              {fleet.shortName} ({fleet.suffix} = {fleet.volumeM3} m³)
+                                            </option>
+                                          ))}
+                                        </select>
+                                      )}
+                                      {item.cubicConversionFactorM3 && (
+                                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/30 font-semibold">
+                                          Potong Curah: {item.cubicDeductionM3 ?? Number((item.cubicConversionFactorM3 * item.quantity).toFixed(2))} m³ (@{item.cubicConversionFactorM3} m³)
+                                        </span>
+                                      )}
+                                      {item.grossMarginPercent !== undefined && (isBuildingTerminal || isBuildingMaterialProduct(item.product)) && (
+                                        <span
+                                          className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold ${
+                                            item.isMarginBelowFloor
+                                              ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
+                                              : 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
+                                          }`}
+                                        >
+                                          Margin {item.grossMarginPercent.toFixed(1)}%
+                                          {item.isMarginBelowFloor ? ' ⚠️ < 3%' : ''}
+                                        </span>
+                                      )}
+                                      {item.product.slaDuration && (
+                                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30">
+                                          ⏱ {item.product.slaDuration}
+                                        </span>
+                                      )}
+                                      {item.laundryLengthM && item.laundryWidthM && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setAreaTargetCartIndex(idx);
+                                            setAreaModalService(item.product);
+                                          }}
+                                          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30 cursor-pointer hover:bg-purple-500/25"
+                                        >
+                                          📐 {item.laundryLengthM}m × {item.laundryWidthM}m
+                                        </button>
+                                      )}
+                                      {item.grossWeightKg !== undefined && (
+                                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                          ⚖️ Bruto {item.grossWeightKg.toFixed(2)} - Tare {(item.tareWeightKg || 0).toFixed(2)} = Netto {(item.actualNetWeightKg ?? item.quantity).toFixed(2)} kg
+                                        </span>
+                                      )}
+                                      {item.isMinWeightAdjusted && (
+                                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/35 font-semibold">
+                                          Auto Min. {item.minWeightAppliedKg ?? item.quantity} {item.selectedUnit || itemUnit}
+                                        </span>
+                                      )}
+                                      {(item.product.laundryUnitType === 'KILOAN' || (isLaundryTerminal && (item.product.unit || '').toLowerCase() === 'kg')) && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedCartIndex(idx);
+                                            setScaleTargetService(item.product);
+                                            setIsDigitalScaleModalOpen(true);
+                                          }}
+                                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer flex items-center gap-0.5"
+                                        >
+                                          <Scale className="w-2.5 h-2.5" />
+                                          <span>Timbang</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                    {Array.isArray(comps) && comps.length > 0 && (
+                                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+                                        Komponen Paket ({comps.length} SKU): {comps.map(c => `${c.qty * (item.quantity + (item.freeBonusQty || 0))}x ${c.skuName}`).join(' • ')}
+                                      </div>
+                                    )}
+                                    {(item.freeBonusQty || 0) > 0 && (
+                                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono font-semibold">
+                                        + Bonus Gratis: {item.freeBonusQty} unit ({item.freeBonusLabel || 'Beli X Gratis Y'})
+                                      </div>
+                                    )}
+                                    {(linePromoSavings > 0 || item.promoHint || item.manualDiscountReason) && (
+                                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono flex flex-wrap gap-x-2">
+                                        {linePromoSavings > 0 && (
+                                          <span>
+                                            {item.promoName ? `${item.promoName} • ` : item.buildingTierLabel ? `${item.buildingTierLabel} • ` : ''}
+                                            Hemat Rp {linePromoSavings.toLocaleString('id-ID')}
+                                          </span>
+                                        )}
+                                        {item.manualDiscountReason && (
+                                          <span className="text-amber-600 dark:text-amber-300">
+                                            ({item.manualDiscountReason}{item.manualDiscountAuthorizedBy ? ` • ${item.manualDiscountAuthorizedBy}` : ''})
+                                          </span>
+                                        )}
+                                        {item.promoHint && (
+                                          <span className={item.pwpQualified === false ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}>
+                                            {item.promoHint}
+                                          </span>
+                                        )}
+                                        {(item.overriddenPromosCount || 0) > 0 && (
+                                          <span className="text-slate-400">
+                                            (Anti-Tumpuk: {item.overriddenPromosCount} promo lain non-aktif)
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex flex-col items-center">
+                                      <div className="inline-flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateQty(idx, -1)}
+                                          className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
+                                            isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                          }`}
+                                          title="Kurangi Qty"
+                                        >
+                                          <Minus className="w-3 h-3" />
+                                        </button>
+                                        <input
+                                          id={`pos-qty-input-${idx}`}
+                                          type="number"
+                                          step="any"
+                                          value={item.quantity}
+                                          onChange={(e) => handleDirectQtyChange(idx, parseFloat(e.target.value) || 1)}
+                                          className="w-14 h-6 text-center font-mono font-normal text-xs border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateQty(idx, 1)}
+                                          className={`w-5 h-6 flex items-center justify-center rounded border text-xs cursor-pointer transition ${
+                                            isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                          }`}
+                                          title="Tambah Qty"
+                                        >
+                                          <Plus className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                      {(item.freeBonusQty || 0) > 0 && (
+                                        <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
+                                          +{item.freeBonusQty} Gratis
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right font-mono text-xs">
+                                    {unitDisc > 0 ? (
+                                      <div className="flex flex-col items-end leading-tight">
+                                        <span className="text-[10px] text-slate-400 line-through">
+                                          Rp {rawUnitPrice.toLocaleString('id-ID')}
+                                        </span>
+                                        <span className="text-emerald-600 dark:text-emerald-400">
+                                          Rp {effectiveUnitPrice.toLocaleString('id-ID')}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span>Rp {rawUnitPrice.toLocaleString('id-ID')}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right font-mono font-semibold text-xs text-emerald-600 dark:text-emerald-400">
+                                    <div>Rp {item.subtotal.toLocaleString('id-ID')}</div>
+                                    {linePromoSavings > 0 && (
+                                      <div className="text-[10px] font-normal text-emerald-500">
+                                        -Rp {linePromoSavings.toLocaleString('id-ID')}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-0.5 px-1.5 text-center">
+                                    <div className="inline-flex gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingItemIndex(idx)}
+                                        className="w-6 h-6 flex items-center justify-center rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 cursor-pointer active:scale-[0.99] transition-all"
+                                      >
+                                        <Edit3 className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRequestRemoveItem(idx)}
+                                        className="w-6 h-6 flex items-center justify-center rounded border border-rose-500/40 bg-rose-500/10 text-rose-500 cursor-pointer active:scale-[0.99] transition-all"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
             )}
           </div>
 
-          {/* Banner Khusus Elektronik, Bengkel & Material Bangunan */}
           {isElectronicsTerminal && (
             <div className="w-full py-2 px-3 mb-1.5 rounded-xl border border-sky-500/40 bg-sky-950/30 text-sky-200 flex items-center justify-between text-xs">
-              <span className="font-bold">📱 Elektronik & Gadget Register • Dual-IMEI & Garansi Aktif</span>
+              <span className="font-bold">📱 Elektronik &amp; Gadget Register • Dual-IMEI &amp; Garansi Aktif</span>
               <span className="font-mono text-emerald-400 font-bold">● ONLINE</span>
             </div>
           )}
@@ -8596,7 +8255,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 </div>
               </div>
 
-              {/* Ringkasan Pemisahan Jurnal Logistik & Est. Laba Bersih Setelah Ongkir di POS */}
               <div className={`pt-1.5 border-t flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
                 isLight ? 'border-amber-200 text-slate-800' : 'border-indigo-500/25 text-slate-300'
               }`}>
@@ -8630,7 +8288,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 </div>
               </div>
 
-              {/* Margin Floor Guard Warning di POS */}
               {buildingCartAccounting.hasMarginViolation && (
                 <div className="rounded-lg p-2 bg-rose-500/15 border border-rose-500/60 text-rose-800 dark:text-rose-200 flex flex-wrap items-center justify-between gap-2">
                   <div className="text-[11px]">
@@ -8662,7 +8319,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             </div>
           )}
 
-          {/* BILAH BAWAH: PEMBAYARAN */}
           {!isFnbPhotoMenuMode && !isSalonServiceTerminal && !isLaundryTerminal && (
             <div
               id="bar-pos-bottom-payment"
@@ -8798,7 +8454,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             setSplitNonCashChannel(next);
                           }}
                           className="text-[9px] leading-3.5 font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
-                          title="Ganti kanal Non-Tunai (QRIS / Debit / Transfer)"
                         >
                           Ubah
                         </button>
@@ -8825,7 +8480,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
                           }
                           className="h-8 px-2 rounded-lg text-[10px] font-semibold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer"
-                          title="Isi otomatis sisa kekurangan Non-Tunai"
                         >
                           Sisa
                         </button>
@@ -9074,7 +8728,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             setVariantPickerState({ product: prod, mode: 'ADD' });
             return;
           }
-          const pickedQty = Number((prod as any).qty) > 0 ? Number((prod as any).qty) : 1;
+          const pickedQty = Number((prod as { qty?: number }).qty) > 0 ? Number((prod as { qty?: number }).qty) : 1;
           handleAddToCart(prod, pickedQty);
           focusBarcodeInput();
         }}
@@ -9249,7 +8903,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         }
       />
 
-      {/* Modal Konfirmasi Ringan Batal / Kosongkan Keranjang Draft (Tanpa PIN Supervisor) */}
       {isVoidConfirmOpen && (
         <div
           id="modal-confirm-clear-cart"
@@ -9466,7 +9119,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         />
       )}
 
-      {/* Modal Pemilih / Ganti Loket PC */}
       {isStationPickerOpen && (
         <div
           id="modal-switch-pc-station"
@@ -9603,7 +9255,6 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         </div>
       )}
 
-      {/* Modal Verifikasi PIN Otorisasi Manajemen (6 Digit) untuk Ganti Loket PC / Pindah Divisi */}
       {pendingPosAuthAction && (
         <div
           id="modal-pos-mgmt-auth-pin"

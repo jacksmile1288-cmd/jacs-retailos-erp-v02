@@ -9,15 +9,7 @@ import {
   Printer,
   X,
   CheckCircle2,
-  AlertTriangle,
-  Building2,
-  Calendar,
-  Clock,
-  User,
-  Monitor,
   Receipt,
-  Download,
-  Share2,
 } from 'lucide-react';
 
 interface ShiftSummaryReceiptModalProps {
@@ -25,6 +17,19 @@ interface ShiftSummaryReceiptModalProps {
   onClose: () => void;
   isLight?: boolean;
 }
+
+const formatShiftDateTime = (raw?: string): string => {
+  if (!raw) return '-';
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
 
 export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> = ({
   shift,
@@ -40,7 +45,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
   const activeBusinessName = (
     businessProfile?.name ||
     businessProfile?.businessName ||
-    'BARBER HUMAIRA'
+    'TOKO UTAMA'
   ).trim();
   const primaryModel =
     businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType;
@@ -94,10 +99,10 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
         </div>
 
         {/* Scrollable Receipt Body (Thermal Receipt Appearance) */}
-        <div className="flex-1 overflow-y-auto pr-1">
+        <div className="flex-1 overflow-y-auto pr-1 pb-6">
           <div
             id="printable-shift-receipt"
-            className="p-5 rounded-2xl bg-white text-slate-900 font-mono text-[11px] leading-relaxed shadow-inner border border-slate-300 select-all"
+            className="p-5 pb-6 rounded-2xl bg-white text-slate-900 font-mono text-[11px] leading-relaxed shadow-inner border border-slate-300 select-all"
           >
             {/* Header Struk */}
             <div className="text-center pb-3 border-b border-dashed border-slate-400">
@@ -105,7 +110,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
                 {activeBusinessName}
               </div>
               <div className="text-[10px] text-slate-600 font-sans">
-                {activeBusinessName} • {sectorTerminalSubtitle}
+                {sectorTerminalSubtitle}
               </div>
               <div className="mt-1.5 font-bold uppercase tracking-wide text-xs bg-slate-100 py-1 rounded border border-slate-300">
                 *** LAPORAN TUTUP SHIFT KASIR (Z-REPORT) ***
@@ -114,29 +119,31 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
 
             {/* Info Shift */}
             <div className="py-2.5 border-b border-dashed border-slate-400 space-y-1 text-[10px]">
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">ID Shift:</span>
-                <span className="font-bold">{shift.id}</span>
+                <span className="font-bold text-right">{shift.id}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">Terminal:</span>
-                <span className="font-bold">{syncedTerminalName}</span>
+                <span className="font-bold text-right">{syncedTerminalName}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">Operator Kasir:</span>
-                <span className="font-bold">{shift.cashierName}</span>
+                <span className="font-bold text-right">{shift.cashierName}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">Waktu Buka:</span>
-                <span>{shift.startTime}</span>
+                <span className="text-right">{formatShiftDateTime(shift.startTime)}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">Waktu Tutup:</span>
-                <span>{shift.endTime || new Date().toISOString().slice(0, 16)}</span>
+                <span className="text-right">
+                  {formatShiftDateTime(shift.endTime || new Date().toISOString())}
+                </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-2">
                 <span className="text-slate-600">Total Transaksi:</span>
-                <span className="font-bold">{shift.totalTransactionsCount} Transaksi</span>
+                <span className="font-bold text-right">{shift.totalTransactionsCount} Transaksi</span>
               </div>
             </div>
 
@@ -189,7 +196,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
                 </span>
               </div>
               <div
-                className={`flex justify-between font-black text-xs pt-1 border-t border-slate-300 ${
+                className={`flex justify-between gap-2 font-black text-xs pt-1 border-t border-slate-300 ${
                   isMatch
                     ? 'text-emerald-700'
                     : isSurplus
@@ -198,7 +205,7 @@ export const ShiftSummaryReceiptModal: React.FC<ShiftSummaryReceiptModalProps> =
                 }`}
               >
                 <span>Selisih Rekonsiliasi:</span>
-                <span>
+                <span className="text-right">
                   {diff > 0
                     ? `+Rp ${diff.toLocaleString('id-ID')} [Lebih (Surplus)]`
                     : isMatch

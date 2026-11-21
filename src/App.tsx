@@ -387,13 +387,19 @@ const MainLayout: React.FC = () => {
         <div className="flex items-center gap-2 min-w-0 shrink">
           <div className="flex items-center gap-2 shrink-0">
             <div className="w-7 h-7 rounded-lg bg-slate-900 border border-cyan-500/40 flex items-center justify-center overflow-hidden shadow-sm shadow-cyan-500/20">
-              <img
-                src="/logo-jacs-enterprise.png"
-                alt="JacS Enterprise Logo"
+            <img
+                src={businessProfile?.logoUrl || businessProfile?.logo || '/logo-jacs-enterprise.png'}
+                alt={`${businessProfile?.name || businessProfile?.businessName || 'JacS Enterprise'} Logo`}
                 className="w-full h-full object-contain"
                 onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  const parent = e.currentTarget.parentElement;
+                  const img = e.currentTarget;
+                  if (!img.dataset.fallbackApplied && !img.src.endsWith('/logo-jacs-enterprise.png')) {
+                    img.dataset.fallbackApplied = 'true';
+                    img.src = '/logo-jacs-enterprise.png';
+                    return;
+                  }
+                  img.style.display = 'none';
+                  const parent = img.parentElement;
                   if (parent && !parent.querySelector('.fallback-text')) {
                     const span = document.createElement('span');
                     span.className = 'font-normal text-xs text-cyan-400 fallback-text';
@@ -401,11 +407,11 @@ const MainLayout: React.FC = () => {
                     parent.appendChild(span);
                   }
                 }}
-              />
+              /> 
             </div>
             <div className="flex items-center gap-1.5">
               <span className="font-['Plus_Jakarta_Sans'] font-normal text-xs sm:text-sm tracking-wider whitespace-nowrap">
-                JacS Enterprise
+                {businessProfile?.name || businessProfile?.businessName || 'TOKO UTAMA'}
               </span>
               <span className="text-slate-500 hidden 2xl:inline">—</span>
               <span

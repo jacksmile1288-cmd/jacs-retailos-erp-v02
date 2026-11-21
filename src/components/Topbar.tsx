@@ -32,6 +32,7 @@ export const Topbar: React.FC<TopbarProps> = ({
     currentUser,
     activeUser,
     contextualProfile,
+    businessProfile,
     logout,
     openAiAssistant,
   } = useApp();
@@ -42,6 +43,13 @@ export const Topbar: React.FC<TopbarProps> = ({
   const isEn = language === 'en';
   const user = currentUser || activeUser;
   const isHomeActive = activeNav === 'home';
+
+  const activeStoreName = (
+    businessProfile?.name ||
+    businessProfile?.businessName ||
+    businessProfile?.companyName ||
+    'TOKO UTAMA'
+  ).trim();
 
   const handleLogout = () => {
     logout();
@@ -59,7 +67,7 @@ export const Topbar: React.FC<TopbarProps> = ({
             : 'bg-[#161b22] border-slate-800 text-slate-200'
         }`}
       >
-        {/* Kiri: Brand JacS Enterprise + Tombol Beranda Terpadu */}
+        {/* Kiri: Identitas Toko / Usaha Aktif + Tombol Beranda Terpadu */}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -77,7 +85,7 @@ export const Topbar: React.FC<TopbarProps> = ({
           <div
             onClick={() => setActiveNav('home')}
             className="flex items-center gap-2.5 cursor-pointer group"
-            title="JacS Enterprise • RetailOS ERP"
+            title={`${activeStoreName} • RetailOS ERP`}
           >
             <div
               className={`w-8 h-8 rounded-xl flex items-center justify-center font-mono font-normal text-xs transition-transform group-hover:scale-105 ${
@@ -91,8 +99,8 @@ export const Topbar: React.FC<TopbarProps> = ({
 
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm md:text-[15px] tracking-wider bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 bg-clip-text text-transparent">
-                  JacS Enterprise
+                <span className="font-['Plus_Jakarta_Sans'] font-semibold text-sm md:text-[15px] tracking-wider bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 bg-clip-text text-transparent max-w-[180px] sm:max-w-[240px] truncate">
+                  {activeStoreName}
                 </span>
                 <span
                   className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-medium uppercase tracking-wider border hidden sm:inline-block ${
@@ -140,7 +148,7 @@ export const Topbar: React.FC<TopbarProps> = ({
                 ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
                 : 'bg-cyan-950/40 hover:bg-cyan-900/60 border-cyan-700/50 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.15)]'
             }`}
-            title="Tanya JacS AI Assistant"
+            title="Tanya AI Assistant"
           >
             <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
             <span className="hidden sm:inline">Tanya AI</span>
@@ -238,6 +246,10 @@ export const Topbar: React.FC<TopbarProps> = ({
             </div>
 
             <div className="py-4 space-y-3 text-xs">
+              <div className="flex justify-between items-center py-1 border-b border-slate-100 dark:border-slate-800/60">
+                <span className="text-slate-400">ENTITAS</span>
+                <span className="font-bold text-right truncate max-w-[180px]">{activeStoreName}</span>
+              </div>
               <div className="flex justify-between items-center py-1 border-b border-slate-100 dark:border-slate-800/60">
                 <span className="text-slate-400">OPERATOR</span>
                 <span className="font-bold">{user?.name || '-'}</span>
