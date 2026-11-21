@@ -132,9 +132,22 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
   const pinInputRef = useRef<HTMLInputElement>(null);
 
   // Judul Utama Bersih: KHANSA SWALAYAN
-  const primaryStoreTitle = 'KHANSA';
-  const secondaryStoreTitle = 'SWALAYAN';
-  const displayStoreLabel = 'KHANSA SWALAYAN';
+ const rawStoreName = (
+  (businessProfile as any)?.storeName ||
+  (businessProfile as any)?.businessName ||
+  (businessProfile as any)?.name ||
+  (businessProfile as any)?.companyName ||
+  'KHANSA SWALAYAN'
+)
+  .toString()
+  .trim();
+
+const storeWords = rawStoreName.split(/\s+/).filter(Boolean);
+const primaryStoreTitle =
+  storeWords.length > 1 ? storeWords.slice(0, -1).join(' ') : storeWords[0] || 'KHANSA';
+const secondaryStoreTitle =
+  storeWords.length > 1 ? storeWords[storeWords.length - 1] : 'SWALAYAN';
+const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
 
   const customCoverBgUrl =
     (businessProfile as any)?.welcomeCoverImageUrl ||
