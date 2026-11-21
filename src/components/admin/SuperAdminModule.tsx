@@ -126,6 +126,8 @@ import { JacsSOPManualTab } from './JacsSOPManualTab';
 import { JacsBranchManagementTab } from './JacsBranchManagementTab';
 import { MasterDataModule } from '../master/MasterDataModule';
 import { MigrationEntityType } from '../../types';
+const IS_CLIENT_TRIAL_MODE = import.meta.env.VITE_CLIENT_TRIAL_MODE === 'true';
+
 const SUPABASE_BACKEND_SQL_SNIPPET = `-- =========================================================================
 -- JAC-S RETAILOS ERP: SUPABASE BACKEND SETUP SCRIPT
 -- =========================================================================
@@ -782,7 +784,7 @@ export const SuperAdminModule: React.FC = () => {
   const [securityError, setSecurityError] = useState<string | null>(null);
 
   // Active Admin Tab
-  const adminTab = (superAdminTab || 'system') as
+  const adminTab = (superAdminTab || (IS_CLIENT_TRIAL_MODE ? 'legality' : 'system')) as
     | 'system'
     | 'cloud'
     | 'legality'
@@ -798,11 +800,17 @@ export const SuperAdminModule: React.FC = () => {
     | 'branches'
     | 'master-data'
     | 'sop';
-  const setAdminTab = (tab: any) => setSuperAdminTab(tab);
+  const setAdminTab = (tab: any) => {
+    if (IS_CLIENT_TRIAL_MODE && tab !== 'legality') {
+      showToast('Tab terkunci dalam mode Uji Coba Klien (Client Trial Mode).', 'info');
+      return;
+    }
+    setSuperAdminTab(tab);
+  };
 
   useEffect(() => {
-    if (!superAdminTab || superAdminTab === 'overview') {
-      setSuperAdminTab('system');
+    if (!superAdminTab || superAdminTab === 'overview' || (IS_CLIENT_TRIAL_MODE && superAdminTab !== 'legality')) {
+      setSuperAdminTab('legality');
     }
   }, [superAdminTab, setSuperAdminTab]);
 
@@ -2088,12 +2096,18 @@ export const SuperAdminModule: React.FC = () => {
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = adminTab === tab.id;
+            const isLocked = IS_CLIENT_TRIAL_MODE && tab.id !== 'legality';
             return (
               <button
                 key={tab.id}
                 onClick={() => setAdminTab(tab.id as any)}
-                className={`w-full px-3.5 py-2.5 rounded-xl text-[13px] tracking-wide flex items-center gap-2.5 transition cursor-pointer text-left ${
-                  isActive
+                disabled={isLocked}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-[13px] tracking-wide flex items-center justify-between gap-2.5 transition cursor-pointer text-left ${
+                  isLocked
+                    ? isLight
+                      ? 'opacity-40 bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      : 'opacity-40 bg-slate-900/40 text-slate-500 border border-slate-800 cursor-not-allowed'
+                    : isActive
                     ? isLight
                       ? 'bg-cyan-50/80 border border-cyan-500/70 text-slate-900 shadow-[0_0_14px_rgba(6,182,212,0.22)] font-medium'
                       : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,212,0.25)] font-medium'
@@ -2102,8 +2116,11 @@ export const SuperAdminModule: React.FC = () => {
                     : 'text-gray-400 hover:text-white hover:bg-gray-800/50 border border-transparent font-normal'
                 }`}
               >
-                <Icon className="w-4 h-4 shrink-0" style={{ color: tab.color }} />
-                <span className="truncate">{tab.label}</span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Icon className="w-4 h-4 shrink-0" style={{ color: isLocked ? '#94a3b8' : tab.color }} />
+                  <span className="truncate">{tab.label}</span>
+                </div>
+                {isLocked && <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
               </button>
             );
           })}
