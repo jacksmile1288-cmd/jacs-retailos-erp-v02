@@ -605,10 +605,13 @@ export const SuperAdminModule: React.FC = () => {
   const [cloudPingResult, setCloudPingResult] = useState<CloudConnectionPingResult | null>(null);
 
   const handleSaveCloudConfig = (notify = true) => {
+    const existingCfg = dualBackendSync.getConfig();
     const newCfg = {
-      supabaseUrl: cloudSupabaseUrl.trim(),
-      supabaseAnonKey: cloudSupabaseAnonKey.trim(),
-      gasWebhookUrl: cloudGasWebhookUrl.trim(),
+      supabaseUrl: cloudSupabaseUrl.trim() || (notify ? '' : (existingCfg.supabaseUrl || '').trim()),
+      supabaseAnonKey:
+        cloudSupabaseAnonKey.trim() || (notify ? '' : (existingCfg.supabaseAnonKey || '').trim()),
+      gasWebhookUrl:
+        cloudGasWebhookUrl.trim() || (notify ? '' : (existingCfg.gasWebhookUrl || '').trim()),
     };
     dualBackendSync.saveConfig(newCfg);
     if (notify) {

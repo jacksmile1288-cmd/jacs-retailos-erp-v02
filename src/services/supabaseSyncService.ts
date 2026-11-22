@@ -1,4 +1,12 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import {
+  supabase,
+  isSupabaseConfigured,
+  getRuntimeSupabaseClient,
+  resolveSupabaseCredentials,
+  sanitizeAndValidateSupabaseUrl,
+  DEFAULT_FALLBACK_SUPABASE_URL,
+  RuntimeSupabaseCredentials,
+} from '../lib/supabaseClient';
 import { Product, CartItem } from '../types';
 
 const OFFLINE_QUEUE_KEY = 'jacs_supabase_offline_queue_v1';
@@ -9,6 +17,17 @@ export interface QueuedSyncPayload {
   action: 'UPSERT' | 'INSERT' | 'RPC_TRANSACTION';
   payload: any;
   timestamp: string;
+}
+
+export interface ErpSnapshotPayload {
+  id?: string;
+  businessName?: string;
+  productsCount?: number;
+  transactionsCount?: number;
+  financeCount?: number;
+  journalCount?: number;
+  snapshotPayload: Record<string, any>;
+  syncedAt?: string;
 }
 
 export const getOfflineQueue = (): QueuedSyncPayload[] => {
@@ -45,8 +64,11 @@ export const enqueueOfflineAction = (
   saveOfflineQueue(queue);
 };
 
-export const syncOfflineQueueToSupabase = async (): Promise<number> => {
-  if (!isSupabaseConfigured || !navigator.onLine) return 0;
+export const syncOfflineQueueToSupabase = async (
+  runtimeConfig?: RuntimeSupabaseCredentials
+): Promise<number> => {
+  const client = getRuntimeSupabaseClient(runtimeConfig);
+  if (!client || !navigator.onLine) return 0;
   const queue = getOfflineQueue();
   if (queue.length === 0) return 0;
 
@@ -57,13 +79,13 @@ export const syncOfflineQueueToSupabase = async (): Promise<number> => {
     try {
       let error = null;
       if (item.action === 'RPC_TRANSACTION') {
-        const { error: rpcError } = await supabase.rpc('process_pos_transaction_atomic', item.payload);
+        const { error: rpcError } = await client.rpc('process_pos_transaction_atomic', item.payload);
         error = rpcError;
       } else if (item.action === 'UPSERT') {
-        const res = await supabase.from(item.table).upsert(item.payload);
+        const res = await client.from(item.table).upsert(item.payload);
         error = res.error;
       } else {
-        const res = await supabase.from(item.table).insert(item.payload);
+        const res = await client.from(item.table).insert(item.payload);
         error = res.error;
       }
 
@@ -201,7 +223,6 @@ export const pushTransactionAtomicRpc = async (tx: {
   try {
     const { data, error } = await supabase.rpc('process_pos_transaction_atomic', rpcPayload);
     if (error || (data && data.success === false)) {
-      // Fallback to standard push transaction if RPC encounters any issue
       return await pushTransactionToSupabase(tx);
     }
     return true;
@@ -311,7 +332,123 @@ export const pushStockMovementToSupabase = async (movement: {
   }
 };
 
-// 5. REALTIME SUBSCRIPTION
+// 5. SNAPSHOT SYNC (jacs_erp_snapshots)
+export const syncSnapshotToSupabase = async (
+  snapshot: ErpSnapshotPayload,
+  runtimeConfig?: RuntimeSupabaseCredentials
+): Promise<boolean> => {
+  const creds = resolveSupabaseCredentials(runtimeConfig);
+  const safeUrl =
+    sanitizeAndValidateSupabaseUrl(creds.supabaseUrl) ||
+    (creds.supabaseAnonKey ? DEFAULT_FALLBACK_SUPABASE_URL : '');
+
+  if (!safeUrl || !creds.supabaseAnonKey) {
+    const missingFields: string[] = [];
+    if (!safeUrl) missingFields.push('URL Proyek Supabase');
+    if (!creds.supabaseAnonKey) missingFields.push('Anon Key Supabase');
+    throw new Error(
+      `Supabase belum dikonfigurasi (${missingFields.join(' & ') || 'URL dan Anon Key'} belum diisi).`
+    );
+  }
+
+  const client = getRuntimeSupabaseClient({
+    supabaseUrl: safeUrl,
+    supabaseAnonKey: creds.supabaseAnonKey,
+  });
+
+  if (!client) {
+    throw new Error(
+      `Gagal menginisialisasi koneksi Supabase untuk endpoint ${safeUrl}.`
+    );
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Perangkat sedang offline.');
+  }
+
+  const row = {
+    id: snapshot.id || 'default-snapshot',
+    business_name: snapshot.businessName || 'JACS ENTERPRISE',
+    products_count: Number(snapshot.productsCount ?? 0),
+    transactions_count: Number(snapshot.transactionsCount ?? 0),
+    finance_count: Number(snapshot.financeCount ?? 0),
+    journal_count: Number(snapshot.journalCount ?? 0),
+    snapshot_payload: snapshot.snapshotPayload,
+    synced_at: snapshot.syncedAt || new Date().toISOString(),
+  };
+
+  const { error } = await client
+    .from('jacs_erp_snapshots')
+    .upsert(row, { onConflict: 'id' });
+
+  if (error) {
+    throw new Error(`Gagal sync snapshot ke Supabase: ${error.message}`);
+  }
+  return true;
+};
+
+export const pullLatestSnapshotFromSupabase = async (
+  id = 'default-snapshot',
+  runtimeConfig?: RuntimeSupabaseCredentials
+) => {
+  const creds = resolveSupabaseCredentials(runtimeConfig);
+  const safeUrl =
+    sanitizeAndValidateSupabaseUrl(creds.supabaseUrl) ||
+    (creds.supabaseAnonKey ? DEFAULT_FALLBACK_SUPABASE_URL : '');
+
+  if (!safeUrl || !creds.supabaseAnonKey) {
+    return null;
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    throw new Error('Perangkat sedang offline. Tidak dapat menarik snapshot dari Supabase.');
+  }
+
+  const client = getRuntimeSupabaseClient({
+    supabaseUrl: safeUrl,
+    supabaseAnonKey: creds.supabaseAnonKey,
+  });
+  if (!client) return null;
+
+  // 1. Ambil baris snapshot terbaru berdasarkan synced_at DESC
+  const { data: latestRows, error: latestError } = await client
+    .from('jacs_erp_snapshots')
+    .select('*')
+    .order('synced_at', { ascending: false })
+    .limit(1);
+
+  if (latestError) {
+    // Fallback langsung berdasarkan id jika order synced_at bermasalah
+    const { data: fallbackRow, error: fallbackError } = await client
+      .from('jacs_erp_snapshots')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fallbackError) {
+      throw new Error(`Gagal menarik snapshot dari Supabase: ${fallbackError.message}`);
+    }
+    if (fallbackRow) return fallbackRow;
+    throw new Error(`Gagal menarik snapshot dari Supabase: ${latestError.message}`);
+  }
+
+  if (Array.isArray(latestRows) && latestRows.length > 0 && latestRows[0]) {
+    return latestRows[0];
+  }
+
+  // 2. Fallback eksplisit ke baris id = 'default-snapshot' (atau id yang diminta)
+  const { data: defaultRow, error: defaultError } = await client
+    .from('jacs_erp_snapshots')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (defaultError) {
+    throw new Error(`Gagal menarik snapshot dari Supabase: ${defaultError.message}`);
+  }
+
+  return defaultRow || null;
+};
+
+// 6. REALTIME SUBSCRIPTION
 export const subscribeToSupabaseChanges = (onProductChange: (payload: any) => void) => {
   if (!isSupabaseConfigured) return () => {};
 

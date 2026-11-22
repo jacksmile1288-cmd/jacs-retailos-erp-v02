@@ -1,18 +1,144 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { dualBackendSync } from '../services/dualBackendSync';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+export const DEFAULT_FALLBACK_SUPABASE_URL = 'https://cdjjidkzesscwlibhbng.supabase.co';
+
+export interface RuntimeSupabaseCredentials {
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
+}
+
+const stripInvisibleAndQuotes = (raw?: unknown): string =>
+  typeof raw === 'string'
+    ? raw
+        .replace(/[\u200B-\u200D\uFEFF\u0000-\u001F\u007F]/g, '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '')
+        .trim()
+    : '';
+
+export const sanitizeAndValidateSupabaseUrl = (raw?: unknown): string => {
+  const cleaned = stripInvisibleAndQuotes(raw)
+    .replace(/\s+/g, '')
+    .replace(/\/+$/, '');
+  if (!cleaned) return '';
+
+  let candidate = cleaned;
+  if (/^https?:\/\//i.test(candidate)) {
+    candidate = candidate.replace(/^https?:\/\//i, (m) => m.toLowerCase());
+  } else if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/.*)?$/i.test(candidate)) {
+    candidate = `https://${candidate}`;
+  } else {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return '';
+    }
+    if (!parsed.hostname || (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost')) {
+      return '';
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return '';
+  }
+};
+
+const normalizeSupabaseKey = (raw?: unknown): string =>
+  stripInvisibleAndQuotes(raw).replace(/\s+/g, '');
+
+const envSupabaseUrl = sanitizeAndValidateSupabaseUrl(import.meta.env.VITE_SUPABASE_URL || '');
+const envSupabaseAnonKey = normalizeSupabaseKey(import.meta.env.VITE_SUPABASE_ANON_KEY || '');
+
+const isValidSupabaseUrl = (url: string): boolean => Boolean(sanitizeAndValidateSupabaseUrl(url));
+
+const isValidSupabaseKey = (key: string): boolean => Boolean(key && key.length > 0);
 
 export const isSupabaseConfigured = Boolean(
-  supabaseUrl &&
-  supabaseUrl.startsWith('https://') &&
-  supabaseAnonKey &&
-  supabaseAnonKey.length > 20
+  isValidSupabaseUrl(envSupabaseUrl) && isValidSupabaseKey(envSupabaseAnonKey)
 );
+
+const readStoredDualBackendSupabase = (): RuntimeSupabaseCredentials => {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return {};
+    const raw = window.localStorage.getItem('jacs_dual_backend_config');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const storedUrl =
+      typeof parsed?.supabaseUrl === 'string'
+        ? parsed.supabaseUrl
+        : typeof parsed?.supabase_url === 'string'
+        ? parsed.supabase_url
+        : typeof parsed?.url === 'string'
+        ? parsed.url
+        : '';
+    const storedKey =
+      typeof parsed?.supabaseAnonKey === 'string'
+        ? parsed.supabaseAnonKey
+        : typeof parsed?.supabase_anon_key === 'string'
+        ? parsed.supabase_anon_key
+        : typeof parsed?.anonKey === 'string'
+        ? parsed.anonKey
+        : '';
+    return {
+      supabaseUrl: sanitizeAndValidateSupabaseUrl(storedUrl),
+      supabaseAnonKey: normalizeSupabaseKey(storedKey),
+    };
+  } catch {
+    return {};
+  }
+};
+
+const readLiveDualBackendSupabase = (): RuntimeSupabaseCredentials => {
+  try {
+    const live = dualBackendSync.getConfig();
+    return {
+      supabaseUrl: sanitizeAndValidateSupabaseUrl(live?.supabaseUrl),
+      supabaseAnonKey: normalizeSupabaseKey(live?.supabaseAnonKey),
+    };
+  } catch {
+    return {};
+  }
+};
+
+export const resolveSupabaseCredentials = (
+  override?: RuntimeSupabaseCredentials
+): { supabaseUrl: string; supabaseAnonKey: string; configured: boolean } => {
+  const overrideUrl = sanitizeAndValidateSupabaseUrl(override?.supabaseUrl);
+  const overrideKey = normalizeSupabaseKey(override?.supabaseAnonKey);
+  const live = readLiveDualBackendSupabase();
+  const stored = readStoredDualBackendSupabase();
+
+  const resolvedKey =
+    overrideKey || live.supabaseAnonKey || stored.supabaseAnonKey || envSupabaseAnonKey || '';
+
+  const urlCandidates = [overrideUrl, live.supabaseUrl, stored.supabaseUrl, envSupabaseUrl];
+  let resolvedUrl = '';
+  for (const candidate of urlCandidates) {
+    const valid = sanitizeAndValidateSupabaseUrl(candidate);
+    if (valid) {
+      resolvedUrl = valid;
+      break;
+    }
+  }
+
+  // Fallback aman ke URL Supabase valid jika URL runtime kosong/malformed namun Anon Key sudah tersedia
+  if (!resolvedUrl && resolvedKey) {
+    resolvedUrl = DEFAULT_FALLBACK_SUPABASE_URL;
+  }
+
+  return {
+    supabaseUrl: resolvedUrl,
+    supabaseAnonKey: resolvedKey,
+    configured: isValidSupabaseUrl(resolvedUrl) && isValidSupabaseKey(resolvedKey),
+  };
+};
 
 // Fallback safe mock client if not configured so application does not crash
 export const supabase: SupabaseClient = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+  ? createClient(envSupabaseUrl, envSupabaseAnonKey, {
       auth: { persistSession: true, autoRefreshToken: true },
       realtime: { params: { eventsPerSecond: 10 } },
     })
@@ -31,6 +157,47 @@ export const supabase: SupabaseClient = isSupabaseConfigured
       }),
       removeChannel: () => {},
     }) as unknown as SupabaseClient);
+
+const runtimeClientCache = new Map<string, SupabaseClient>();
+
+export const getRuntimeSupabaseClient = (
+  override?: RuntimeSupabaseCredentials
+): SupabaseClient | null => {
+  const { supabaseUrl: resolvedUrl, supabaseAnonKey: resolvedKey, configured } =
+    resolveSupabaseCredentials(override);
+
+  if (!configured || !resolvedKey) return null;
+
+  const safeUrl = sanitizeAndValidateSupabaseUrl(resolvedUrl) || DEFAULT_FALLBACK_SUPABASE_URL;
+
+  if (
+    isSupabaseConfigured &&
+    safeUrl === envSupabaseUrl &&
+    resolvedKey === envSupabaseAnonKey
+  ) {
+    return supabase;
+  }
+
+  const cacheKey = `${safeUrl}::${resolvedKey}`;
+  const cached = runtimeClientCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const client = createClient(safeUrl, resolvedKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+    runtimeClientCache.set(cacheKey, client);
+    return client;
+  } catch {
+    const fallbackClient = createClient(DEFAULT_FALLBACK_SUPABASE_URL, resolvedKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+    runtimeClientCache.set(`${DEFAULT_FALLBACK_SUPABASE_URL}::${resolvedKey}`, fallbackClient);
+    return fallbackClient;
+  }
+};
 
 export const SUPABASE_SETUP_SQL_SCRIPT = `-- =========================================================================
 -- JAC-S RETAILOS ERP: SUPABASE PRODUCTION DATABASE SCHEMA & RLS SETUP

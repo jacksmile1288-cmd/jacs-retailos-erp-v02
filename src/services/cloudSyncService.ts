@@ -1,4 +1,10 @@
 import { dualBackendSync, DualBackendConfig, generateTxUuid } from './dualBackendSync';
+import {
+  resolveSupabaseCredentials,
+  sanitizeAndValidateSupabaseUrl,
+  DEFAULT_FALLBACK_SUPABASE_URL,
+} from '../lib/supabaseClient';
+import { pullLatestSnapshotFromSupabase } from './supabaseSyncService';
 
 export interface CloudSyncSnapshot {
   products: any[];
@@ -340,14 +346,119 @@ export async function pushSyncData(
   };
 }
 
+const extractCloudSnapshotPayload = (
+  rowOrRaw: any
+): Partial<CloudSyncSnapshot> | null => {
+  if (!rowOrRaw || typeof rowOrRaw !== 'object') return null;
+
+  const candidateRaw =
+    rowOrRaw.snapshot_payload ??
+    rowOrRaw.snapshot ??
+    rowOrRaw.payload ??
+    rowOrRaw.data ??
+    rowOrRaw.result ??
+    rowOrRaw;
+
+  let parsed: any = candidateRaw;
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (!trimmed) {
+      parsed = null;
+    } else {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+
+  // Handle double-wrapped snapshot payload if present
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const inner = parsed.snapshot_payload ?? parsed.snapshot ?? parsed.payload;
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+      parsed = inner;
+    } else if (typeof inner === 'string') {
+      try {
+        const innerParsed = JSON.parse(inner);
+        if (innerParsed && typeof innerParsed === 'object') {
+          parsed = innerParsed;
+        }
+      } catch {}
+    }
+  }
+
+  const baseObj = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  const products = Array.isArray(baseObj.products) ? baseObj.products : undefined;
+  const transactions = Array.isArray(baseObj.transactions)
+    ? baseObj.transactions
+    : Array.isArray(baseObj.sales)
+    ? baseObj.sales
+    : undefined;
+  const financeEntries = Array.isArray(baseObj.financeEntries)
+    ? baseObj.financeEntries
+    : Array.isArray(baseObj.finance)
+    ? baseObj.finance
+    : undefined;
+  const journalEntries = Array.isArray(baseObj.journalEntries)
+    ? baseObj.journalEntries
+    : undefined;
+
+  let businessProfile =
+    baseObj.businessProfile && typeof baseObj.businessProfile === 'object'
+      ? baseObj.businessProfile
+      : undefined;
+
+  if (!businessProfile && typeof rowOrRaw.business_name === 'string' && rowOrRaw.business_name.trim()) {
+    businessProfile = { name: rowOrRaw.business_name.trim() };
+  }
+
+  const hasValidSection = Boolean(
+    products !== undefined ||
+      transactions !== undefined ||
+      financeEntries !== undefined ||
+      journalEntries !== undefined ||
+      businessProfile !== undefined
+  );
+
+  if (!hasValidSection) return null;
+
+  return {
+    ...baseObj,
+    ...(products !== undefined ? { products } : {}),
+    ...(transactions !== undefined ? { transactions } : {}),
+    ...(financeEntries !== undefined ? { financeEntries } : {}),
+    ...(journalEntries !== undefined ? { journalEntries } : {}),
+    ...(businessProfile !== undefined ? { businessProfile } : {}),
+  };
+};
+
 /**
- * Tarik data snapshot terbaru dari cloud (Supabase REST API atau Google Apps Script Webhook).
+ * Tarik data snapshot terbaru dari cloud (Supabase jacs_erp_snapshots atau Google Apps Script Webhook).
  */
 export async function pullSyncData(customConfig?: DualBackendConfig): Promise<CloudPullResult> {
-  const config = customConfig || dualBackendSync.getConfig();
+  const storedConfig = dualBackendSync.getConfig();
+  const effectiveSupabaseUrl =
+    sanitizeAndValidateSupabaseUrl(customConfig?.supabaseUrl) ||
+    sanitizeAndValidateSupabaseUrl(storedConfig.supabaseUrl) ||
+    '';
+  const effectiveSupabaseAnonKey =
+    customConfig?.supabaseAnonKey?.trim() || storedConfig.supabaseAnonKey?.trim() || '';
+  const effectiveGasUrl =
+    customConfig?.gasWebhookUrl?.trim() || storedConfig.gasWebhookUrl?.trim() || '';
+
+  const resolvedSupabase = resolveSupabaseCredentials({
+    supabaseUrl: effectiveSupabaseUrl,
+    supabaseAnonKey: effectiveSupabaseAnonKey,
+  });
+  const safeSupabaseUrl =
+    sanitizeAndValidateSupabaseUrl(resolvedSupabase.supabaseUrl) ||
+    (resolvedSupabase.supabaseAnonKey ? DEFAULT_FALLBACK_SUPABASE_URL : '');
+  const hasSupabaseConfig = Boolean(safeSupabaseUrl && resolvedSupabase.supabaseAnonKey);
+
   const timestamp = new Date().toISOString();
 
-  if (!config.supabaseUrl && !config.gasWebhookUrl) {
+  if (!hasSupabaseConfig && !effectiveGasUrl) {
     return {
       success: false,
       message: 'Belum ada endpoint cloud (Supabase atau GAS) yang dikonfigurasi di Konsol SuperAdmin.',
@@ -356,82 +467,72 @@ export async function pullSyncData(customConfig?: DualBackendConfig): Promise<Cl
     };
   }
 
-  // 1. Coba tarik dari Supabase REST API (jacs_erp_snapshots atau cloud_sync)
-  if (config.supabaseUrl && config.supabaseAnonKey) {
-    const baseUrl = config.supabaseUrl.trim().replace(/\/+$/, '');
+  let supabaseErrorMsg = '';
+
+  // 1. Tarik snapshot terbaru dari Supabase tabel jacs_erp_snapshots memakai kredensial runtime aktif
+  if (hasSupabaseConfig) {
     try {
-      let res = await fetch(`${baseUrl}/rest/v1/jacs_erp_snapshots?order=synced_at.desc&limit=1`, {
-        headers: {
-          apikey: config.supabaseAnonKey.trim(),
-          Authorization: `Bearer ${config.supabaseAnonKey.trim()}`,
-          Accept: 'application/json',
-        },
+      const row = await pullLatestSnapshotFromSupabase('default-snapshot', {
+        supabaseUrl: safeSupabaseUrl,
+        supabaseAnonKey: resolvedSupabase.supabaseAnonKey,
       });
 
-      if (res.status === 404) {
-        res = await fetch(`${baseUrl}/rest/v1/cloud_sync?order=synced_at.desc&limit=1`, {
-          headers: {
-            apikey: config.supabaseAnonKey.trim(),
-            Authorization: `Bearer ${config.supabaseAnonKey.trim()}`,
-            Accept: 'application/json',
-          },
-        });
-      }
-
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows) && rows.length > 0) {
-          const rawPayload = rows[0]?.snapshot_payload || rows[0]?.payload || rows[0]?.data;
-          let parsedData = rawPayload;
-          if (typeof rawPayload === 'string') {
-            try {
-              parsedData = JSON.parse(rawPayload);
-            } catch {}
-          }
-          if (parsedData && (parsedData.products || parsedData.transactions || parsedData.financeEntries || parsedData.journalEntries)) {
-            return {
-              success: true,
-              message: `Data snapshot berhasil ditarik dari Supabase REST API (${rows[0].synced_at || timestamp})`,
-              timestamp,
-              transport: 'SUPABASE',
-              data: parsedData,
-            };
-          }
+      if (row) {
+        const parsedData = extractCloudSnapshotPayload(row);
+        if (parsedData) {
+          return {
+            success: true,
+            message: `Data snapshot berhasil ditarik dari Supabase jacs_erp_snapshots (${row.synced_at || timestamp})`,
+            timestamp,
+            transport: 'SUPABASE',
+            data: parsedData,
+          };
         }
+        return {
+          success: false,
+          message: 'Baris snapshot ditemukan di jacs_erp_snapshots, namun payload snapshot kosong atau tidak valid.',
+          timestamp,
+          transport: 'SUPABASE',
+          error: 'EMPTY_PAYLOAD',
+        };
       }
     } catch (err: any) {
-      console.warn('[Pull Sync Supabase Error]', err?.message);
+      supabaseErrorMsg = err?.message || 'Gagal menarik snapshot dari Supabase.';
+      console.warn('[Pull Sync Supabase Error]', supabaseErrorMsg);
     }
   }
 
-  // 2. Coba tarik dari Google Apps Script Webhook
-  if (config.gasWebhookUrl) {
+  // 2. Coba tarik dari Google Apps Script Webhook jika dikonfigurasi
+  if (effectiveGasUrl) {
     try {
-      const gasUrl = `${config.gasWebhookUrl.trim()}${config.gasWebhookUrl.includes('?') ? '&' : '?'}action=PULL_SNAPSHOT`;
+      const gasUrl = `${effectiveGasUrl}${effectiveGasUrl.includes('?') ? '&' : '?'}action=PULL_SNAPSHOT`;
       const res = await fetch(gasUrl, { method: 'GET' });
       if (res.ok) {
         const json = await res.json();
-        if (json && (json.snapshot || json.data || json.payload || json.result)) {
-          let parsedData = json.snapshot || json.data || json.payload || json.result;
-          if (typeof parsedData === 'string') {
-            try {
-              parsedData = JSON.parse(parsedData);
-            } catch {}
-          }
-          if (parsedData && (parsedData.products || parsedData.transactions || parsedData.financeEntries || parsedData.journalEntries)) {
-            return {
-              success: true,
-              message: 'Data snapshot berhasil ditarik dari Google Apps Script Webhook',
-              timestamp,
-              transport: 'GAS',
-              data: parsedData,
-            };
-          }
+        const parsedData = extractCloudSnapshotPayload(json);
+        if (parsedData) {
+          return {
+            success: true,
+            message: 'Data snapshot berhasil ditarik dari Google Apps Script Webhook',
+            timestamp,
+            transport: 'GAS',
+            data: parsedData,
+          };
         }
       }
     } catch (err: any) {
       console.warn('[Pull Sync GAS Error]', err?.message);
     }
+  }
+
+  if (supabaseErrorMsg) {
+    return {
+      success: false,
+      message: supabaseErrorMsg,
+      timestamp,
+      transport: 'SUPABASE',
+      error: supabaseErrorMsg,
+    };
   }
 
   return {
