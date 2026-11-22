@@ -15,10 +15,13 @@ export interface SyncQueueItem {
   timestamp: string;
 }
 
+export type BackendProvider = 'SUPABASE' | 'GAS' | 'LOCAL';
+
 export interface DualBackendConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
   gasWebhookUrl: string;
+  provider?: BackendProvider;
 }
 
 export type CloverEnvironment = 'PRODUCTION' | 'SANDBOX';
@@ -105,7 +108,8 @@ class DualBackendSyncEngine {
   private config: DualBackendConfig = {
     supabaseUrl: '',
     supabaseAnonKey: '',
-    gasWebhookUrl: ''
+    gasWebhookUrl: '',
+    provider: 'LOCAL'
   };
 
   private cloverConfig: CloverConfig = {

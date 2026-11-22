@@ -158,6 +158,18 @@ import {
   CloudSyncSnapshot,
 } from '../services/cloudSyncService';
 import { syncWithCloverPos, CloverSyncResult } from '../services/cloverSyncService';
+import {
+  pushTransactionAtomicRpc,
+  pushStockMovementToSupabase,
+} from '../services/supabaseSyncService';
+import {
+  testGasConnection,
+  syncOfflineQueueToGAS,
+  getGasOfflineQueue,
+  upsertProductToGAS,
+  pushTransactionToGAS,
+  pushStockMovementToGAS,
+} from '../services/gasSyncService';
 import { verifyAndDecodeSession, hashSha256 } from '../utils/securityUtils';
 import {
   INITIAL_USERS,
@@ -449,6 +461,13 @@ export interface AppContextType {
   executeCloudSync: (customConfig?: DualBackendConfig) => Promise<CloudSyncResult>;
   pullCloudSyncData: (customConfig?: DualBackendConfig) => Promise<CloudPullResult>;
   testCloudEndpoints: (customConfig?: DualBackendConfig) => Promise<CloudConnectionPingResult>;
+  activeBackendProvider: 'SUPABASE' | 'GAS' | 'LOCAL';
+  setActiveBackendProvider: (provider: 'SUPABASE' | 'GAS' | 'LOCAL') => void;
+  gasWebhookUrl: string;
+  setGasWebhookUrl: (url: string) => void;
+  testGasConnection: () => Promise<{ ok: boolean; message: string; status: number }>;
+  gasOfflineQueueCount: number;
+  syncOfflineQueues: () => Promise<{ supabaseSynced: number; gasSynced: number }>;
 
   suppliers: SupplierMaster[];
   setSuppliers: React.Dispatch<React.SetStateAction<SupplierMaster[]>>;
@@ -3888,6 +3907,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [products, triggerAutoCloudSync]);
 
+  const [activeBackendProvider, setActiveBackendProviderState] = useState<'SUPABASE' | 'GAS' | 'LOCAL'>(() => {
+    const cfg = dualBackendSync.getConfig();
+    if (cfg.provider) return cfg.provider;
+    if (cfg.gasWebhookUrl && !cfg.supabaseUrl) return 'GAS';
+    if (cfg.supabaseUrl) return 'SUPABASE';
+    return 'LOCAL';
+  });
+
+  const setActiveBackendProvider = useCallback((provider: 'SUPABASE' | 'GAS' | 'LOCAL') => {
+    setActiveBackendProviderState(provider);
+    dualBackendSync.saveConfig({ provider });
+    showToast(`Provider backend aktif diatur ke: ${provider}`, 'success');
+  }, [showToast]);
+
+  const [gasWebhookUrlState, setGasWebhookUrlState] = useState(() => dualBackendSync.getConfig().gasWebhookUrl || '');
+  const setGasWebhookUrl = useCallback((url: string) => {
+    setGasWebhookUrlState(url);
+    dualBackendSync.saveConfig({ gasWebhookUrl: url.trim() });
+  }, []);
+
+  const [gasOfflineQueueCount, setGasOfflineQueueCount] = useState(() => getGasOfflineQueue().length);
+
+  const syncOfflineQueues = useCallback(async () => {
+    const supabaseSynced = await dualBackendSync.processQueue();
+    const gasSynced = await syncOfflineQueueToGAS();
+    setGasOfflineQueueCount(getGasOfflineQueue().length);
+    const totalSynced = (typeof supabaseSynced === 'number' ? supabaseSynced : 0) + gasSynced;
+    if (totalSynced > 0) {
+      showToast(`Berhasil menyinkronkan ${totalSynced} item antrean offline ke cloud.`, 'success');
+    }
+    return { supabaseSynced: typeof supabaseSynced === 'number' ? supabaseSynced : 0, gasSynced };
+  }, [showToast]);
+
+  const testGasConnectionHandler = useCallback(async () => {
+    return await testGasConnection();
+  }, []);
+
   const restoreSystemSnapshot = useCallback(
     (snapshot: any): { success: boolean; restoredKeys: string[]; message: string } => {
       try {
@@ -5877,6 +5933,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       addSale(newSale);
       showReceipt(newSale);
+
+      // Trigger Atomic Supabase RPC transaction processing
+      pushTransactionAtomicRpc({
+        receiptNumber: newSale.receipt_number,
+        shiftId: payload.shiftId,
+        terminalId: payload.terminalId || activeTerminalId,
+        stationCode: resolvedStationCode,
+        cashierName: newSale.cashier_name,
+        customerId: payload.customerId,
+        customerName: payload.customerName,
+        items: payload.items,
+        total: payload.total,
+        paymentMethod: newSale.payment_method,
+        cashTendered: payload.cashTendered,
+        changeDue: payload.changeDue,
+      });
+
+      for (const item of payload.items) {
+        pushStockMovementToSupabase({
+          id: `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          productId: item.product.id,
+          sku: item.product.sku || item.product.id,
+          productName: item.product.name,
+          deltaQty: -((item.quantity || 0) * (item.conversionFactor || 1)),
+          movementType: 'SALE',
+          referenceId: newSale.receipt_number,
+          notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
+          createdBy: newSale.cashier_name,
+        });
+      }
+
       return newSale;
     },
     [currentUser, activeTerminalId, activeTerminal, boundStation, addSale, showReceipt]
@@ -10380,6 +10467,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     executeCloudSync,
     pullCloudSyncData: pullCloudSyncDataHandler,
     testCloudEndpoints: testCloudEndpointsHandler,
+    activeBackendProvider,
+    setActiveBackendProvider,
+    gasWebhookUrl: gasWebhookUrlState,
+    setGasWebhookUrl,
+    testGasConnection: testGasConnectionHandler,
+    gasOfflineQueueCount,
+    syncOfflineQueues,
 
     suppliers: domainSuppliers,
     setSuppliers,

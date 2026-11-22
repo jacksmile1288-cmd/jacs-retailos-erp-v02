@@ -426,6 +426,13 @@ export const SuperAdminModule: React.FC = () => {
     executeCloudSync,
     testCloudEndpoints,
     pullCloudSyncData,
+    activeBackendProvider,
+    setActiveBackendProvider,
+    gasWebhookUrl,
+    setGasWebhookUrl,
+    testGasConnection,
+    gasOfflineQueueCount,
+    syncOfflineQueues,
   } = useApp();
 
   const { recordAudit } = useAudit();
@@ -4484,6 +4491,67 @@ export const SuperAdminModule: React.FC = () => {
                   <span className={`w-2 h-2 rounded-full ${dualBackendSync.getConfig().gasWebhookUrl ? 'bg-amber-400' : 'bg-slate-500'}`} />
                   <span>GAS Webhook: {dualBackendSync.getConfig().gasWebhookUrl ? 'Terkonfigurasi' : 'Belum Diatur'}</span>
                 </span>
+              </div>
+            </div>
+
+            {/* Pilihan Provider Aktif (Supabase / Google Apps Script / Lokal) */}
+            <div className={`p-4 rounded-xl border mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+            }`}>
+              <div>
+                <span className={`text-xs font-bold block ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Provider Cloud &amp; Antrean Aktif [{activeBackendProvider}]
+                </span>
+                <span className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Antrean offline GAS: <strong className="text-amber-500 font-mono">{gasOfflineQueueCount} item</strong>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveBackendProvider('LOCAL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition border ${
+                    activeBackendProvider === 'LOCAL'
+                      ? 'bg-slate-700 text-white border-slate-600 shadow'
+                      : isLight ? 'bg-white text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
+                  Lokal (Buffer)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveBackendProvider('SUPABASE')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition border ${
+                    activeBackendProvider === 'SUPABASE'
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow'
+                      : isLight ? 'bg-white text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
+                  Supabase REST
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveBackendProvider('GAS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition border ${
+                    activeBackendProvider === 'GAS'
+                      ? 'bg-amber-600 text-white border-amber-500 shadow'
+                      : isLight ? 'bg-white text-slate-700 border-slate-300' : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                >
+                  Google Apps Script (GAS)
+                </button>
+                {gasOfflineQueueCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await syncOfflineQueues();
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer transition shadow flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sync Antrean ({gasOfflineQueueCount})</span>
+                  </button>
+                )}
               </div>
             </div>
 

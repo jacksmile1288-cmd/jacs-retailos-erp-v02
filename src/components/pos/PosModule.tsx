@@ -196,6 +196,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     serviceStylists,
     processFashionExchange,
     isMasterCatalogWiped,
+    activeBackendProvider,
+    gasOfflineQueueCount,
+    syncOfflineQueues,
   } = useApp();
 
   const isHybridMode = Boolean(businessDomainConfig?.isHybridMultiUnit);
@@ -2451,6 +2454,72 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     });
   };
 
+  const getProductUomOptions = (product: Product) => {
+    const baseUnit = product.unit || 'Pcs';
+    const basePrice = getProductPriceByTier(product, selectedPriceTier);
+    const list = [
+      {
+        unit: baseUnit,
+        conversionFactor: 1,
+        price: basePrice,
+        barcode: product.barcode,
+      },
+    ];
+    if (product.unitSecondary && (product.conversionRate || 0) > 1) {
+      const factor = product.conversionRate || 12;
+      const secPrice =
+        product.priceSecondary || Math.round(basePrice * factor * 0.95);
+      list.push({
+        unit: product.unitSecondary,
+        conversionFactor: factor,
+        price: secPrice,
+        barcode: product.variantBarcode,
+      });
+    }
+    const dusFactor = product.conversionRate && product.conversionRate >= 24 ? product.conversionRate : 24;
+    if (!list.some(u => u.unit.toLowerCase().includes('dus') || u.unit.toLowerCase().includes('karton'))) {
+      const dusPrice = Math.round(basePrice * dusFactor * 0.90);
+      list.push({
+        unit: 'Dus / Karton',
+        conversionFactor: dusFactor,
+        price: dusPrice,
+        barcode: `${product.barcode || product.id}-DUS`,
+      });
+    }
+    return list;
+  };
+
+  const handleSelectCartItemUnit = (index: number, nextUnitName: string) => {
+    setCart((prev) => {
+      const updated = prev.map((item, idx) => {
+        if (idx !== index) return item;
+        const uoms = getProductUomOptions(item.product);
+        const chosenUom = uoms.find((u) => u.unit === nextUnitName) || uoms[0];
+        const conversionFactor = chosenUom.conversionFactor;
+        const baseStock = item.product.stock ?? 0;
+        const requiredBaseQty = item.quantity * conversionFactor;
+        if (requiredBaseQty > baseStock) {
+          showToast(
+            `⚠️ Peringatan: Stok dasar (${baseStock}) tidak mencukupi untuk ${item.quantity} ${chosenUom.unit} (${requiredBaseQty} base units)!`,
+            'warning'
+          );
+        }
+        const costPricePerUnit = Number(item.product.cost_price || item.product.costPrice || 0);
+        const minSafeUnitPrice = costPricePerUnit * conversionFactor;
+        const finalPrice = Math.max(chosenUom.price, minSafeUnitPrice);
+
+        return {
+          ...item,
+          selectedUnit: chosenUom.unit,
+          conversionFactor,
+          originalUnitPrice: finalPrice,
+          subtotal: Math.round(finalPrice * item.quantity),
+        };
+      });
+      return recalculatePosCart(updated);
+    });
+  };
+
   const handleToggleItemUnit = (index: number) => {
     setCart((prev) => {
       const updated = prev.map((item, idx) => {
@@ -3068,6 +3137,44 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
           focusBarcodeInput();
           return;
         }
+      }
+    }
+
+    for (const prod of searchPool) {
+      const uoms = getProductUomOptions(prod);
+      const secondaryUom = uoms.find((u) => u.conversionFactor > 1 && u.barcode && u.barcode.toLowerCase() === q.toLowerCase());
+      if (secondaryUom || (prod.variantBarcode && prod.variantBarcode.toLowerCase() === q.toLowerCase())) {
+        const chosenUom = secondaryUom || uoms[1] || uoms[0];
+        const conversionFactor = chosenUom.conversionFactor;
+        const baseStock = prod.stock ?? 0;
+        const requiredBaseQty = 1 * conversionFactor;
+        if (requiredBaseQty > baseStock) {
+          showToast(`⚠️ Peringatan: Stok dasar (${baseStock}) tidak mencukupi untuk kemasan ${chosenUom.unit} (${requiredBaseQty} base units)!`, 'warning');
+        }
+        const costPricePerUnit = Number(prod.cost_price || prod.costPrice || 0);
+        const minSafeUnitPrice = costPricePerUnit * conversionFactor;
+        const finalPrice = Math.max(chosenUom.price, minSafeUnitPrice);
+
+        setCart((prev) => {
+          const existingIdx = prev.findIndex((it) => it.product.id === prod.id && it.selectedUnit === chosenUom.unit && !it.modifiers);
+          const next = existingIdx >= 0
+            ? prev.map((it, i) => i === existingIdx ? { ...it, quantity: it.quantity + 1, subtotal: Math.round(finalPrice * (it.quantity + 1)) } : it)
+            : [...prev, {
+                product: prod,
+                quantity: 1,
+                subtotal: finalPrice,
+                originalUnitPrice: finalPrice,
+                itemDiscount: 0,
+                selectedUnit: chosenUom.unit,
+                conversionFactor,
+              }];
+          return recalculatePosCart(next);
+        });
+        playScannerBeep();
+        showToast(`📦 Kemasan [${chosenUom.unit}] terdeteksi: +1 ${chosenUom.unit} (${conversionFactor} Pcs) • Rp ${finalPrice.toLocaleString('id-ID')}`, 'success');
+        setBarcodeInput('');
+        focusBarcodeInput();
+        return;
       }
     }
 
@@ -4563,19 +4670,25 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                   <>
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                     <span className="font-normal text-xs font-mono hidden xl:inline max-w-[85px] truncate">{activeTerminal?.name}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                      ONLINE
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                      activeBackendProvider === 'SUPABASE' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                      activeBackendProvider === 'GAS' ? 'bg-amber-500/15 text-amber-400 border border-emerald-500/30' :
+                      'bg-slate-700 text-slate-300 border border-slate-600'
+                    }`}>
+                      [{activeBackendProvider}]
                     </span>
-                    {offlineQueue.length > 0 && (
+                    {(offlineQueue.length > 0 || gasOfflineQueueCount > 0) && (
                       <button
                         type="button"
                         onClick={async () => {
                           await syncOfflineTransactions();
+                          await syncOfflineQueues();
                         }}
                         className="px-1.5 py-0.5 rounded text-[10px] font-mono font-normal bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all duration-200 cursor-pointer flex items-center gap-1 active:scale-[0.99]"
+                        title="Sinkronkan antrean offline ke Cloud"
                       >
                         <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                        <span>Sync ({offlineQueue.length})</span>
+                        <span>Sync ({offlineQueue.length + gasOfflineQueueCount})</span>
                       </button>
                     )}
                   </>

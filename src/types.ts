@@ -331,6 +331,7 @@ export interface CartItem {
   componentSkus?: Array<{ skuId: string; skuName: string; qty: number; unitCost: number }>;
   signa?: string; // Opsional catatan aturan pakai
   selectedUnit?: string; // Satuan aktif (e.g. Sak, Batang, Meter, Roll)
+  conversionFactor?: number;
   isRetailUnit?: boolean; // Mode eceran (e.g. Meteran vs Batangan/Roll)
   deliveryMethod?: 'DIRECT' | 'FLEET_DELIVERY'; // Bawa Langsung vs Armada Toko
   buildingTierName?: 'ECERAN' | 'TUKANG' | 'KONTRAKTOR' | string;

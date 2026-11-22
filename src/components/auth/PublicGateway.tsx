@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   Briefcase,
@@ -108,10 +108,12 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     businessProfile,
   } = useApp();
 
-  // State Interactive 3D Brand Cover
-  const [isCoverVisible, setIsCoverVisible] = useState<boolean>(true);
+  // State Interactive 3D Brand Cover (triggered by 30s idle timer)
+  const [isCoverVisible, setIsCoverVisible] = useState<boolean>(false);
   const [tiltCoords, setTiltCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const coverPointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const IDLE_TIMEOUT_MS = 30000; // 30 seconds idle timer
 
   const [showSuperAdminModal, setShowSuperAdminModal] = useState(false);
   const [selectedModuleId, setSelectedModuleId] = useState<string>('pos');
@@ -154,14 +156,52 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
     (businessProfile as any)?.storePhotoUrl ||
     DEFAULT_SUPERMARKET_BG;
 
-  const dismissWelcomeCover = () => {
+  const dismissWelcomeCover = useCallback(() => {
     if (!isCoverVisible) return;
     setIsCoverVisible(false);
     coverPointerStartRef.current = null;
     setTimeout(() => {
       pinInputRef.current?.focus();
     }, 320);
-  };
+  }, [isCoverVisible]);
+
+  const resetIdleTimer = useCallback(() => {
+    if (isCoverVisible) {
+      setIsCoverVisible(false);
+    }
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = setTimeout(() => {
+      setIsCoverVisible(true);
+    }, IDLE_TIMEOUT_MS);
+  }, [isCoverVisible]);
+
+  useEffect(() => {
+    // Start initial idle timer
+    idleTimerRef.current = setTimeout(() => {
+      setIsCoverVisible(true);
+    }, IDLE_TIMEOUT_MS);
+
+    const handleUserActivity = () => {
+      resetIdleTimer();
+    };
+
+    window.addEventListener('mousemove', handleUserActivity);
+    window.addEventListener('keydown', handleUserActivity);
+    window.addEventListener('touchstart', handleUserActivity);
+    window.addEventListener('scroll', handleUserActivity);
+    window.addEventListener('click', handleUserActivity);
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      window.removeEventListener('mousemove', handleUserActivity);
+      window.removeEventListener('keydown', handleUserActivity);
+      window.removeEventListener('touchstart', handleUserActivity);
+      window.removeEventListener('scroll', handleUserActivity);
+      window.removeEventListener('click', handleUserActivity);
+    };
+  }, [resetIdleTimer]);
 
   const handleCoverMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const { innerWidth, innerHeight } = window;
@@ -390,7 +430,7 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         onClick={dismissWelcomeCover}
         onMouseMove={handleCoverMouseMove}
         onTouchStart={dismissWelcomeCover}
-        className={`fixed inset-0 z-[90] flex flex-col justify-between p-5 sm:p-8 cursor-pointer transition-all duration-700 ease-out overflow-hidden bg-[#030b1a] ${
+        className={`fixed inset-0 z-[90] flex flex-col justify-between p-5 sm:p-8 cursor-pointer transition-all duration-1000 ease-in-out overflow-hidden bg-[#030b1a] ${
           isCoverVisible
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 -translate-y-full pointer-events-none'
