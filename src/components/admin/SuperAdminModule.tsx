@@ -48,6 +48,7 @@ import {
   Zap,
   RotateCcw,
   Sliders,
+  Wrench,
   ExternalLink,
   ChevronRight,
   Eye,
@@ -3342,6 +3343,166 @@ export const SuperAdminModule: React.FC = () => {
       {/* TAB 1: DIAGNOSTICS */}
       {adminTab === 'diagnostics' && (
         <div className="space-y-6">
+          {/* Controlled Recovery & Diagnostics Toolkit Panel */}
+          <div className={`p-6 rounded-2xl border space-y-4 ${
+            isLight ? 'bg-gradient-to-r from-cyan-50/90 to-emerald-50/90 border-cyan-300 shadow-md' : 'bg-gradient-to-r from-[#161b22] to-[#0d1117] border-cyan-500/40 shadow-xl'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 flex items-center justify-center shrink-0">
+                  <Wrench className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className={`font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Pusat Pemulihan &amp; Diagnostik Terkendali (Controlled Recovery)
+                  </h3>
+                  <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Eksekusi pemulihan sistem: sinkronisasi antrean offline, pengujian provider aktif, ekspor signed backup JSON, dan pembersihan cache transien aman.
+                  </p>
+                </div>
+              </div>
+              <span className="px-3 py-1 rounded-xl text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 self-start sm:self-auto">
+                Provider Aktif: [{activeBackendProvider}]
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsCloudTestingAndSyncing(true);
+                  try {
+                    const res = await syncOfflineQueues();
+                    showToast(`Berhasil menyinkronkan antrean offline (Supabase: ${res.supabaseSynced}, GAS: ${res.gasSynced})`, 'success');
+                    addSyncLog(`🔄 Controlled Recovery: Sinkronisasi antrean offline berhasil.`);
+                  } catch (err: any) {
+                    showToast(`Sync antrean gagal: ${err?.message || 'Error'}`, 'error');
+                  } finally {
+                    setIsCloudTestingAndSyncing(false);
+                  }
+                }}
+                disabled={isCloudTestingAndSyncing}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                  isLight ? 'bg-white hover:bg-cyan-50/50 border-slate-200 text-slate-900' : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800 text-slate-100'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-cyan-500 flex items-center gap-1.5">
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCloudTestingAndSyncing ? 'animate-spin' : ''}`} />
+                    <span>Sync Antrean Offline</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400">
+                    {gasOfflineQueueCount} Pending
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-75 leading-snug">
+                  Kirim ulang antrean transaksi &amp; mutasi yang tertunda ke Supabase/GAS.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsCloudTestingAndSyncing(true);
+                  try {
+                    if (activeBackendProvider === 'GAS') {
+                      const res = await testGasConnection();
+                      showToast(res.message, res.ok ? 'success' : 'error');
+                      addSyncLog(`⚡ Uji Koneksi GAS: ${res.message}`);
+                    } else {
+                      const cfg = handleSaveCloudConfig(false);
+                      const ping = await testCloudEndpoints(cfg);
+                      setCloudPingResult(ping);
+                      showToast(`Uji koneksi ${activeBackendProvider} selesai. ${ping.supabase.statusText}`, ping.supabase.connected ? 'success' : 'warning');
+                      addSyncLog(`🌐 Uji Koneksi ${activeBackendProvider}: ${ping.supabase.statusText}`);
+                    }
+                  } catch (err: any) {
+                    showToast(`Uji koneksi gagal: ${err?.message || 'Error'}`, 'error');
+                  } finally {
+                    setIsCloudTestingAndSyncing(false);
+                  }
+                }}
+                disabled={isCloudTestingAndSyncing}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                  isLight ? 'bg-white hover:bg-emerald-500/10 border-slate-200 text-slate-900' : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800 text-slate-100'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
+                    <Server className="w-3.5 h-3.5" />
+                    <span>Uji Koneksi Provider</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
+                    Ping Test
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-75 leading-snug">
+                  Tes latensi &amp; respons endpoint Supabase / GAS aktif saat ini.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportFullSnapshot}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                  isLight ? 'bg-white hover:bg-amber-500/10 border-slate-200 text-slate-900' : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800 text-slate-100'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-amber-500 flex items-center gap-1.5">
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Ekspor Backup JSON</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400">
+                    Signed SHA-256
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-75 leading-snug">
+                  Unduh arsip snapshot data lengkap &amp; laporan diagnostik sistem.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    clearSystemErrorLogs();
+                    clearRemoteHubLogs();
+                    showToast('Cache lokal transien (log error & remote bus) berhasil dibersihkan dengan aman.', 'success');
+                    recordAudit({
+                      traceId: `CACHE-CLEAN-${Date.now()}`,
+                      userId: effectiveUser?.id || 'super-admin',
+                      userName: effectiveUser?.name || 'Super Admin',
+                      userRole: effectiveUser?.role || 'Super Admin',
+                      module: 'SUPER_ADMIN',
+                      action: 'CONFIG_CHANGE',
+                      severity: 'INFO',
+                      payloadAfter: { action: 'SAFE_LOCAL_CACHE_CLEANUP', details: 'Pembersihan cache transien aman' },
+                    });
+                  } catch (err: any) {
+                    showToast(`Pembersihan cache gagal: ${err?.message || 'Error'}`, 'error');
+                  }
+                }}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                  isLight ? 'bg-white hover:bg-rose-500/10 border-slate-200 text-slate-900' : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800 text-slate-100'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-rose-500 flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Pembersihan Cache Aman</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400">
+                    Safe Purge
+                  </span>
+                </div>
+                <p className="text-[11px] opacity-75 leading-snug">
+                  Bersihkan log error &amp; cache sementara tanpa menghapus katalog produk/transaksi.
+                </p>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className={`p-4 rounded-2xl border transition-all duration-200 ${
               isLight

@@ -39,6 +39,7 @@ import SuperAdminModule from './components/admin/SuperAdminModule';
 import POSModule from './components/pos/PosModule';
 import { ModuleErrorBoundary } from './components/common/ModuleErrorBoundary';
 import { JacsAiAssistantDrawer } from './components/ai/JacsAiAssistantDrawer';
+import SystemHealthNotificationBanner from './components/common/SystemHealthNotificationBanner';
 import { ActiveNavModule, User } from './types';
 import {
   generatePosStations,
@@ -803,6 +804,8 @@ const MainLayout: React.FC = () => {
               <span className="text-[10px] font-mono opacity-80">Konsol SuperAdmin tetap terbuka</span>
             </div>
           )}
+
+        <SystemHealthNotificationBanner />
 
         {remoteMaintenanceLock.locked &&
         !isSuperAdminAuthenticated &&

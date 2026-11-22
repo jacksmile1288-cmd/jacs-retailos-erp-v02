@@ -79,34 +79,58 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
   const getItemQty = (item?: CartItem | null): number =>
     Math.max(1, Number(item?.quantity ?? (item as any)?.qty ?? 1) || 1);
 
+  const safeBaselineProducts = useMemo(
+    () =>
+      (Array.isArray(FASHION_APPAREL_PRODUCTS) ? FASHION_APPAREL_PRODUCTS : []).filter(
+        (p): p is Product => Boolean(p && typeof p === 'object' && p.id)
+      ),
+    []
+  );
+
+  const safeProducts = useMemo(
+    () =>
+      (Array.isArray(products) ? products : []).filter(
+        (p): p is Product => Boolean(p && typeof p === 'object' && p.id)
+      ),
+    [products]
+  );
+
   // Merge state products + FASHION_APPAREL_PRODUCTS baseline catalog with robust sizeUpcharges fallback
   const fashionProducts = useMemo(() => {
     const map = new Map<string, Product>();
-    FASHION_APPAREL_PRODUCTS.forEach((p) => {
+    safeBaselineProducts.forEach((p) => {
+      if (!p?.id) return;
       const baselineUpcharges = p.sizeUpcharges || { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 };
       map.set(p.id, { ...p, sizeUpcharges: baselineUpcharges });
     });
-    (products || []).forEach((p) => {
-      if (p && (isFashionProduct(p) || p.businessModel === 'fashion' || String(p.id || '').toUpperCase().startsWith('FASH-'))) {
-        const baselineMatch = FASHION_APPAREL_PRODUCTS.find((bp) => bp.id === p.id);
+    safeProducts.forEach((p) => {
+      if (
+        p?.id &&
+        (isFashionProduct(p) ||
+          p.businessModel === 'fashion' ||
+          String(p.id || '').toUpperCase().startsWith('FASH-'))
+      ) {
+        const baselineMatch = safeBaselineProducts.find((bp) => bp?.id && bp.id === p?.id);
         const defaultUpcharges = baselineMatch?.sizeUpcharges || { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 };
         const mergedUpcharges = {
           ...defaultUpcharges,
-          ...(p.sizeUpcharges || {})
+          ...(p.sizeUpcharges || {}),
         };
         map.set(p.id, { ...p, sizeUpcharges: mergedUpcharges });
       }
     });
     return Array.from(map.values()).filter(
-      (p) => String(p.status).toUpperCase() !== 'DISCONTINUED' && p.itemType !== 'RAW_MATERIAL'
+      (p) => Boolean(p?.id) && String(p.status || '').toUpperCase() !== 'DISCONTINUED' && p.itemType !== 'RAW_MATERIAL'
     );
-  }, [products]);
+  }, [safeBaselineProducts, safeProducts]);
 
   // Candidate sales restricted STRICTLY to Fashion & Boutique transactions
   const candidateSales = useMemo(() => {
-    const valid = (sales || []).filter(
+    const safeSales = (Array.isArray(sales) ? sales : []).filter(
+      (s): s is Sale => Boolean(s && typeof s === 'object')
+    );
+    const valid = safeSales.filter(
       (s) =>
-        s &&
         !s.isFashionExchange &&
         s.status !== 'VOID' &&
         s.status !== 'VOIDED' &&
@@ -116,36 +140,43 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
         isFashionSale(s)
     );
     const sorted = [...valid].sort((a, b) => {
-      return String(b.created_at || b.date).localeCompare(String(a.created_at || a.date));
+      return String(b?.created_at || b?.date || '').localeCompare(String(a?.created_at || a?.date || ''));
     });
     const q = receiptSearch.trim().toLowerCase();
     if (!q) return sorted.slice(0, 10);
     return sorted
       .filter(
         (s) =>
-          (s.receipt_number || '').toLowerCase().includes(q) ||
-          (s.transaction_id || '').toLowerCase().includes(q) ||
-          (s.customer_name || '').toLowerCase().includes(q) ||
-          (s.customer_phone || '').toLowerCase().includes(q) ||
-          (s.items_summary || '').toLowerCase().includes(q)
+          (s?.receipt_number || '').toLowerCase().includes(q) ||
+          (s?.transaction_id || '').toLowerCase().includes(q) ||
+          (s?.customer_name || '').toLowerCase().includes(q) ||
+          (s?.customer_phone || '').toLowerCase().includes(q) ||
+          (s?.items_summary || '').toLowerCase().includes(q)
       )
       .slice(0, 12);
   }, [sales, receiptSearch]);
 
   const selectedSale = useMemo(
     () =>
-      candidateSales.find(
+      (candidateSales || []).find(
         (s) =>
-          s.transaction_id === selectedSaleId ||
-          s.receipt_number === selectedSaleId
-      ) || candidateSales[0] || null,
+          Boolean(s) &&
+          Boolean(selectedSaleId) &&
+          (s?.transaction_id === selectedSaleId || s?.receipt_number === selectedSaleId)
+      ) ||
+      candidateSales[0] ||
+      null,
     [candidateSales, selectedSaleId]
   );
 
   const selectedSaleFashionItems = useMemo(() => {
     if (!selectedSale || !Array.isArray(selectedSale.items)) return [];
     return selectedSale.items.filter(
-      (it) => isFashionProduct(it?.product) || (it as any)?.selectedFashionSize || (it as any)?.selectedFashionColor
+      (it): it is CartItem =>
+        Boolean(it) &&
+        (isFashionProduct(it?.product) ||
+          Boolean((it as any)?.selectedFashionSize) ||
+          Boolean((it as any)?.selectedFashionColor))
     );
   }, [selectedSale]);
 
@@ -157,64 +188,80 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     if (selectedSale && !selectedSaleId) {
-      setSelectedSaleId(selectedSale.transaction_id);
+      setSelectedSaleId(selectedSale.transaction_id || selectedSale.receipt_number || '');
     }
   }, [isOpen, selectedSale, selectedSaleId]);
 
   useEffect(() => {
-    if (!selectedOldItem) return;
+    if (!isOpen || !selectedOldItem) return;
     const oldProdId = getItemProductId(selectedOldItem);
     const oldProdRef =
-      selectedOldItem.product ||
-      fashionProducts.find((p) => p?.id === oldProdId) ||
+      (selectedOldItem?.product?.id ? selectedOldItem.product : null) ||
+      (oldProdId ? (fashionProducts || []).find((p) => p?.id === oldProdId) : undefined) ||
       null;
 
     const oldSize =
-      selectedOldItem.selectedFashionSize ||
+      selectedOldItem?.selectedFashionSize ||
       oldProdRef?.variantSize?.split(',')[0]?.trim() ||
       'M';
     const oldColor =
-      selectedOldItem.selectedFashionColor ||
+      selectedOldItem?.selectedFashionColor ||
       oldProdRef?.variantColor?.split(',')[0]?.trim() ||
       'Sage';
     setReturnedSize(oldSize);
     setReturnedColor(oldColor);
 
     const matchingProd =
-      fashionProducts.find((p) => p?.id && p.id === oldProdId) ||
+      (oldProdId ? (fashionProducts || []).find((p) => p?.id === oldProdId) : undefined) ||
       oldProdRef ||
       fashionProducts[0] ||
       null;
     setReplacementProductId(matchingProd?.id || fashionProducts[0]?.id || '');
 
-    const altCell = matchingProd?.variantMatrix?.find(
+    const variantMatrix = (Array.isArray(matchingProd?.variantMatrix) ? matchingProd.variantMatrix : []).filter(
+      (c) => Boolean(c && typeof c === 'object')
+    );
+    const altCell = variantMatrix.find(
       (c) =>
-        (c.size !== oldSize || c.color !== oldColor) && (Number(c.stock) || 0) > 0
+        (c?.size !== oldSize || c?.color !== oldColor) && (Number(c?.stock) || 0) > 0
     );
     setReplacementSize(altCell?.size || (oldSize === 'M' ? 'L' : 'M'));
     setReplacementColor(altCell?.color || oldColor);
-  }, [selectedOldItem, fashionProducts]);
+  }, [isOpen, selectedOldItem, fashionProducts]);
 
   // Replacement product lookup with sizeUpcharges guaranteed from baseline
   const replacementProduct = useMemo(() => {
-    const foundInFashionList = fashionProducts.find((p) => p?.id && p.id === replacementProductId);
-    const foundInState = (products || []).find((p) => p?.id && p.id === replacementProductId);
-    const foundInBaseline = FASHION_APPAREL_PRODUCTS.find((p) => p?.id && p.id === replacementProductId);
+    const safeRepId = String(replacementProductId || '');
+    const foundInFashionList = safeRepId
+      ? (fashionProducts || []).find((p) => p?.id === safeRepId)
+      : undefined;
+    const foundInState = safeRepId
+      ? safeProducts.find((p) => p?.id === safeRepId)
+      : undefined;
+    const foundInBaseline = safeRepId
+      ? safeBaselineProducts.find((p) => p?.id === safeRepId)
+      : undefined;
 
-    const baseProd = foundInFashionList || foundInState || foundInBaseline || selectedOldItem?.product || fashionProducts[0] || null;
-    if (!baseProd) return null;
+    const baseProd =
+      foundInFashionList ||
+      foundInState ||
+      foundInBaseline ||
+      (selectedOldItem?.product?.id ? selectedOldItem.product : null) ||
+      fashionProducts[0] ||
+      null;
+    if (!baseProd?.id) return null;
 
-    const baselineMatch = FASHION_APPAREL_PRODUCTS.find((p) => p.id === baseProd.id);
+    const baselineMatch = safeBaselineProducts.find((p) => p?.id === baseProd?.id);
     const defaultUpcharges = baselineMatch?.sizeUpcharges || { S: 0, M: 0, L: 0, XL: 10000, XXL: 15000 };
     const mergedUpcharges = {
       ...defaultUpcharges,
-      ...(baseProd.sizeUpcharges || {})
+      ...(baseProd.sizeUpcharges || {}),
     };
     return {
       ...baseProd,
-      sizeUpcharges: mergedUpcharges
+      sizeUpcharges: mergedUpcharges,
     };
-  }, [products, replacementProductId, fashionProducts, selectedOldItem]);
+  }, [safeProducts, safeBaselineProducts, replacementProductId, fashionProducts, selectedOldItem]);
 
   if (!isOpen) return null;
 
@@ -242,8 +289,14 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
 
   const computeEffectiveFashionPrice = (prod: Product | null, sz: string): number => {
     if (!prod) return 0;
+    const safeSz = String(sz || '');
     const base = Number(prod.sell_price ?? prod.price_retail ?? 0);
-    const up = Number(prod.sizeUpcharges?.[sz] || prod.sizeUpcharges?.[sz.toUpperCase()] || prod.sizeUpcharges?.[sz.toLowerCase()] || 0);
+    const up = Number(
+      prod.sizeUpcharges?.[safeSz] ||
+        prod.sizeUpcharges?.[safeSz.toUpperCase()] ||
+        prod.sizeUpcharges?.[safeSz.toLowerCase()] ||
+        0
+    );
     const raw = base + up;
     if (prod.fashionPromo?.clearanceActive && (prod.fashionPromo.clearanceValue || 0) > 0) {
       const sav =
@@ -262,21 +315,25 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
   // Supports size upcharge differences (e.g. M to XXL -> +Rp 15.000)
   const priceDifference = (newUnitPrice - oldUnitPrice) * qty;
 
-  const repMatrix = replacementProduct?.variantMatrix || [];
+  const repMatrix = (Array.isArray(replacementProduct?.variantMatrix) ? replacementProduct.variantMatrix : []).filter(
+    (c) => Boolean(c && typeof c === 'object' && c.size && c.color)
+  );
+  const fallbackSizes = Array.isArray(FASHION_STANDARD_SIZES) ? FASHION_STANDARD_SIZES : ['S', 'M', 'L', 'XL', 'XXL'];
+  const fallbackColors = Array.isArray(FASHION_STANDARD_COLORS) ? FASHION_STANDARD_COLORS : ['Hitam', 'Putih', 'Sage'];
   const repSizes =
     repMatrix.length > 0
       ? Array.from(new Set(repMatrix.map((c) => c.size)))
-      : FASHION_STANDARD_SIZES;
+      : fallbackSizes;
   const repColors =
     repMatrix.length > 0
       ? Array.from(new Set(repMatrix.map((c) => c.color)))
-      : FASHION_STANDARD_COLORS;
+      : fallbackColors;
 
   const handleConfirmExchange = () => {
-    if (!selectedSale || !selectedOldItem || !replacementProduct) return;
+    if (!selectedSale || !selectedOldItem || !replacementProduct?.id) return;
     const res = onSubmitExchange({
-      originalSaleId: selectedSale.transaction_id,
-      originalReceiptNumber: selectedSale.receipt_number || selectedSale.transaction_id,
+      originalSaleId: selectedSale.transaction_id || selectedSale.receipt_number || '',
+      originalReceiptNumber: selectedSale.receipt_number || selectedSale.transaction_id || '',
       customerId: selectedSale.customer_id,
       customerName: selectedSale.customer_name,
       customerPhone: selectedSale.customer_phone,
@@ -286,7 +343,7 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
       returnedColor,
       returnedUnitPrice: oldUnitPrice,
       replacementProductId: replacementProduct.id,
-      replacementProductName: replacementProduct.name,
+      replacementProductName: replacementProduct.name || 'Artikel Pengganti',
       replacementSize,
       replacementColor,
       replacementUnitPrice: newUnitPrice,
@@ -300,17 +357,16 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
       terminalId: activeTerminalId,
       shiftId: activeShiftId,
     });
-    if (res.success) {
+    if (res?.success) {
       onClose();
     }
   };
 
   const isSameArticle = Boolean(
     selectedOldItem &&
-      replacementProduct &&
+      replacementProduct?.id &&
       oldProdId &&
-      replacementProduct.id &&
-      oldProdId.trim().toLowerCase() === replacementProduct.id.trim().toLowerCase()
+      oldProdId.trim().toLowerCase() === String(replacementProduct.id).trim().toLowerCase()
   );
 
   return (
@@ -389,14 +445,19 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
             ) : (
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {candidateSales.map((s, idx) => {
-                  const saleKey = s.transaction_id || s.receipt_number || `sale-${idx}`;
-                  const isSel = selectedSale?.transaction_id === s.transaction_id;
+                  if (!s) return null;
+                  const saleKey = s?.transaction_id || s?.receipt_number || `sale-${idx}`;
+                  const isSel = Boolean(
+                    selectedSale &&
+                      ((selectedSale.transaction_id && selectedSale.transaction_id === s?.transaction_id) ||
+                        (selectedSale.receipt_number && selectedSale.receipt_number === s?.receipt_number))
+                  );
                   return (
                     <button
                       key={saleKey}
                       type="button"
                       onClick={() => {
-                        setSelectedSaleId(s.transaction_id);
+                        setSelectedSaleId(s?.transaction_id || s?.receipt_number || '');
                         setSelectedOldItemIdx(0);
                       }}
                       className={`px-3 py-2 rounded-xl border text-left shrink-0 min-w-[220px] cursor-pointer transition ${
@@ -427,6 +488,18 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
               </div>
             )}
           </div>
+
+          {selectedSale && !selectedOldItem && (
+            <div className="p-4 rounded-xl border border-dashed border-amber-400/50 bg-amber-500/5 text-center text-xs text-slate-500 dark:text-slate-400 space-y-1">
+              <AlertCircle className="w-6 h-6 mx-auto text-amber-500 opacity-80" />
+              <p className="font-medium text-slate-700 dark:text-slate-200">
+                Tidak ada item produk Fashion &amp; Butik yang valid pada struk ini.
+              </p>
+              <p className="text-[11px]">
+                Silakan pilih nomor struk penjualan butik lain yang memiliki item produk aktif untuk diproses penukarannya.
+              </p>
+            </div>
+          )}
 
           {selectedSale && selectedOldItem && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -580,24 +653,35 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
                   <label className="text-[11px] text-slate-500 dark:text-slate-400">
                     Produk Pengganti:
                   </label>
-                  <select
-                    value={replacementProduct?.id || ''}
-                    onChange={(e) => setReplacementProductId(e.target.value)}
-                    className={`w-full px-2.5 py-2 rounded-xl border text-xs outline-none ${
-                      isLight
-                        ? 'bg-white border-slate-300 text-slate-900'
-                        : 'bg-slate-950 border-slate-700 text-white'
-                    }`}
-                  >
-                    {fashionProducts.map((p, idx) => (
-                      <option key={`rep-prod-${p.id || idx}`} value={p.id}>
-                        {p.name} — Rp {Number(p.sell_price ?? p.price_retail ?? 0).toLocaleString('id-ID')}
-                      </option>
-                    ))}
-                  </select>
+                  {fashionProducts.length === 0 ? (
+                    <div className="p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 dark:text-slate-400">
+                      Produk pengganti tidak ditemukan di katalog Fashion &amp; Butik.
+                    </div>
+                  ) : (
+                    <select
+                      value={replacementProduct?.id || ''}
+                      onChange={(e) => setReplacementProductId(e.target.value)}
+                      className={`w-full px-2.5 py-2 rounded-xl border text-xs outline-none ${
+                        isLight
+                          ? 'bg-white border-slate-300 text-slate-900'
+                          : 'bg-slate-950 border-slate-700 text-white'
+                      }`}
+                    >
+                      {fashionProducts.map((p, idx) => (
+                        <option key={`rep-prod-${p?.id || idx}`} value={p?.id || ''}>
+                          {p?.name || 'Artikel Butik'} — Rp {Number(p?.sell_price ?? p?.price_retail ?? 0).toLocaleString('id-ID')}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {/* Mini Size x Color Matrix with +10k / +15k Badges */}
+                {!replacementProduct?.id ? (
+                  <div className="p-3 rounded-lg border border-dashed border-amber-400/50 bg-amber-500/5 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    Pilih produk pengganti yang tersedia untuk melihat matriks stok ukuran &amp; warna.
+                  </div>
+                ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
                   <table className="w-full text-[11px] border-collapse">
                     <thead>
@@ -612,7 +696,12 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {repSizes.map((sz, sIdx) => {
-                        const szUpcharge = Number(replacementProduct?.sizeUpcharges?.[sz] || replacementProduct?.sizeUpcharges?.[sz.toUpperCase()] || 0);
+                        const safeSz = String(sz || '');
+                        const szUpcharge = Number(
+                          replacementProduct?.sizeUpcharges?.[safeSz] ||
+                            replacementProduct?.sizeUpcharges?.[safeSz.toUpperCase()] ||
+                            0
+                        );
                         return (
                           <tr key={`matrix-row-${sz}-${sIdx}`}>
                             <td className="py-1 px-2 font-mono font-bold">
@@ -627,7 +716,7 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
                             </td>
                             {repColors.map((cl, cIdx) => {
                               const cell = repMatrix.find(
-                                (c) => c.size === sz && c.color === cl
+                                (c) => c?.size === sz && c?.color === cl
                               );
                               const st = cell ? Number(cell.stock) || 0 : 0;
                               const isPicked =
@@ -659,6 +748,7 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
                     </tbody>
                   </table>
                 </div>
+                )}
 
                 <div className="pt-1 flex justify-between text-xs font-mono">
                   <span>
@@ -743,7 +833,7 @@ export const FashionExchangeModal: React.FC<FashionExchangeModalProps> = ({
           </button>
           <button
             type="button"
-            disabled={!selectedSale || !selectedOldItem || !replacementProduct}
+            disabled={!selectedSale || !selectedOldItem || !replacementProduct?.id}
             onClick={handleConfirmExchange}
             className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-40 shadow-sm transition active:scale-[0.99]"
           >

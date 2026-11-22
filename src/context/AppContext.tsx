@@ -2823,6 +2823,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.removeItem(`${STORAGE_PREFIX}shifts`);
       localStorage.removeItem(`${STORAGE_PREFIX}audit_logs`);
       localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem(SYSTEM_ERROR_LOGS_KEY);
+      localStorage.removeItem('jacs_remote_command_bus');
+      localStorage.removeItem('jacs_remote_ack_bus');
+      localStorage.removeItem('jacs_remote_telemetry_bus');
     } catch {}
 
     const msg = 'Clean Slate Berhasil: Seluruh riwayat transaksi dikosongkan ke Rp 0. Katalog Master Data & Konfigurasi API dipertahankan.';
@@ -5934,7 +5939,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addSale(newSale);
       showReceipt(newSale);
 
-      // Trigger Atomic Supabase RPC transaction processing
+      const txUuid = generateTxUuid();
+
+      // 1. Enqueue to dual-backend sync engine (Supabase & GAS REST)
+      dualBackendSync.enqueue('POS_TRANSACTION', 'INSERT', {
+        ...newSale,
+        tx_uuid: txUuid,
+      });
+
+      // 2. Enqueue to GAS offline queue & webhook
+      pushTransactionToGAS({
+        receiptNumber: newSale.receipt_number,
+        shiftId: payload.shiftId,
+        terminalId: payload.terminalId || activeTerminalId,
+        stationCode: resolvedStationCode,
+        cashierName: newSale.cashier_name,
+        customerId: payload.customerId,
+        customerName: payload.customerName,
+        items: payload.items,
+        total: payload.total,
+        paymentMethod: newSale.payment_method,
+        cashTendered: payload.cashTendered,
+        changeDue: payload.changeDue,
+        tx_uuid: txUuid,
+      }).catch(() => {});
+
+      for (const item of payload.items) {
+        const delta = -((item.quantity || 0) * (item.conversionFactor || 1));
+        const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        pushStockMovementToSupabase({
+          id: movementId,
+          productId: item.product.id,
+          sku: item.product.sku || item.product.id,
+          productName: item.product.name,
+          deltaQty: delta,
+          movementType: 'SALE',
+          referenceId: newSale.receipt_number,
+          notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
+          createdBy: newSale.cashier_name,
+        }).catch(() => {});
+
+        pushStockMovementToGAS({
+          id: movementId,
+          productId: item.product.id,
+          sku: item.product.sku || item.product.id,
+          productName: item.product.name,
+          deltaQty: delta,
+          movementType: 'SALE',
+          referenceId: newSale.receipt_number,
+          notes: `POS Sale GAS (${resolvedStationCode})`,
+          createdBy: newSale.cashier_name,
+        }).catch(() => {});
+      }
+
+      // Trigger Atomic Supabase RPC transaction processing (non-blocking)
       pushTransactionAtomicRpc({
         receiptNumber: newSale.receipt_number,
         shiftId: payload.shiftId,
@@ -5948,21 +6007,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         paymentMethod: newSale.payment_method,
         cashTendered: payload.cashTendered,
         changeDue: payload.changeDue,
-      });
+      }).catch(() => {});
 
-      for (const item of payload.items) {
-        pushStockMovementToSupabase({
-          id: `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          productId: item.product.id,
-          sku: item.product.sku || item.product.id,
-          productName: item.product.name,
-          deltaQty: -((item.quantity || 0) * (item.conversionFactor || 1)),
-          movementType: 'SALE',
-          referenceId: newSale.receipt_number,
-          notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
-          createdBy: newSale.cashier_name,
-        });
-      }
+      setGasOfflineQueueCount(getGasOfflineQueue().length);
 
       return newSale;
     },
@@ -9729,6 +9776,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       columnNumber?: number;
       type?: 'CRITICAL' | 'WARNING';
     }) => {
+      const msgLower = (payload.message || '').toLowerCase();
+      const cfg = dualBackendSync.getConfig();
+      const isLocalMode = cfg.provider === 'LOCAL' || (!cfg.supabaseUrl && !cfg.gasWebhookUrl);
+
+      if (
+        isLocalMode &&
+        (msgLower.includes('fetch') ||
+          msgLower.includes('network') ||
+          msgLower.includes('supabase') ||
+          msgLower.includes('gas') ||
+          msgLower.includes('timeout') ||
+          msgLower.includes('net::ERR_'))
+      ) {
+        return;
+      }
+
       const parsed = parseErrorStackSummary(
         payload.stack,
         payload.sourceFile,
