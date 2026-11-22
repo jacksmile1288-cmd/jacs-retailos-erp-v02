@@ -22,6 +22,9 @@ export const DualBackendStatusWidget: React.FC = () => {
   useEffect(() => {
     const unsubscribe = dualBackendSync.subscribe((snap) => {
       setStatus(snap);
+      if (snap.lastSyncFailed === false) {
+        setLastSyncResult((prev) => (prev && !prev.success ? null : prev));
+      }
     });
     return unsubscribe;
   }, []);
@@ -71,6 +74,10 @@ export const DualBackendStatusWidget: React.FC = () => {
       supabase: res.supabase.statusText,
       gas: res.gas.statusText,
     });
+    if (res.supabase.connected || res.gas.connected) {
+      setLastSyncResult((prev) => (prev && !prev.success ? null : prev));
+    }
+    setStatus(dualBackendSync.getSnapshot());
     setIsTesting(false);
   };
 
@@ -88,6 +95,8 @@ export const DualBackendStatusWidget: React.FC = () => {
   let dotColor = 'bg-emerald-400';
   let statusLabel = 'ONLINE — SYNCED';
 
+  const hasSyncFailure = Boolean((lastSyncResult && !lastSyncResult.success) || status.lastSyncFailed);
+
   if (!status.isOnline) {
     badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
     dotColor = 'bg-amber-400';
@@ -96,7 +105,7 @@ export const DualBackendStatusWidget: React.FC = () => {
     badgeColor = 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300';
     dotColor = 'bg-cyan-400 animate-ping';
     statusLabel = 'SYNCING...';
-  } else if (lastSyncResult && !lastSyncResult.success) {
+  } else if (hasSyncFailure) {
     badgeColor = 'bg-rose-500/15 border-rose-500/40 text-rose-300';
     dotColor = 'bg-rose-400';
     statusLabel = 'SYNC FAILED';
@@ -118,8 +127,8 @@ export const DualBackendStatusWidget: React.FC = () => {
           type="button"
           onClick={handleOpenSettings}
           title={
-            lastSyncResult && !lastSyncResult.success
-              ? `Klik untuk detail error: ${lastSyncResult.message}`
+            hasSyncFailure
+              ? `Klik untuk detail error: ${lastSyncResult?.message || status.lastSyncErrorMessage || 'Sync gagal'}`
               : 'Konfigurasi Dual-Backend Cloud Sync (Supabase & Google Apps Script)'
           }
           className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold whitespace-nowrap transition-all hover:opacity-90 cursor-pointer shrink-0 ${badgeColor}`}

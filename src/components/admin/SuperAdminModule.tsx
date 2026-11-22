@@ -643,6 +643,27 @@ export const SuperAdminModule: React.FC = () => {
 
       const res = await executeCloudSync(cfg);
       setLastCloudSyncResult(res);
+      if (res.success && res.endpoints.supabase.success) {
+        setCloudPingResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                supabase: {
+                  ...prev.supabase,
+                  configured: true,
+                  connected: true,
+                  statusText: prev.supabase.connected
+                    ? prev.supabase.statusText
+                    : `Terhubung (jacs_erp_snapshots • 200 OK${
+                        res.endpoints.supabase.durationMs !== undefined
+                          ? ` • ${res.endpoints.supabase.durationMs}ms`
+                          : ''
+                      })`,
+                },
+              }
+            : prev
+        );
+      }
       addSyncLog(`☁️ Cloud Sync: ${res.message}`);
     } finally {
       setIsCloudTestingAndSyncing(false);
@@ -655,7 +676,15 @@ export const SuperAdminModule: React.FC = () => {
       const cfg = handleSaveCloudConfig(false);
       const ping = await testCloudEndpoints(cfg);
       setCloudPingResult(ping);
-      showToast('Pengujian konektivitas endpoint cloud selesai.', 'info');
+      if (ping.supabase.connected || ping.gas.connected) {
+        setLastCloudSyncResult((prev) => (prev && !prev.success ? null : prev));
+      }
+      showToast(
+        ping.supabase.connected
+          ? `Supabase REST terhubung: ${ping.supabase.statusText}`
+          : 'Pengujian konektivitas endpoint cloud selesai.',
+        ping.supabase.connected ? 'success' : 'info'
+      );
       addSyncLog(`🌐 Ping Supabase: ${ping.supabase.statusText} • GAS: ${ping.gas.statusText}`);
     } finally {
       setIsCloudTestingAndSyncing(false);
@@ -4640,12 +4669,29 @@ export const SuperAdminModule: React.FC = () => {
               {/* Status Pill Header */}
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-medium border flex items-center gap-1.5 ${
-                  dualBackendSync.getConfig().supabaseUrl && dualBackendSync.getConfig().supabaseAnonKey
+                  lastCloudSyncResult?.endpoints?.supabase?.success ||
+                  cloudPingResult?.supabase?.connected ||
+                  (dualBackendSync.getConfig().supabaseUrl && dualBackendSync.getConfig().supabaseAnonKey)
                     ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
                     : 'bg-slate-800 text-slate-400 border-slate-700'
                 }`}>
-                  <span className={`w-2 h-2 rounded-full ${dualBackendSync.getConfig().supabaseUrl ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                  <span>Supabase REST: {dualBackendSync.getConfig().supabaseUrl ? 'Terkonfigurasi' : 'Belum Diatur'}</span>
+                  <span className={`w-2 h-2 rounded-full ${
+                    lastCloudSyncResult?.endpoints?.supabase?.success ||
+                    cloudPingResult?.supabase?.connected ||
+                    dualBackendSync.getConfig().supabaseUrl
+                      ? 'bg-emerald-400'
+                      : 'bg-slate-500'
+                  }`} />
+                  <span>
+                    Supabase REST:{' '}
+                    {lastCloudSyncResult?.endpoints?.supabase?.success
+                      ? 'Tersinkronisasi'
+                      : cloudPingResult?.supabase?.connected
+                      ? 'Terhubung'
+                      : dualBackendSync.getConfig().supabaseUrl
+                      ? 'Terkonfigurasi'
+                      : 'Belum Diatur'}
+                  </span>
                 </span>
                 <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-medium border flex items-center gap-1.5 ${
                   dualBackendSync.getConfig().gasWebhookUrl
@@ -4787,7 +4833,7 @@ export const SuperAdminModule: React.FC = () => {
                   </div>
                 </div>
                 <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
-                  Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/cloud_sync</code> dengan otentikasi header <code className="font-mono">apikey</code>.
+                  Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/jacs_erp_snapshots</code> (fallback <code className="font-mono">/rest/v1/cloud_sync</code>) dengan otentikasi header <code className="font-mono">apikey</code> &amp; <code className="font-mono">Authorization</code>.
                 </p>
               </div>
 

@@ -5,6 +5,8 @@ export interface SyncStatusSnapshot {
   lastSyncTime: string | null;
   supabaseStatus: 'CONNECTED' | 'DISCONNECTED' | 'CONFIG_REQUIRED';
   gasStatus: 'CONNECTED' | 'DISCONNECTED' | 'CONFIG_REQUIRED';
+  lastSyncFailed?: boolean;
+  lastSyncErrorMessage?: string | null;
 }
 
 export interface SyncQueueItem {
@@ -125,6 +127,9 @@ class DualBackendSyncEngine {
   private isSyncing = false;
   private isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private lastSyncTime: string | null = null;
+  private lastSyncFailed = false;
+  private lastSyncErrorMessage: string | null = null;
+  private supabaseLastConnected: boolean | null = null;
   private listeners: Set<(snap: SyncStatusSnapshot) => void> = new Set();
 
   private remoteChannel: BroadcastChannel | null = null;
@@ -364,14 +369,56 @@ class DualBackendSyncEngine {
     };
   }
 
+  public markSyncSuccess(timestamp?: string) {
+    this.lastSyncTime = timestamp || new Date().toISOString();
+    this.lastSyncFailed = false;
+    this.lastSyncErrorMessage = null;
+    if (this.config.supabaseUrl && this.config.supabaseAnonKey) {
+      this.supabaseLastConnected = true;
+    }
+    this.notify();
+  }
+
+  public markSyncFailure(errorMessage?: string) {
+    this.lastSyncFailed = true;
+    this.lastSyncErrorMessage = errorMessage || 'Sinkronisasi gagal';
+    this.notify();
+  }
+
+  public markPingResult(result: {
+    supabaseConfigured?: boolean;
+    supabaseConnected?: boolean;
+    gasConnected?: boolean;
+  }) {
+    if (result.supabaseConnected === true) {
+      this.supabaseLastConnected = true;
+      this.lastSyncFailed = false;
+      this.lastSyncErrorMessage = null;
+    } else if (result.supabaseConfigured && result.supabaseConnected === false) {
+      this.supabaseLastConnected = false;
+    }
+    if (result.gasConnected === true && !result.supabaseConfigured) {
+      this.lastSyncFailed = false;
+      this.lastSyncErrorMessage = null;
+    }
+    this.notify();
+  }
+
   public getSnapshot(): SyncStatusSnapshot {
+    const hasSupabase = Boolean(this.config.supabaseUrl && this.config.supabaseAnonKey);
     return {
       isOnline: this.isOnline,
       isSyncing: this.isSyncing,
       queuedCount: this.queue.length,
       lastSyncTime: this.lastSyncTime,
-      supabaseStatus: this.config.supabaseUrl && this.config.supabaseAnonKey ? 'CONNECTED' : 'CONFIG_REQUIRED',
-      gasStatus: this.config.gasWebhookUrl ? 'CONNECTED' : 'CONFIG_REQUIRED'
+      supabaseStatus: !hasSupabase
+        ? 'CONFIG_REQUIRED'
+        : this.supabaseLastConnected === false
+        ? 'DISCONNECTED'
+        : 'CONNECTED',
+      gasStatus: this.config.gasWebhookUrl ? 'CONNECTED' : 'CONFIG_REQUIRED',
+      lastSyncFailed: this.lastSyncFailed,
+      lastSyncErrorMessage: this.lastSyncErrorMessage,
     };
   }
 
@@ -788,13 +835,30 @@ class DualBackendSyncEngine {
     let gasMsg = 'Not Configured';
 
     if (this.config.supabaseUrl && this.config.supabaseAnonKey) {
+      const baseUrl = this.config.supabaseUrl.trim().replace(/\/+$/, '');
+      const anonKey = this.config.supabaseAnonKey.trim();
+      const headers = {
+        apikey: anonKey,
+        Authorization: `Bearer ${anonKey}`,
+        Accept: 'application/json',
+      };
       try {
-        const res = await fetch(`${this.config.supabaseUrl}/rest/v1/`, {
-          headers: { apikey: this.config.supabaseAnonKey }
-        });
-        supabaseMsg = res.ok ? 'Connected (200 OK)' : `Failed (${res.status})`;
+        let targetTable = 'jacs_erp_snapshots';
+        let res = await fetch(`${baseUrl}/rest/v1/${targetTable}?select=id&limit=1`, { headers });
+        if (res.status === 404) {
+          targetTable = 'cloud_sync';
+          res = await fetch(`${baseUrl}/rest/v1/${targetTable}?select=id&limit=1`, { headers });
+        }
+        if (res.ok) {
+          supabaseMsg = `Connected (${targetTable} • ${res.status} OK)`;
+          this.markPingResult({ supabaseConfigured: true, supabaseConnected: true });
+        } else {
+          supabaseMsg = `Failed (${res.status})`;
+          this.markPingResult({ supabaseConfigured: true, supabaseConnected: false });
+        }
       } catch (e: any) {
         supabaseMsg = `Error: ${e.message || 'Network Fail'}`;
+        this.markPingResult({ supabaseConfigured: true, supabaseConnected: false });
       }
     }
 

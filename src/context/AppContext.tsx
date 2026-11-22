@@ -9647,9 +9647,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
 
         if (result.success) {
-          try {
-            (dualBackendSync as any).lastSyncTime = nowIso;
-          } catch {}
+          dualBackendSync.markSyncSuccess(nowIso);
           setSales((prev) =>
             prev.map((s) =>
               s.syncStatus === 'PENDING_SYNC' || !s.syncStatus
@@ -9675,6 +9673,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             level: 'INFO',
           });
         } else {
+          dualBackendSync.markSyncFailure(result.message);
           showToast(result.message, 'error');
           appendAudit('CLOUD_SYNC_FAILED', 'INTEGRATION', result.message, {
             division: currentUser?.division || 'IT & Systems',
@@ -9707,6 +9706,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           syncedCounts,
           errors: [errMsg],
         };
+        dualBackendSync.markSyncFailure(errorResult.message);
         showToast(errorResult.message, 'error');
         appendAudit('CLOUD_SYNC_FAILED', 'INTEGRATION', errorResult.message, {
           division: currentUser?.division || 'IT & Systems',

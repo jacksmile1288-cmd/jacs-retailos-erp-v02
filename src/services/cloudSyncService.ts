@@ -544,10 +544,27 @@ export async function pullSyncData(customConfig?: DualBackendConfig): Promise<Cl
 }
 
 /**
- * Pengujian konektivitas cepat ke endpoint Supabase dan Google Apps Script.
+ * Pengujian konektivitas cepat ke endpoint Supabase (/rest/v1/jacs_erp_snapshots) dan Google Apps Script.
  */
 export async function testCloudConnections(customConfig?: DualBackendConfig): Promise<CloudConnectionPingResult> {
-  const config = customConfig || dualBackendSync.getConfig();
+  const storedConfig = dualBackendSync.getConfig();
+  const effectiveSupabaseUrl =
+    sanitizeAndValidateSupabaseUrl(customConfig?.supabaseUrl) ||
+    sanitizeAndValidateSupabaseUrl(storedConfig.supabaseUrl) ||
+    '';
+  const effectiveSupabaseAnonKey =
+    customConfig?.supabaseAnonKey?.trim() || storedConfig.supabaseAnonKey?.trim() || '';
+  const effectiveGasUrl =
+    customConfig?.gasWebhookUrl?.trim() || storedConfig.gasWebhookUrl?.trim() || '';
+
+  const resolvedSupabase = resolveSupabaseCredentials({
+    supabaseUrl: effectiveSupabaseUrl,
+    supabaseAnonKey: effectiveSupabaseAnonKey,
+  });
+  const safeSupabaseUrl =
+    sanitizeAndValidateSupabaseUrl(resolvedSupabase.supabaseUrl) ||
+    (resolvedSupabase.supabaseAnonKey ? DEFAULT_FALLBACK_SUPABASE_URL : '');
+  const safeAnonKey = resolvedSupabase.supabaseAnonKey;
 
   let supabaseResult = {
     configured: false,
@@ -563,47 +580,70 @@ export async function testCloudConnections(customConfig?: DualBackendConfig): Pr
     latencyMs: 0,
   };
 
-  // Test Supabase
-  if (config.supabaseUrl && config.supabaseAnonKey) {
+  // Test Supabase via /rest/v1/jacs_erp_snapshots (fallback /rest/v1/cloud_sync)
+  if (safeSupabaseUrl && safeAnonKey) {
     supabaseResult.configured = true;
     const start = performance.now();
-    const baseUrl = config.supabaseUrl.trim().replace(/\/+$/, '');
+    const baseUrl = safeSupabaseUrl.replace(/\/+$/, '');
+    const headers = {
+      apikey: safeAnonKey,
+      Authorization: `Bearer ${safeAnonKey}`,
+      Accept: 'application/json',
+    };
+
     try {
-      const res = await fetch(`${baseUrl}/rest/v1/`, {
-        headers: {
-          apikey: config.supabaseAnonKey.trim(),
-          Authorization: `Bearer ${config.supabaseAnonKey.trim()}`,
-        },
+      let targetTable = 'jacs_erp_snapshots';
+      let res = await fetch(`${baseUrl}/rest/v1/${targetTable}?select=id&limit=1`, {
+        method: 'GET',
+        headers,
       });
+
+      if (res.status === 404) {
+        targetTable = 'cloud_sync';
+        res = await fetch(`${baseUrl}/rest/v1/${targetTable}?select=id&limit=1`, {
+          method: 'GET',
+          headers,
+        });
+      }
+
       const latency = Math.round(performance.now() - start);
       supabaseResult.latencyMs = latency;
+
       if (res.ok) {
         supabaseResult.connected = true;
-        supabaseResult.statusText = `Terhubung (200 OK • ${latency}ms)`;
+        supabaseResult.statusText = `Terhubung (${targetTable} • ${res.status} OK • ${latency}ms)`;
+        dualBackendSync.markPingResult({ supabaseConfigured: true, supabaseConnected: true });
       } else if (res.status === 401 || res.status === 403) {
         supabaseResult.connected = false;
         supabaseResult.statusText = `Gagal Otentikasi (${res.status} Unauthorized)`;
+        dualBackendSync.markPingResult({ supabaseConfigured: true, supabaseConnected: false });
       } else {
         supabaseResult.connected = false;
         supabaseResult.statusText = `HTTP Error ${res.status}`;
+        dualBackendSync.markPingResult({ supabaseConfigured: true, supabaseConnected: false });
       }
     } catch (e: any) {
       supabaseResult.connected = false;
       supabaseResult.statusText = `Koneksi Gagal: ${e.message || 'Network Fail'}`;
+      dualBackendSync.markPingResult({ supabaseConfigured: true, supabaseConnected: false });
     }
   }
 
   // Test Google Apps Script
-  if (config.gasWebhookUrl) {
+  if (effectiveGasUrl) {
     gasResult.configured = true;
     const start = performance.now();
     try {
-      // Test via OPTIONS/GET
-      const res = await fetch(config.gasWebhookUrl.trim(), { method: 'GET', mode: 'no-cors' });
+      await fetch(effectiveGasUrl, { method: 'GET', mode: 'no-cors' });
       const latency = Math.round(performance.now() - start);
       gasResult.latencyMs = latency;
       gasResult.connected = true;
       gasResult.statusText = `Webhook Aktif (~${latency}ms)`;
+      dualBackendSync.markPingResult({
+        supabaseConfigured: supabaseResult.configured,
+        supabaseConnected: supabaseResult.configured ? supabaseResult.connected : undefined,
+        gasConnected: true,
+      });
     } catch (e: any) {
       gasResult.connected = false;
       gasResult.statusText = `Koneksi Gagal: ${e.message || 'Network Fail'}`;

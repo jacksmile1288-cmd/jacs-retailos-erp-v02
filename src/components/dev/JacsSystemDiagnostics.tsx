@@ -269,19 +269,31 @@ export const JacsSystemDiagnostics: React.FC = () => {
     if (supabaseUrl && supabaseUrl.startsWith('http')) {
       const startSupabase = performance.now();
       try {
-        addLog(`FETCH: Mengirim ping request ke Supabase Instance...`);
-        const res = await fetch(`${supabaseUrl}/rest/v1/`, {
+        const cleanUrl = supabaseUrl.trim().replace(/\/+$/, '');
+        const cleanKey = supabaseKey.trim();
+        const headers = {
+          apikey: cleanKey,
+          Authorization: `Bearer ${cleanKey}`,
+          Accept: 'application/json',
+        };
+        addLog(`FETCH: Mengirim ping request ke Supabase (/rest/v1/jacs_erp_snapshots)...`);
+        let targetTable = 'jacs_erp_snapshots';
+        let res = await fetch(`${cleanUrl}/rest/v1/${targetTable}?select=id&limit=1`, {
           method: 'GET',
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`
-          }
+          headers,
         });
+        if (res.status === 404) {
+          targetTable = 'cloud_sync';
+          res = await fetch(`${cleanUrl}/rest/v1/${targetTable}?select=id&limit=1`, {
+            method: 'GET',
+            headers,
+          });
+        }
         const latencySupabase = Math.round(performance.now() - startSupabase);
-        if (res.status === 200 || res.status === 401 || res.status === 404) {
-          addLog(`OK: Supabase Endpoint LIVE | HTTP ${res.status} | Latensi: ${latencySupabase}ms`);
+        if (res.ok) {
+          addLog(`OK: Supabase Endpoint LIVE (${targetTable}) | HTTP ${res.status} | Latensi: ${latencySupabase}ms`);
         } else {
-          addLog(`WARN: Supabase Response | HTTP ${res.status} | Latensi: ${latencySupabase}ms`);
+          addLog(`WARN: Supabase Response (${targetTable}) | HTTP ${res.status} | Latensi: ${latencySupabase}ms`);
         }
       } catch (err: any) {
         const latencySupabase = Math.round(performance.now() - startSupabase);
