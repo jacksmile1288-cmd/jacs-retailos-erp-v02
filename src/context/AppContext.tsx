@@ -1738,7 +1738,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [brands, setBrands] = useState<BrandMaster[]>(INITIAL_BRANDS);
   const [categoriesMaster, setCategoriesMaster] = useState<CategoryMaster[]>(INITIAL_CATEGORIES);
-  const [terminals, setTerminals] = useState<Terminal[]>(INITIAL_TERMINALS);
+  const [terminals, setTerminals] = useState<Terminal[]>(() =>
+    INITIAL_TERMINALS.slice(0, Math.max(1, Math.min(10, getStoredActiveCashierQuota() || 2)))
+  );
+  useEffect(() => {
+    const quota = Math.max(1, Math.min(10, Number(activeCashierQuota) || 2));
+    setTerminals((prev) => {
+      const result: Terminal[] = [];
+      for (let i = 1; i <= quota; i++) {
+        const stationCode = `POS-${String(i).padStart(2, '0')}`;
+        const termId = `T-${String(i).padStart(2, '0')}`;
+        const existing =
+          prev.find((t) => t.code === stationCode || t.id === termId || t.id === stationCode) ||
+          INITIAL_TERMINALS.find((t) => t.code === stationCode || t.id === termId);
+        if (existing) {
+          result.push(existing);
+        } else {
+          result.push({
+            ...(INITIAL_TERMINALS[0] || {
+              colorHex: '#06b6d4',
+              neonBorderClass: 'border-[#06b6d4] shadow-[0_0_15px_rgba(6,182,212,0.45)]',
+              neonBgClass: 'bg-[#06b6d4]/10 hover:bg-[#06b6d4]/20',
+              neonTextClass: 'text-[#06b6d4]',
+              location: 'Retail & Wholesaler Modern',
+              businessModel: 'Retail & Wholesaler Modern',
+              subLabel: 'Data Master',
+              modelType: 'retail',
+              isActive: false,
+              isLocked: true,
+              activeOrdersToday: 0,
+            }),
+            id: termId,
+            name: `KASIR ${String(i).padStart(2, '0')}`,
+            code: stationCode,
+            stationCode,
+            isActive: i === 1,
+          });
+        }
+      }
+      return result;
+    });
+  }, [activeCashierQuota]);
   const [boundStation, setBoundStationState] = useState<PosStationBinding | null>(() => getBoundPosStation());
   const [activeTerminalId, setActiveTerminalId] = useState<string>(() => getBoundPosStation()?.stationCode || 'POS-01');
   const [activeTerminalOverride, setActiveTerminalOverride] = useState<Terminal | null>(null);
@@ -8251,10 +8291,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [showToast]
   );
 
-  const effectiveDomainConfig = useMemo(
-    () => getEffectiveBusinessDomainConfig(businessProfile),
-    [businessProfile]
-  );
+  const effectiveDomainConfig = useMemo(() => {
+    const base = getEffectiveBusinessDomainConfig(businessProfile);
+    const enforcedQuota = Math.max(1, Math.min(10, Number(activeCashierQuota) || 2));
+    return {
+      ...base,
+      activeStationCount: enforcedQuota,
+    };
+  }, [businessProfile, activeCashierQuota]);
 
   const domainSuppliers = useMemo(
     () => filterSuppliersByBusinessDomain(suppliers, effectiveDomainConfig),

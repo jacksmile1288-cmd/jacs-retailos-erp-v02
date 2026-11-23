@@ -871,10 +871,7 @@ export const getEffectiveBusinessDomainConfig = (
 
   const resolvedTopology: OperationalTopologyMode = 'NON_BLOCKING_ERP';
   const storedQuota = getStoredActiveCashierQuota();
-  const hasExplicitSuperAdminQuota =
-    typeof window !== 'undefined' &&
-    typeof localStorage !== 'undefined' &&
-    Boolean(localStorage.getItem(ACTIVE_CASHIER_QUOTA_STORAGE_KEY));
+  const enforcedQuotaCount = Math.max(1, Math.min(10, Number(storedQuota) || 2));
 
   if (profile.domainConfig?.primaryBusinessModel) {
     const resolvedModelId = resolveBusinessModelId(profile.domainConfig.primaryBusinessModel);
@@ -891,16 +888,7 @@ export const getEffectiveBusinessDomainConfig = (
         : [def.defaultPosType];
 
     const rawSub = (profile.domainConfig.subFeatures || {}) as Partial<BusinessDomainSubFeatures>;
-    const rawCandidateCount =
-      profile.domainConfig.activeStationCount ??
-      profile.posUnitCount ??
-      2;
-    const rawStationCount = hasExplicitSuperAdminQuota
-      ? storedQuota
-      : Number(rawCandidateCount) === 10
-      ? 2
-      : rawCandidateCount || 2;
-    const activeStationCount = Math.max(1, Math.min(10, Number(rawStationCount) || 2));
+    const activeStationCount = enforcedQuotaCount;
 
     return {
       primaryBusinessModel: def.id,
@@ -926,7 +914,7 @@ export const getEffectiveBusinessDomainConfig = (
 
   return createBusinessDomainConfig(profile.businessType || profile.category, {
     operationalTopology: resolvedTopology,
-    activeStationCount: hasExplicitSuperAdminQuota ? storedQuota : 2,
+    activeStationCount: enforcedQuotaCount,
   });
 };
 

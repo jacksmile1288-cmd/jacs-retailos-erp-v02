@@ -12,6 +12,7 @@ import {
   getEffectiveBusinessDomainConfig,
   resolveCanonicalSector,
 } from '../../utils/businessDomainConfig';
+import { filterProductsByBusinessDomain } from '../../utils/buildingDomainIsolation';
 import {
   BUILDING_HARDWARE_PRODUCTS,
   FASHION_APPAREL_PRODUCTS,
@@ -84,6 +85,7 @@ export const ExecutiveModule: React.FC = () => {
 
   const {
     products,
+    getProductAlertThreshold,
     salesHistory,
     purchaseRequests,
     purchasing,
@@ -368,9 +370,15 @@ export const ExecutiveModule: React.FC = () => {
   const totalOmzet = filteredSales.reduce((acc: number, curr: any) => acc + (Number(curr.total_amount ?? curr.total) || 0), 0);
   const totalStruk = filteredSales.length;
 
-  // 3. Filter Produk Riil
-  const filteredProducts = (products || []).filter((p: any) =>
-    !isMultiBranch || selectedBranch === 'ALL' || p.branchId === selectedBranch
+  // 3. Filter Produk Riil (Langsung dari seluruh daftar produk aktif pada state global products)
+  const filteredProducts = useMemo(
+    () =>
+      (products || []).filter((p: any) => {
+        if (!p || typeof p !== 'object') return false;
+        const st = String(p.status || 'Active').toUpperCase();
+        return st !== 'DISCONTINUED' && st !== 'INACTIVE' && st !== 'NONAKTIF';
+      }),
+    [products]
   );
 
   // 3b. Analitik Khusus Rumpun BUILDING_BULK (Material Bangunan, Curah m³/Ret, Surat Jalan & Piutang Proyek)
@@ -936,80 +944,28 @@ export const ExecutiveModule: React.FC = () => {
     [filteredProducts, filteredSales, stockMutations, employees]
   );
 
-  // 3c. Katalog & Valuasi Stok HPP Sinkron Rumpun Aktif (Agar KPI Atas Konsisten 100% dengan Panel Domain)
+  // 3c. Katalog & Valuasi Stok HPP Sinkron Rumpun Aktif (Sama persis dengan daftar produk aktif di modul Warehouse & POS)
   const activeDomainProducts = useMemo(() => {
     if (activeFamily === 'BUILDING_BULK') {
       return buildingBulkAnalytics.catalog;
     }
 
-    if (activeFamily === 'FNB_CULINARY') {
-      const fromState = filteredProducts.filter(
-        (p: any) =>
-          p.itemType === 'MENU_FB' ||
-          String(p.businessModel || '').toLowerCase() === 'fnb' ||
-          String(p.id || '').toUpperCase().startsWith('FNB-')
-      );
-      const map = new Map<string, any>();
-      FNB_PRODUCTS.forEach((p) => map.set(p.id, p));
-      fromState.forEach((p: any) => {
-        if (p.itemType !== 'RAW_MATERIAL') map.set(p.id, p);
-      });
-      return Array.from(map.values());
-    }
-
-    if (activeFamily === 'SPECIALTY_SERVICE') {
-      const model = effectiveDomainConfig.primaryBusinessModel;
-      const isFashionModel = model === 'FASHION_BUTIK' || Boolean(effectiveDomainConfig.subFeatures?.hasVariantMatrix);
-      const isElectronicsModel = Boolean(effectiveDomainConfig.subFeatures?.hasSerialImei);
-      const baseCatalog = isFashionModel
-        ? FASHION_APPAREL_PRODUCTS
-        : isElectronicsModel
-        ? ELECTRONICS_GADGETS_PRODUCTS
-        : [...AUTOMOTIVE_WORKSHOP_PRODUCTS, ...SALON_BARBERSHOP_PRODUCTS];
-
-      const map = new Map<string, any>();
-      baseCatalog.forEach((p) => map.set(p.id, p));
-      filteredProducts.forEach((p: any) => {
-        const bm = String(p.businessModel || '').toLowerCase();
-        const idUpper = String(p.id || '').toUpperCase();
-        if (isFashionModel && (bm === 'fashion' || idUpper.startsWith('FASH-'))) {
-          map.set(p.id, p);
-        } else if (isElectronicsModel && (bm === 'electronics' || bm === 'gadget' || idUpper.startsWith('GAD-'))) {
-          map.set(p.id, p);
-        } else if (
-          (model === 'BARBERSHOP_SALON' || model === 'LAUNDRY') &&
-          (bm === 'workshop' || bm === 'automotive' || bm === 'salon' || bm === 'service' || idUpper.startsWith('OTO-') || idUpper.startsWith('SLN-'))
-        ) {
-          map.set(p.id, p);
-        }
-      });
-      return Array.from(map.values());
-    }
-
-    // RETAIL_GENERAL (termasuk Toko Obat & Kesehatan Umum, Grosir, & Ritel)
-    const nonRetailModels = new Set(['fnb', 'building', 'fashion', 'electronics', 'gadget', 'workshop', 'automotive', 'salon', 'service']);
-    const nonRetailPrefixes = ['fnb-', 'ing-', 'raw-', 'mat-', 'fash-', 'gad-', 'oto-', 'sln-'];
-    const retailFiltered = filteredProducts.filter((p: any) => {
-      const it = String(p.itemType || '').toUpperCase();
-      if (it === 'MENU_FB' || it === 'RAW_MATERIAL' || it === 'SERVICE') return false;
-      const bm = String(p.businessModel || '').toLowerCase();
-      if (nonRetailModels.has(bm)) return false;
-      const idLower = String(p.id || '').toLowerCase();
-      if (nonRetailPrefixes.some((pref) => idLower.startsWith(pref))) return false;
-      return true;
-    });
+    const domainFiltered = filterProductsByBusinessDomain(
+      filteredProducts,
+      effectiveDomainConfig
+    );
 
     if (effectiveDomainConfig.primaryBusinessModel === 'TOKO_OBAT_KESEHATAN') {
       const map = new Map<string, any>();
-      retailFiltered.forEach((p: any) => map.set(p.id, p));
+      domainFiltered.forEach((p: any) => map.set(p.id, p));
       PHARMACY_HEALTHCARE_PRODUCTS.forEach((p) => {
         if (!map.has(p.id)) map.set(p.id, p);
       });
       return Array.from(map.values());
     }
 
-    return retailFiltered;
-  }, [activeFamily, buildingBulkAnalytics.catalog, filteredProducts, effectiveDomainConfig.primaryBusinessModel, effectiveDomainConfig.subFeatures]);
+    return domainFiltered.length > 0 ? domainFiltered : filteredProducts;
+  }, [activeFamily, buildingBulkAnalytics.catalog, filteredProducts, effectiveDomainConfig]);
 
   // 3b-4. Analitik Operasional Sektor F&B (Menu Terlaris, Food Cost BOM %, Dine-In vs Takeaway/Delivery, Bahan Baku Kritis)
   const fnbExecutiveAnalytics = useMemo(() => {
@@ -1180,7 +1136,7 @@ export const ExecutiveModule: React.FC = () => {
     };
   }, [filteredSales, activeDomainProducts.length]);
 
-  // 3b-6. Analitik Operasional Sektor RETAIL (Perputaran SKU, Margin, Stok Rendah & Valuasi)
+  // 3b-6. Analitik Operasional Sektor RETAIL (Perputaran SKU, Margin, Stok Rendah & Valuasi — Sinkron dengan Warehouse & POS)
   const retailExecutiveAnalytics = useMemo(() => {
     const retailSkus = activeDomainProducts || [];
     let marginSum = 0;
@@ -1190,13 +1146,44 @@ export const ExecutiveModule: React.FC = () => {
     let totalRetailValuation = 0;
 
     retailSkus.forEach((p: any) => {
-      const stock = Number(p.stock) || 0;
-      const minStk = Number(p.minStock ?? p.min_stock ?? 5) || 5;
-      const cost = Number(p.costPrice ?? p.cost_price ?? p.buy_price ?? 0) || 0;
-      const sell = Number(p.sellingPrice ?? p.sell_price ?? p.price ?? 0) || 0;
+      const stock = Number(p.stock ?? p.current_stock ?? p.final_stock ?? 0) || 0;
+      const thresholdInfo =
+        typeof getProductAlertThreshold === 'function' ? getProductAlertThreshold(p) : null;
+      const minStk =
+        Number(p.minStock ?? p.min_stock ?? thresholdInfo?.minStock ?? 10) || 10;
+      const cost =
+        Number(
+          p.costPrice ??
+            p.cost_price ??
+            p.buy_price ??
+            p.hpp ??
+            p.costing?.totalCost ??
+            p.costing?.rawMaterialHPP ??
+            0
+        ) || 0;
+      const sell =
+        Number(
+          p.sellingPrice ??
+            p.sell_price ??
+            p.price_retail ??
+            p.retailPrice ??
+            p.price ??
+            0
+        ) || 0;
+
       totalRetailValuation += Math.max(0, stock) * Math.max(0, cost);
-      if (stock <= 0) outOfStockCount += 1;
-      else if (stock <= minStk) lowStockCount += 1;
+
+      const statusLower = String(p.status || '').toLowerCase();
+      const isOut = stock <= 0 || statusLower === 'out of stock';
+      const isLow =
+        !isOut &&
+        (stock <= minStk ||
+          statusLower === 'low stock' ||
+          Boolean(thresholdInfo?.isLowStock));
+
+      if (isOut) outOfStockCount += 1;
+      else if (isLow) lowStockCount += 1;
+
       if (sell > 0 && cost > 0) {
         marginSum += ((sell - cost) / sell) * 100;
         marginCount += 1;
@@ -1241,16 +1228,26 @@ export const ExecutiveModule: React.FC = () => {
       retailUnitsSold,
       topRetailSku,
     };
-  }, [activeDomainProducts, filteredSales]);
+  }, [activeDomainProducts, filteredSales, getProductAlertThreshold]);
 
   const totalValuasiStok = useMemo(() => {
     if (activeFamily === 'BUILDING_BULK') {
       return buildingBulkAnalytics.totalValuation;
     }
-    return activeDomainProducts.reduce(
-      (acc: number, p: any) => acc + (Number(p.stock) || 0) * (Number(p.costPrice ?? p.cost_price ?? p.buy_price) || 0),
-      0
-    );
+    return activeDomainProducts.reduce((acc: number, p: any) => {
+      const stock = Number(p.stock ?? p.current_stock ?? p.final_stock ?? 0) || 0;
+      const cost =
+        Number(
+          p.costPrice ??
+            p.cost_price ??
+            p.buy_price ??
+            p.hpp ??
+            p.costing?.totalCost ??
+            p.costing?.rawMaterialHPP ??
+            0
+        ) || 0;
+      return acc + Math.max(0, stock) * Math.max(0, cost);
+    }, 0);
   }, [activeFamily, buildingBulkAnalytics.totalValuation, activeDomainProducts]);
 
   const activeCatalogCountLabel =

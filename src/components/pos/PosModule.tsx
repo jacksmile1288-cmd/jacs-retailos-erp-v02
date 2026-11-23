@@ -200,6 +200,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     gasOfflineQueueCount,
     syncOfflineQueues,
     isSuperAdminAuthenticated,
+    activeCashierQuota,
   } = useApp();
 
   const sessionOperator = currentUser || activeUser;
@@ -288,7 +289,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     1,
     Math.min(
       10,
-      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1
+      Number(activeCashierQuota ?? businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 2) || 2
     )
   );
   const activeStations: PosStationDescriptor[] = useMemo(

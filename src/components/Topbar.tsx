@@ -213,26 +213,8 @@ export const Topbar: React.FC<TopbarProps> = ({
           )}
         </div>
 
-        {/* Kanan: Badge Divisi, Tanya AI, Bahasa, Tema, Profil & Logout */}
+        {/* Kanan: Tanya AI, Bahasa, Tema, Profil & Logout */}
         <div className="flex items-center gap-3 shrink-0">
-          {!isSuperAdminSession && (
-            <div
-              className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[10px] font-semibold whitespace-nowrap shrink-0 ${
-                isLight
-                  ? 'bg-slate-100 border-slate-300 text-slate-700'
-                  : 'bg-slate-900 border-slate-800 text-slate-300'
-              }`}
-              title={
-                isEn
-                  ? `Locked Division: ${divisionShortName} • Click Logout to Switch Division`
-                  : `Divisi Terkunci: ${divisionShortName} • Klik Keluar untuk Pindah Divisi`
-              }
-            >
-              <Shield className="w-3 h-3 text-cyan-500 shrink-0" />
-              <span>{isEn ? 'Division:' : 'Divisi:'} {divisionShortName}</span>
-            </div>
-          )}
-
           {/* Tombol Tanya AI (Khusus Executive Manager & SuperAdmin) */}
           {isAiFeatureAuthorized && (
             <button

@@ -187,6 +187,7 @@ const MainLayout: React.FC = () => {
     recordSystemError,
     businessDomainConfig,
     businessProfile,
+    activeCashierQuota,
     boundStation,
     activeTerminal,
     cashierShifts,
@@ -254,7 +255,7 @@ const MainLayout: React.FC = () => {
     1,
     Math.min(
       10,
-      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 2) || 2
+      Number(activeCashierQuota ?? businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 2) || 2
     )
   );
 
@@ -667,7 +668,7 @@ const MainLayout: React.FC = () => {
 
         {/* KANAN: Workspace Switcher (Eksklusif SuperAdmin) + Status Widget + Tanya AI (Khusus Executive & SuperAdmin) + Bahasa, Tema, & Logout */}
         <div className="flex items-center gap-3 shrink-0 ml-auto">
-          {isHybridWorkspaceSwitcherVisible ? (
+          {isHybridWorkspaceSwitcherVisible && (
             <div className="relative flex items-center gap-2 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
               <span
                 className={`hidden xl:inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 ${
@@ -786,36 +787,6 @@ const MainLayout: React.FC = () => {
                   </div>
                 )}
               </div>
-            </div>
-          ) : (
-            <div
-              id="division-locked-badge"
-              className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[10px] font-semibold whitespace-nowrap shrink-0 ${
-                isLight
-                  ? 'bg-slate-100 border-slate-300 text-slate-700'
-                  : 'bg-slate-900 border-slate-800 text-slate-300'
-              }`}
-              title={
-                language === 'en'
-                  ? `Locked Division: ${
-                      currentModule === 'pos'
-                        ? 'POS'
-                        : activePillarMeta?.shortLabel || currentUser.division || 'POS'
-                    } • Click Logout to Switch Division`
-                  : `Divisi Terkunci: ${
-                      currentModule === 'pos'
-                        ? 'POS'
-                        : activePillarMeta?.shortLabel || currentUser.division || 'POS'
-                    } • Klik Keluar untuk Pindah Divisi`
-              }
-            >
-              <Lock className="w-3 h-3 text-cyan-500 shrink-0" />
-              <span>
-                {language === 'en' ? 'Division:' : 'Divisi:'}{' '}
-                {currentModule === 'pos'
-                  ? 'POS'
-                  : activePillarMeta?.shortLabel || currentUser.division || 'POS'}
-              </span>
             </div>
           )}
 
