@@ -199,7 +199,78 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     activeBackendProvider,
     gasOfflineQueueCount,
     syncOfflineQueues,
+    isSuperAdminAuthenticated,
   } = useApp();
+
+  const sessionOperator = currentUser || activeUser;
+  const canManageStationBinding = useMemo(() => {
+    if (isSuperAdminAuthenticated) return true;
+    if (!sessionOperator) return false;
+    const roleStr = String(sessionOperator.role || '').toUpperCase();
+    const divStr = String(sessionOperator.division || '').toUpperCase();
+    const idStr = String(sessionOperator.user_id || sessionOperator.id || '').toUpperCase();
+    return (
+      roleStr.includes('SUPER') ||
+      divStr.includes('SUPER') ||
+      idStr.includes('SUPER') ||
+      idStr === 'USR-001' ||
+      roleStr.includes('EXEC') ||
+      divStr.includes('EXEC') ||
+      roleStr === 'MANAGER' ||
+      roleStr === 'OWNER'
+    );
+  }, [isSuperAdminAuthenticated, sessionOperator]);
+
+  const assignedCashierStationCode = useMemo((): string | null => {
+    if (canManageStationBinding || !sessionOperator) return null;
+    const roleStr = String(sessionOperator.role || '').toUpperCase();
+    const divStr = String(sessionOperator.division || '').toUpperCase();
+    const idStr = String(sessionOperator.user_id || sessionOperator.id || '').toUpperCase();
+    const nameStr = String(sessionOperator.name || '').trim();
+
+    const matchedRoster = (users || []).find(
+      (u) =>
+        (sessionOperator.user_id && u.user_id === sessionOperator.user_id) ||
+        (sessionOperator.id && u.id === sessionOperator.id) ||
+        (nameStr && String(u.name || '').trim().toLowerCase() === nameStr.toLowerCase())
+    );
+    const assignedRaw =
+      sessionOperator.assignedTerminalId || matchedRoster?.assignedTerminalId || '';
+    const assignedMatch = String(assignedRaw).match(/(\d+)/);
+    if (assignedMatch) {
+      const slot = Math.max(1, Math.min(10, parseInt(assignedMatch[1], 10)));
+      return `POS-${String(slot).padStart(2, '0')}`;
+    }
+
+    const nameMatch =
+      nameStr.match(/(?:kasir|pos|loket)\s*[-#]?\s*0?(\d+)/i) || nameStr.match(/0?(\d+)$/);
+    if (nameMatch) {
+      const slot = Math.max(1, Math.min(10, parseInt(nameMatch[1], 10)));
+      return `POS-${String(slot).padStart(2, '0')}`;
+    }
+
+    if (idStr === 'USR-003') return 'POS-01';
+    if (idStr === 'USR-004') return 'POS-02';
+    if (idStr === 'USR-006') return 'POS-03';
+    if (idStr === 'USR-007') return 'POS-04';
+    const slotIdMatch = idStr.match(/USR-KASIR-0?(\d+)/i);
+    if (slotIdMatch) {
+      const slot = Math.max(1, Math.min(10, parseInt(slotIdMatch[1], 10)));
+      return `POS-${String(slot).padStart(2, '0')}`;
+    }
+
+    if (
+      roleStr.includes('KASIR') ||
+      roleStr.includes('CASHIER') ||
+      roleStr === 'POS' ||
+      divStr.includes('POS') ||
+      divStr.includes('KASIR')
+    ) {
+      return 'POS-01';
+    }
+
+    return null;
+  }, [canManageStationBinding, sessionOperator, users]);
 
   const isHybridMode = Boolean(businessDomainConfig?.isHybridMultiUnit);
   const activeBusinessModelDef = useMemo(
@@ -270,7 +341,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
 
   const activeTerminal = contextActiveTerminal || terminals[0];
   const activeStationCode = normalizeStationCode(
-    activeTerminal?.stationCode ||
+    assignedCashierStationCode ||
+      activeTerminal?.stationCode ||
       activeTerminal?.id ||
       boundStation?.stationCode ||
       activeStations[0]?.stationCode ||
@@ -284,8 +356,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   useEffect(() => {
     if (visiblePosIdentities.length === 0) return;
 
-    const boundMatch = boundStation
-      ? visiblePosIdentities.find((st) => st.stationCode === boundStation.stationCode)
+    const enforcedStationCode = assignedCashierStationCode || boundStation?.stationCode;
+    const boundMatch = enforcedStationCode
+      ? visiblePosIdentities.find((st) => st.stationCode === enforcedStationCode)
       : undefined;
 
     if (boundMatch) {
@@ -346,7 +419,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         terminalType: targetStation.isHybrid ? 'BACK_END' : 'FRONT_END',
       });
     }
-  }, [boundStation, visiblePosIdentities, contextActiveTerminal, setActiveTerminal, activeSector]);
+  }, [assignedCashierStationCode, boundStation, visiblePosIdentities, contextActiveTerminal, setActiveTerminal, activeSector]);
 
   const isEn = globalLanguage === 'en';
   const language: 'ID' | 'EN' = isEn ? 'EN' : 'ID';
@@ -394,6 +467,13 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       | { type: 'SWITCH_STATION' }
       | { type: 'NAVIGATE_MODULE'; moduleId: ActiveNavModule; label: string }
   ) => {
+    if (action.type === 'SWITCH_STATION' && !canManageStationBinding) {
+      showToast(
+        `Akses Dibatasi: Akun Anda terikat pada loket ${assignedCashierStationCode || activeStationCode}. Fitur "Ganti Loket PC" hanya tersedia untuk Executive Manager atau SuperAdmin.`,
+        'warning'
+      );
+      return;
+    }
     setPosMgmtPinInput('');
     setPosMgmtPinError(null);
     setShowPosMgmtPin(false);
@@ -3509,13 +3589,27 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   };
 
   const handleTerminalCardClick = (term: Terminal) => {
-    const targetStationCode = normalizeStationCode(term.stationCode || term.id || term.code);
+    const requestedStationCode = normalizeStationCode(term.stationCode || term.id || term.code);
+    if (assignedCashierStationCode && requestedStationCode !== assignedCashierStationCode) {
+      showToast(
+        `1 Akun Kasir = 1 Loket Terikat: Akun ${sessionOperator?.name || 'Kasir'} hanya diizinkan membuka loket ${assignedCashierStationCode}.`,
+        'warning'
+      );
+      return;
+    }
+
+    const targetStationCode = assignedCashierStationCode || requestedStationCode;
     const matchingStation = activeStations.find((s) => s.stationCode === targetStationCode);
     const isBoundHere = Boolean(
       boundStation && activeStations.some((s) => s.stationCode === boundStation.stationCode)
     );
 
-    if (isBoundHere && boundStation && boundStation.stationCode !== targetStationCode) {
+    if (
+      !assignedCashierStationCode &&
+      isBoundHere &&
+      boundStation &&
+      boundStation.stationCode !== targetStationCode
+    ) {
       showToast(
         `Perangkat ini terkunci pada loket ${boundStation.stationCode}. Klik "Lepas Kunci Perangkat" terlebih dahulu untuk pindah loket.`,
         'warning'
@@ -3552,6 +3646,14 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   };
 
   const handleSwitchDeviceStation = (targetCard: PosIdentityCard) => {
+    if (!canManageStationBinding) {
+      showToast(
+        `1 Akun Kasir = 1 Loket Terikat: Hanya Executive Manager atau SuperAdmin yang dapat memindahkan loket PC.`,
+        'warning'
+      );
+      setIsStationPickerOpen(false);
+      return;
+    }
     const targetCode = targetCard.stationCode;
     const matchingStation = activeStations.find((s) => s.stationCode === targetCode);
 
@@ -4136,12 +4238,15 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     >
       {!isRegisterOpen ? (
         (() => {
+          const lockedCode = assignedCashierStationCode || boundStation?.stationCode;
           const hasValidDeviceBinding = Boolean(
-            boundStation && activeStations.some((s) => s.stationCode === boundStation.stationCode)
+            lockedCode && activeStations.some((s) => s.stationCode === lockedCode)
           );
           const activeDeviceIdentity =
             visiblePosIdentities.find((item) =>
-              hasValidDeviceBinding
+              assignedCashierStationCode
+                ? item.stationCode === assignedCashierStationCode
+                : hasValidDeviceBinding
                 ? item.stationCode === boundStation?.stationCode
                 : item.stationCode === activeStationCode
             ) || visiblePosIdentities[0];
@@ -4167,27 +4272,32 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       Arsitektur: <strong className="text-emerald-600 dark:text-emerald-400">{getOperationalTopologyOption('NON_BLOCKING_ERP').shortLabel}</strong>
                       {' • '}
-                      Loket Perangkat: <strong className="font-mono text-cyan-600 dark:text-cyan-300">{activeDeviceIdentity?.stationCode || 'POS-01'}</strong>
+                      Loket Terikat: <strong className="font-mono text-cyan-600 dark:text-cyan-300">{activeDeviceIdentity?.stationCode || 'POS-01'}</strong>
                       {visiblePosIdentities.length > 1 ? ` (dari ${visiblePosIdentities.length} loket terdaftar)` : ''}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
-                  {hasValidDeviceBinding && boundStation && (
+                  {(hasValidDeviceBinding || assignedCashierStationCode) && (
                     <span
                       className={`px-2.5 py-0.5 rounded-full text-[11px] leading-4 font-mono font-semibold border flex items-center gap-1.5 ${
                         isLight
                           ? 'bg-cyan-50 text-cyan-800 border-cyan-300'
                           : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/35'
                       }`}
+                      title="Aturan 1 Akun Kasir = 1 Loket Terikat"
                     >
                       <Monitor className="w-3 h-3" />
-                      <span>PC Terikat: {boundStation.stationCode}</span>
+                      <span>
+                        {assignedCashierStationCode
+                          ? `Akun Terikat: ${assignedCashierStationCode}`
+                          : `PC Terikat: ${boundStation?.stationCode || activeStationCode}`}
+                      </span>
                     </span>
                   )}
 
-                  {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                  {canManageStationBinding && (visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
                     <button
                       type="button"
                       id="btn-switch-pc-station"
@@ -4608,7 +4718,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 </button>
                               )}
 
-                              {(visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
+                              {canManageStationBinding && (visiblePosIdentities.length > 1 || hasValidDeviceBinding) && (
                                 <button
                                   type="button"
                                   onClick={(e) => {

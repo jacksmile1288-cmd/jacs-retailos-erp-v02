@@ -845,10 +845,10 @@ export const MasterDataModule: React.FC = () => {
       <div className={`flex flex-wrap justify-between items-center gap-4 mb-5 border-b pb-4 ${isLight ? 'border-cyan-500/20' : 'border-slate-800'}`}>
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`px-2 py-0.5 border text-[10px] font-mono font-medium rounded uppercase tracking-widest ${
+            <span className={`text-[10px] font-mono font-bold uppercase tracking-widest ${
               isLight
-                ? 'bg-cyan-50 border-cyan-400/70 text-cyan-700'
-                : 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
+                ? 'bg-transparent border-0 shadow-none px-0 py-0 text-cyan-800'
+                : 'px-2 py-0.5 border rounded bg-cyan-500/15 border-cyan-500/35 text-cyan-300'
             }`}>
               JacS Enterprise
             </span>

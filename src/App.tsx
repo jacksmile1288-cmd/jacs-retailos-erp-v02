@@ -29,6 +29,7 @@ import {
   EyeOff,
   KeyRound,
   Sparkles,
+  Globe,
 } from 'lucide-react';
 import { AuditProvider } from './AuditProvider';
 import { AppProvider, useApp } from './context/AppContext';
@@ -78,12 +79,40 @@ function getAllowedModulesForUser(
   }
   const roleStr = String(user.role || '').toUpperCase();
   const divStr = String(user.division || '').toUpperCase();
+  const idStr = String(user.id || user.user_id || '').toUpperCase();
 
-  if (isSuperAdmin || roleStr.includes('SUPER') || divStr.includes('SUPER')) {
+  // Mode Maintenance & Audit Developer (SuperAdmin - Jacs Enterprise): Bypass penuh 6 divisi manajemen
+  if (
+    isSuperAdmin ||
+    roleStr.includes('SUPER') ||
+    divStr.includes('SUPER') ||
+    idStr.includes('SUPER') ||
+    idStr === 'USR-001'
+  ) {
     return ['admin', 'executive', 'finance', 'purchasing', 'pos', 'warehouse', 'hr', 'master-data', 'security'];
   }
 
-  return ['pos', 'executive', 'finance', 'purchasing', 'warehouse', 'hr', 'master-data'];
+  // Isolasi Akses Lintas Divisi untuk Staf & Manager (1 sesi login = 1 modul tugas)
+  if (divStr.includes('EXEC') || roleStr.includes('EXEC') || roleStr === 'MANAGER' || roleStr === 'OWNER' || idStr.includes('EXECUTIVE')) {
+    return ['executive'];
+  }
+  if (divStr.includes('FINANCE') || roleStr.includes('FINANCE') || idStr.includes('FINANCE')) {
+    return ['finance'];
+  }
+  if (divStr.includes('PURCHAS') || roleStr.includes('PURCHAS') || idStr.includes('PURCHAS')) {
+    return ['purchasing'];
+  }
+  if (divStr.includes('WAREHOUSE') || divStr.includes('GUDANG') || roleStr.includes('WAREHOUSE') || roleStr.includes('GUDANG') || idStr.includes('WAREHOUSE')) {
+    return ['warehouse'];
+  }
+  if (divStr.includes('HR') || roleStr.includes('HR') || idStr.includes('HR')) {
+    return ['hr'];
+  }
+  if (divStr.includes('POS') || divStr.includes('KASIR') || roleStr.includes('KASIR') || roleStr.includes('CASHIER') || idStr.includes('POS')) {
+    return ['pos'];
+  }
+
+  return ['pos'];
 }
 
 const HYBRID_MANAGEMENT_PILLARS: Array<{
@@ -95,6 +124,7 @@ const HYBRID_MANAGEMENT_PILLARS: Array<{
   { id: 'executive', label: 'Executive & Management', shortLabel: 'Executive', icon: Briefcase },
   { id: 'finance', label: 'Finance & Accounting', shortLabel: 'Finance', icon: CreditCard },
   { id: 'purchasing', label: 'Purchasing', shortLabel: 'Purchasing', icon: ShoppingBag },
+  { id: 'pos', label: 'Point of Sale (Kasir)', shortLabel: 'Kasir POS', icon: Store },
   { id: 'warehouse', label: 'Warehouse & Inventory', shortLabel: 'Warehouse', icon: Boxes },
   { id: 'hr', label: 'Human Resources (HR)', shortLabel: 'HR', icon: Users },
   { id: 'master-data', label: 'Master Data Katalog', shortLabel: 'Master Data', icon: Database },
@@ -224,7 +254,7 @@ const MainLayout: React.FC = () => {
     1,
     Math.min(
       10,
-      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 1) || 1
+      Number(businessDomainConfig?.activeStationCount ?? businessProfile?.posUnitCount ?? 2) || 2
     )
   );
 
@@ -295,24 +325,37 @@ const MainLayout: React.FC = () => {
   const activeDeviceStatus =
     stationStatusList.find((s) => s.stationCode === activeDeviceStationCode)?.status || 'BELUM_BUKA';
 
-  // Jika belum login, tampilkan PublicGateway + Laci JacS AI Assistant
+  // Jika belum login, tampilkan PublicGateway (Tanpa Tanya AI di layar gerbang login publik)
   if (!currentUser) {
     return (
       <>
         <ToastOverlay />
         <PublicGateway onLoginSuccess={() => {}} />
-        <JacsAiAssistantDrawer />
       </>
     );
   }
 
+  const isSuperAdminSession = Boolean(
+    isSuperAdminAuthenticated ||
+      String(currentUser.role || '').toUpperCase().includes('SUPER') ||
+      String(currentUser.division || '').toUpperCase().includes('SUPER') ||
+      String(currentUser.user_id || currentUser.id || '').toUpperCase().includes('SUPER')
+  );
+
   const defaultAllowedModule: ActiveNavModule = allowedModules[0] || 'pos';
   const requestedModule: ActiveNavModule =
     activeNav === 'home' ? defaultAllowedModule : activeNav;
-  const currentModule: ActiveNavModule = requestedModule;
+  const currentModule: ActiveNavModule = allowedModules.includes(requestedModule)
+    ? requestedModule
+    : defaultAllowedModule;
   const isAuthorized = allowedModules.includes(currentModule);
   const isLight = theme === 'light';
-  const isHybridWorkspaceSwitcherVisible = allowedModules.length > 1;
+  // Jalur Bypass 6 Manajemen HANYA tampil eksklusif di Mode SuperAdmin (Maintenance & Audit Developer Jacs Enterprise)
+  const isHybridWorkspaceSwitcherVisible = isSuperAdminSession;
+  // Fitur Tanya AI & AI Executive Advisor HANYA aktif untuk Executive & Management serta SuperAdmin
+  const isAiFeatureAuthorized = Boolean(
+    isSuperAdminSession || currentModule === 'executive' || currentModule === 'admin'
+  );
   const activePillarMeta = HYBRID_MANAGEMENT_PILLARS.find((p) => p.id === currentModule);
 
   const handleWorkspaceSwitch = (targetMod: ActiveNavModule) => {
@@ -385,21 +428,27 @@ const MainLayout: React.FC = () => {
       }`}
     >
       <ToastOverlay />
-      <JacsAiAssistantDrawer />
+      {isAiFeatureAuthorized && <JacsAiAssistantDrawer />}
 
       {/* Slim Top Status Bar — Tata Letak Presisi Anti-Tumpuk */}
       <header
         id="app-topbar"
-        className={`sticky top-0 z-40 shrink-0 min-h-12 px-3 sm:px-4 py-1.5 border-b backdrop-blur-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5 ${
+        className={`sticky top-0 z-40 shrink-0 min-h-12 px-3 sm:px-4 py-1.5 border-b backdrop-blur-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 ${
           isLight
             ? 'bg-[#F6F8FB]/95 border-slate-300/80 text-slate-900'
             : 'bg-slate-950/95 border-slate-800 text-slate-100'
         }`}
       >
-        {/* KIRI: Identitas Brand + Loket Kasir Aktif + Live Counter Online */}
-        <div className="flex items-center gap-2 min-w-0 shrink">
+        {/* KIRI: Identitas Brand + Profil Jabatan Divisi Aktif + Live Counter Online */}
+        <div className="flex items-center gap-3 min-w-0 shrink-0">
           <div className="flex items-center gap-2 shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-slate-900 border border-cyan-500/40 flex items-center justify-center overflow-hidden shadow-sm shadow-cyan-500/20">
+            <div
+              className={`w-7 h-7 flex items-center justify-center overflow-hidden shrink-0 ${
+                isLight
+                  ? 'bg-transparent border-0 shadow-none rounded-none'
+                  : 'rounded-lg bg-slate-900 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
+              }`}
+            >
               <img
                 src={businessProfile?.logoUrl || '/logo-jacs-enterprise.png'}
                 alt={`${businessProfile?.name || businessProfile?.businessName || 'JacS Enterprise'} Logo`}
@@ -415,7 +464,7 @@ const MainLayout: React.FC = () => {
                   const parent = img.parentElement;
                   if (parent && !parent.querySelector('.fallback-text')) {
                     const span = document.createElement('span');
-                    span.className = 'font-normal text-xs text-cyan-400 fallback-text';
+                    span.className = 'font-semibold text-xs text-cyan-700 dark:text-cyan-400 fallback-text';
                     span.innerText = 'JE';
                     parent.appendChild(span);
                   }
@@ -423,7 +472,7 @@ const MainLayout: React.FC = () => {
               />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="font-['Plus_Jakarta_Sans'] font-normal text-xs sm:text-sm tracking-wider whitespace-nowrap">
+              <span className="font-['Plus_Jakarta_Sans'] font-semibold text-xs sm:text-sm tracking-wider whitespace-nowrap text-slate-900 dark:text-white">
                 {businessProfile?.name || businessProfile?.businessName || 'TOKO UTAMA'}
               </span>
               <span className="text-slate-500 hidden 2xl:inline">—</span>
@@ -439,33 +488,56 @@ const MainLayout: React.FC = () => {
             </div>
           </div>
 
-          {/* Identitas Loket & Operator Aktif: Format "Kasir 01 (Admin)" */}
+          {/* Label Profil Jabatan di Sebelah Nama Toko Sesuai Divisi Aktif */}
           {(() => {
             const stationNumber = activeDeviceStationCode.replace(/^POS-/i, '').padStart(2, '0');
-            const operatorDisplayName = currentUser.name || contextualProfile.position || 'Admin';
-            const cashierIdentityLabel = `Kasir ${stationNumber} (${operatorDisplayName})`;
+            const isPosActiveModule = currentModule === 'pos';
+            const divisionProfileLabel = isPosActiveModule
+              ? `Kasir ${stationNumber} (POS)`
+              : currentModule === 'admin'
+              ? 'SuperAdmin (Jacs Enterprise)'
+              : currentModule === 'executive'
+              ? 'Executive Manager (Executive)'
+              : currentModule === 'finance'
+              ? 'Finance Staff (Finance)'
+              : currentModule === 'purchasing'
+              ? 'Purchasing Staff (Purchasing)'
+              : currentModule === 'warehouse'
+              ? 'Warehouse Staff (Warehouse)'
+              : currentModule === 'hr'
+              ? 'HR Staff (HR)'
+              : isSuperAdminSession
+              ? 'SuperAdmin (Jacs Enterprise)'
+              : `${currentUser.name || contextualProfile.position || 'Staff'} (${activePillarMeta?.shortLabel || currentUser.division || 'ERP'})`;
+
             return (
               <div
                 id="navbar-cashier-identity"
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-bold min-w-0 max-w-[175px] whitespace-nowrap shrink-0 ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold whitespace-nowrap shrink-0 ${
                   isLight
                     ? 'bg-slate-100 border-slate-200 text-slate-800'
                     : 'bg-slate-900 border-slate-800 text-slate-100'
                 }`}
-                title={`Loket aktif: ${activeDeviceStationCode} · Operator: ${operatorDisplayName} (${currentUser.role})`}
+                title={
+                  isPosActiveModule
+                    ? `Loket aktif: ${activeDeviceStationCode} · ${divisionProfileLabel}`
+                    : `Profil Sesi Aktif: ${divisionProfileLabel} · Operator: ${currentUser.name || '-'}`
+                }
               >
                 <span
                   className={`w-2 h-2 rounded-full shrink-0 ${
-                    activeDeviceStatus === 'ONLINE'
-                      ? 'bg-emerald-500 animate-pulse'
-                      : activeDeviceStatus === 'ISTIRAHAT'
-                      ? 'bg-amber-400'
-                      : 'bg-slate-400'
+                    isPosActiveModule
+                      ? activeDeviceStatus === 'ONLINE'
+                        ? 'bg-emerald-500 animate-pulse'
+                        : activeDeviceStatus === 'ISTIRAHAT'
+                        ? 'bg-amber-400'
+                        : 'bg-slate-400'
+                      : 'bg-cyan-500 animate-pulse'
                   }`}
                 />
                 <Monitor className="w-3.5 h-3.5 text-cyan-500 shrink-0 hidden sm:inline" />
-                <span className="truncate">{cashierIdentityLabel}</span>
-                {activeDeviceStatus === 'ISTIRAHAT' && (
+                <span>{divisionProfileLabel}</span>
+                {isPosActiveModule && activeDeviceStatus === 'ISTIRAHAT' && (
                   <span className="px-1 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono text-[9px] uppercase shrink-0">
                     Istirahat
                   </span>
@@ -483,7 +555,7 @@ const MainLayout: React.FC = () => {
                 setIsWorkspaceMenuOpen(false);
                 setIsCashierStatusMenuOpen((prev) => !prev);
               }}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] font-semibold whitespace-nowrap cursor-pointer transition ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition ${
                 onlineCashierCount > 0
                   ? isLight
                     ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
@@ -593,10 +665,22 @@ const MainLayout: React.FC = () => {
           </span>
         </div>
 
-        {/* KANAN: Workspace Switcher + Status Widget + Tanya AI + Bahasa, Tema, & Logout */}
-        <div className="flex items-center gap-2 shrink-0 ml-auto">
-          {isHybridWorkspaceSwitcherVisible && (
-            <div className="relative flex items-center gap-1.5 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
+        {/* KANAN: Workspace Switcher (Eksklusif SuperAdmin) + Status Widget + Tanya AI (Khusus Executive & SuperAdmin) + Bahasa, Tema, & Logout */}
+        <div className="flex items-center gap-3 shrink-0 ml-auto">
+          {isHybridWorkspaceSwitcherVisible ? (
+            <div className="relative flex items-center gap-2 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
+              <span
+                className={`hidden xl:inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                  isLight
+                    ? 'bg-transparent border-0 shadow-none px-1 py-0 text-amber-800'
+                    : 'px-2 py-1 rounded-lg border bg-amber-500/15 border-amber-500/40 text-amber-300'
+                }`}
+                title="Jalur Bypass 6 Manajemen aktif eksklusif untuk Mode Maintenance & Audit Developer Jacs Enterprise"
+              >
+                <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-500 shrink-0" />
+                <span>Bypass SuperAdmin • Jacs Enterprise</span>
+              </span>
+
               <button
                 type="button"
                 id="btn-workspace-switcher-pos"
@@ -613,158 +697,178 @@ const MainLayout: React.FC = () => {
                 <span>Kasir POS</span>
               </button>
 
-              {IS_CLIENT_TRIAL_MODE ? (
+              <div className="relative shrink-0">
                 <button
                   type="button"
-                  id="btn-workspace-switcher-trial-legalitas"
-                  onClick={() => handleWorkspaceSwitch('admin')}
+                  id="btn-workspace-switcher-pillars"
+                  onClick={() => {
+                    setIsCashierStatusMenuOpen(false);
+                    setIsWorkspaceMenuOpen((prev) => !prev);
+                  }}
                   className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
-                    currentModule === 'admin'
+                    activePillarMeta || currentModule === 'admin'
                       ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
                       : isLight
                       ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
                       : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
                   }`}
                 >
-                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                  <span>Legalitas Usaha</span>
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {activePillarMeta
+                      ? activePillarMeta.shortLabel
+                      : currentModule === 'admin'
+                      ? 'SuperAdmin'
+                      : 'Bypass 6 Manajemen'}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${isWorkspaceMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-              ) : (
-                <div className="relative shrink-0">
-                  <button
-                    type="button"
-                    id="btn-workspace-switcher-pillars"
-                    onClick={() => {
-                      setIsCashierStatusMenuOpen(false);
-                      setIsWorkspaceMenuOpen((prev) => !prev);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
-                      activePillarMeta || currentModule === 'admin'
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
-                        : isLight
-                        ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
-                        : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+
+                {isWorkspaceMenuOpen && (
+                  <div
+                    className={`absolute right-0 mt-2 w-72 rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 ${
+                      isLight
+                        ? 'bg-white border-slate-300 text-slate-900'
+                        : 'bg-slate-900 border-slate-700 text-slate-100'
                     }`}
                   >
-                    <Layers className="w-3.5 h-3.5 shrink-0" />
-                    <span>
-                      {activePillarMeta
-                        ? activePillarMeta.shortLabel
-                        : currentModule === 'admin'
-                        ? 'SuperAdmin'
-                        : '6 Pilar Manajemen'}
-                    </span>
-                    {currentModule === 'pos' && <Lock className="w-2.5 h-2.5 opacity-75 shrink-0" />}
-                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${isWorkspaceMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isWorkspaceMenuOpen && (
-                    <div
-                      className={`absolute right-0 mt-2 w-64 rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 ${
-                        isLight
-                          ? 'bg-white border-slate-300 text-slate-900'
-                          : 'bg-slate-900 border-slate-700 text-slate-100'
-                      }`}
-                    >
-                      <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                        <span>Workspace Switcher · 6 Pilar</span>
-                        {currentModule === 'pos' && (
-                          <span className="inline-flex items-center gap-1 text-amber-500 font-semibold">
-                            <Lock className="w-2.5 h-2.5" /> PIN
-                          </span>
-                        )}
-                      </div>
-                      {HYBRID_MANAGEMENT_PILLARS.filter((p) => allowedModules.includes(p.id)).map((pillar) => {
-                        const PIcon = pillar.icon;
-                        const isActivePillar = currentModule === pillar.id;
-                        return (
-                          <button
-                            key={pillar.id}
-                            type="button"
-                            onClick={() => handleWorkspaceSwitch(pillar.id)}
-                            className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition ${
-                              isActivePillar
-                                ? 'bg-cyan-500/20 text-cyan-500 border border-cyan-500/40 font-semibold'
-                                : isLight
-                                ? 'hover:bg-slate-100 text-slate-800'
-                                : 'hover:bg-slate-800 text-slate-200'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2 min-w-0">
-                              <PIcon className="w-3.5 h-3.5 shrink-0" />
-                              <span className="truncate">{pillar.label}</span>
-                            </span>
-                            {currentModule === 'pos' && <Lock className="w-3 h-3 text-amber-500/80 shrink-0" />}
-                          </button>
-                        );
-                      })}
-                      {isSuperAdminAuthenticated && (
+                    <div className="px-2.5 py-1.5 border-b border-slate-200 dark:border-slate-800 text-[10px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-500 flex items-center justify-between">
+                      <span>Bypass 6 Manajemen • SuperAdmin</span>
+                      <span
+                        className={
+                          isLight
+                            ? 'bg-transparent border-0 text-[9px] font-bold text-slate-900'
+                            : 'px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[9px] font-bold'
+                        }
+                      >
+                        JACS ENTERPRISE
+                      </span>
+                    </div>
+                    {HYBRID_MANAGEMENT_PILLARS.filter((p) => allowedModules.includes(p.id)).map((pillar) => {
+                      const PIcon = pillar.icon;
+                      const isActivePillar = currentModule === pillar.id;
+                      return (
                         <button
+                          key={pillar.id}
                           type="button"
-                          onClick={() => handleWorkspaceSwitch('admin')}
-                          className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer transition border-t mt-1 pt-2 ${
-                            currentModule === 'admin'
-                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                          onClick={() => handleWorkspaceSwitch(pillar.id)}
+                          className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition ${
+                            isActivePillar
+                              ? 'bg-cyan-500/20 text-cyan-500 border border-cyan-500/40 font-semibold'
                               : isLight
-                              ? 'border-slate-200 hover:bg-slate-100 text-slate-800'
-                              : 'border-slate-800 hover:bg-slate-800 text-amber-300'
+                              ? 'hover:bg-slate-100 text-slate-800'
+                              : 'hover:bg-slate-800 text-slate-200'
                           }`}
                         >
                           <span className="flex items-center gap-2 min-w-0">
-                            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                            <span>Konsol SuperAdmin</span>
+                            <PIcon className="w-3.5 h-3.5 shrink-0" />
+                            <span className="truncate">{pillar.label}</span>
                           </span>
-                          {currentModule === 'pos' && <Lock className="w-3 h-3 text-amber-500/80 shrink-0" />}
                         </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => handleWorkspaceSwitch('admin')}
+                      className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer transition border-t mt-1 pt-2 ${
+                        currentModule === 'admin'
+                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                          : isLight
+                          ? 'border-slate-200 hover:bg-slate-100 text-slate-800'
+                          : 'border-slate-800 hover:bg-slate-800 text-amber-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>Konsol SuperAdmin (Maintenance)</span>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div
+              id="division-locked-badge"
+              className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-mono text-[10px] font-semibold whitespace-nowrap shrink-0 ${
+                isLight
+                  ? 'bg-slate-100 border-slate-300 text-slate-700'
+                  : 'bg-slate-900 border-slate-800 text-slate-300'
+              }`}
+              title={
+                language === 'en'
+                  ? `Locked Division: ${
+                      currentModule === 'pos'
+                        ? 'POS'
+                        : activePillarMeta?.shortLabel || currentUser.division || 'POS'
+                    } • Click Logout to Switch Division`
+                  : `Divisi Terkunci: ${
+                      currentModule === 'pos'
+                        ? 'POS'
+                        : activePillarMeta?.shortLabel || currentUser.division || 'POS'
+                    } • Klik Keluar untuk Pindah Divisi`
+              }
+            >
+              <Lock className="w-3 h-3 text-cyan-500 shrink-0" />
+              <span>
+                {language === 'en' ? 'Division:' : 'Divisi:'}{' '}
+                {currentModule === 'pos'
+                  ? 'POS'
+                  : activePillarMeta?.shortLabel || currentUser.division || 'POS'}
+              </span>
             </div>
           )}
 
-          {/* Status Widget + Tanya AI + Kontrol Bahasa, Tema, & Logout */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Status Widget + Tanya AI (Khusus Executive & SuperAdmin) + Kontrol Bahasa, Tema, & Logout */}
+          <div className="flex items-center gap-2 shrink-0">
             <DualBackendStatusWidget />
 
-            <button
-              type="button"
-              id="btn-app-topbar-ask-ai"
-              onClick={openAiAssistant}
-              className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium font-['Plus_Jakarta_Sans'] flex items-center gap-1.5 transition cursor-pointer ${
-                isLight
-                  ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
-                  : 'bg-cyan-950/50 hover:bg-cyan-900/70 border-cyan-700/60 text-cyan-300'
-              }`}
-              title="Tanya JacS AI Assistant"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
-              <span className="hidden sm:inline">Tanya AI</span>
-            </button>
+            {isAiFeatureAuthorized && (
+              <button
+                type="button"
+                id="btn-app-topbar-ask-ai"
+                onClick={openAiAssistant}
+                className={`h-8 px-2.5 rounded-lg border text-[11px] font-medium font-['Plus_Jakarta_Sans'] flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                  isLight
+                    ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                    : 'bg-cyan-950/50 hover:bg-cyan-900/70 border-cyan-700/60 text-cyan-300'
+                }`}
+                title={
+                  language === 'en'
+                    ? 'Ask JacS AI Assistant (Executive Manager & SuperAdmin Only)'
+                    : 'Tanya JacS AI Assistant (Khusus Executive Manager & SuperAdmin)'
+                }
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+                <span className="hidden sm:inline">{language === 'en' ? 'Ask AI' : 'Tanya AI'}</span>
+              </button>
+            )}
 
             <button
               type="button"
+              id="btn-app-topbar-language-toggle"
               onClick={toggleLanguage}
-              className={`px-2 py-1 rounded-lg border text-[11px] font-mono font-bold uppercase transition cursor-pointer ${
+              className={`h-8 px-2.5 rounded-lg border text-[11px] font-mono font-bold uppercase flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
                 isLight
                   ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
               }`}
               title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
             >
-              {language.toUpperCase()}
+              <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+              <span>{(language || 'id').toUpperCase()}</span>
             </button>
 
             <button
               type="button"
+              id="btn-app-topbar-theme-toggle"
               onClick={toggleTheme}
-              className={`p-1.5 rounded-lg border transition cursor-pointer ${
+              className={`h-8 w-8 rounded-lg border flex items-center justify-center transition cursor-pointer shrink-0 ${
                 isLight
                   ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
               }`}
-              title={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+              title={theme === 'dark' ? (language === 'en' ? 'Light Mode' : 'Mode Terang') : (language === 'en' ? 'Dark Mode' : 'Mode Gelap')}
             >
               {theme === 'dark' ? (
                 <Sun className="w-3.5 h-3.5 text-amber-400" />
@@ -776,12 +880,12 @@ const MainLayout: React.FC = () => {
             <button
               type="button"
               onClick={logout}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+              className={`h-8 flex items-center gap-1.5 px-2.5 rounded-lg border text-[11px] font-bold transition cursor-pointer shrink-0 ${
                 isLight
                   ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
                   : 'bg-rose-950/60 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
               }`}
-              title="Keluar & kembali ke halaman Login"
+              title={language === 'en' ? 'Logout & return to Login gateway' : 'Keluar & kembali ke halaman Login'}
             >
               <LogOut className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden sm:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>

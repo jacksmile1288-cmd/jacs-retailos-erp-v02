@@ -126,6 +126,8 @@ export const ExecutiveModule: React.FC = () => {
     stockMutations,
     fnbToppings,
     updateUserPin,
+    activeCashierQuota,
+    openAiAssistant,
   } = useApp() as any;
 
   const effectiveUser = currentUser || activeUser;
@@ -142,6 +144,33 @@ export const ExecutiveModule: React.FC = () => {
       idStr === 'USR-001' ||
       idStr === 'USR-SUPERADMIN'
     );
+  };
+
+  const isActiveStaffWithinCashierQuotaExec = (u?: any): boolean => {
+    if (!u) return false;
+    const roleStr = String(u.role || '').toLowerCase();
+    const divStr = String(u.division || '').toLowerCase();
+    const isCashier = roleStr.includes('kasir') || roleStr.includes('cashier') || divStr.includes('kasir');
+    if (!isCashier) return true;
+    if (u.status === 'Inactive') return false;
+    const termMatch = String(u?.assignedTerminalId || '').match(/(\d+)/);
+    const nameMatch = String(u?.name || '').match(/kasir\s*0?(\d+)/i);
+    const slotNum = termMatch
+      ? parseInt(termMatch[1], 10)
+      : nameMatch
+      ? parseInt(nameMatch[1], 10)
+      : u?.user_id === 'USR-003'
+      ? 1
+      : u?.user_id === 'USR-004'
+      ? 2
+      : u?.user_id === 'USR-006'
+      ? 3
+      : u?.user_id === 'USR-007'
+      ? 4
+      : null;
+    const currentQuota = Number(activeCashierQuota) || 2;
+    if (slotNum !== null && slotNum > currentQuota) return false;
+    return true;
   };
 
   const effectiveDomainConfig = useMemo(
@@ -1979,6 +2008,23 @@ export const ExecutiveModule: React.FC = () => {
 
           <button
             type="button"
+            id="btn-executive-open-ask-ai"
+            onClick={() => {
+              if (typeof openAiAssistant === 'function') openAiAssistant();
+            }}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-[0.99] ${
+              isDark
+                ? 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.2)]'
+                : 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800 shadow-xs'
+            }`}
+            title="Buka Tanya AI (Monitoring Kesehatan Bisnis, Penyusunan Kebijakan Usaha, & Analisis Masalah Operasional)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+            <span>Tanya AI (Executive Advisor)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => window.location.reload()}
             className={`p-2 rounded-xl border transition-all cursor-pointer active:scale-[0.99] ${
               isDark
@@ -2157,21 +2203,38 @@ export const ExecutiveModule: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleRunAiAnalysis}
-                disabled={isAnalyzingAi}
-                className={`px-4 py-2.5 rounded-xl text-xs font-medium transition-all flex items-center gap-2 cursor-pointer active:scale-[0.99] ${
-                  isAnalyzingAi
-                    ? 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed'
-                    : isDark
-                    ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)]'
-                    : 'bg-cyan-600 hover:bg-cyan-700 text-white shadow-sm'
-                }`}
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{isAnalyzingAi ? 'Menganalisis Snapshot Divisi...' : 'Analisis AI Sekarang'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof openAiAssistant === 'function') openAiAssistant();
+                  }}
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99] border ${
+                    isDark
+                      ? 'bg-cyan-500/15 hover:bg-cyan-500/25 border-cyan-500/40 text-cyan-300'
+                      : 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-cyan-500" />
+                  <span>Buka Laci Tanya AI</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRunAiAnalysis}
+                  disabled={isAnalyzingAi}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-medium transition-all flex items-center gap-2 cursor-pointer active:scale-[0.99] ${
+                    isAnalyzingAi
+                      ? 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed'
+                      : isDark
+                      ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                      : 'bg-cyan-600 hover:bg-cyan-700 text-white shadow-sm'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isAnalyzingAi ? 'Menganalisis Snapshot Divisi...' : 'Analisis AI Sekarang'}</span>
+                </button>
+              </div>
             </div>
 
             {/* Deteksi Pola Selisih Kas & Void Operasional */}
@@ -5341,7 +5404,7 @@ export const ExecutiveModule: React.FC = () => {
                   </span>
                 </div>
                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Kewenangan Executive Manager (<strong>Jacs Enterprise</strong>): Dapat mengatur atau mengganti PIN/sandi <strong>satu per satu</strong> bagi staf operasional di bawahnya (Admin Gudang, Kasir 01–04, Finance, Purchasing, HR). Akun <strong>Master SuperAdmin</strong> terkunci permanen dan fitur <em>Reset Total Semua Sandi Operasional</em> hanya tersedia pada otoritas SuperAdmin.
+                  Kewenangan Executive Manager (<strong>Jacs Enterprise</strong>): Dapat mengatur atau mengganti PIN/sandi <strong>satu per satu</strong> bagi staf operasional di bawahnya dalam kuota aktif (<span className="font-mono">Kasir 01 s/d Kasir {String(activeCashierQuota || 2).padStart(2, '0')}</span>, Admin Gudang, Finance, Purchasing, HR). Akun <strong>Master SuperAdmin</strong> terkunci permanen dan fitur <em>Reset Total Semua Sandi Operasional</em> hanya tersedia pada otoritas SuperAdmin.
                 </p>
               </div>
 
@@ -5351,7 +5414,31 @@ export const ExecutiveModule: React.FC = () => {
                   : 'bg-slate-100 text-slate-600 border-slate-300'
               }`}>
                 <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Reset Total Sandi Operasional: Khsusus SuperAdmin</span>
+                <span>Reset Total Sandi Operasional: Khusus SuperAdmin</span>
+              </div>
+            </div>
+
+            {/* Banner Read-Only Kuota Kasir untuk Executive Manager */}
+            <div className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              isDark
+                ? 'bg-amber-500/10 border-amber-500/35 text-amber-200'
+                : 'bg-amber-50 border-amber-300 text-amber-950'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <div className="font-semibold flex flex-wrap items-center gap-2">
+                    <span>
+                      Kuota Loket Kasir Aktif: {activeCashierQuota || 2} Loket (Kasir 01 s/d Kasir {String(activeCashierQuota || 2).padStart(2, '0')}) — Read-Only
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      [0 / {activeCashierQuota || 2} Kasir Online]
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-90">
+                    Penambahan loket kasir &amp; aktivasi sinkronisasi hanya diproses oleh SuperAdmin - Jacs Enterprise
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -5369,7 +5456,7 @@ export const ExecutiveModule: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className={`divide-y ${isDark ? 'divide-white/[0.06]' : 'divide-slate-200 bg-white'}`}>
-                  {(users || []).map((u: any) => {
+                  {(users || []).filter((u: any) => isActiveStaffWithinCashierQuotaExec(u)).map((u: any) => {
                     const isSuper = isSuperAdminAccountExec(u);
                     return (
                       <tr key={u.user_id || u.id} className={isDark ? 'hover:bg-white/[0.02]' : 'hover:bg-slate-50'}>

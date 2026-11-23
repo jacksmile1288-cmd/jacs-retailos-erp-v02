@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAudit } from '../audit';
 import { sanitizeTextValue } from '../utils/securityShield';
+import { getTranslatedText } from '../utils/translations';
 import {
   Product,
   Sale,
@@ -70,8 +71,10 @@ import {
 } from '../utils/sectorCoaMap';
 import {
   ACTIVE_BUSINESS_PROFILE_STORAGE_KEY,
+  ACTIVE_CASHIER_QUOTA_STORAGE_KEY,
   deriveExecutiveVerticalFromProfile,
   getEffectiveBusinessDomainConfig,
+  getStoredActiveCashierQuota,
   loadActiveBusinessProfileFromStorage,
   normalizeBusinessProfileDomain,
   resolveCanonicalSector,
@@ -445,6 +448,19 @@ export interface AppContextType {
 
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
+  activeCashierQuota: number;
+  cashierQuotaLogs: Array<{
+    id: string;
+    timestamp: string;
+    previousQuota: number;
+    newQuota: number;
+    approvedBy: string;
+    details: string;
+  }>;
+  updateActiveCashierQuota: (
+    nextQuota: number,
+    approvedBy?: string
+  ) => { success: boolean; quota: number; message: string };
   terminals: Terminal[];
   setTerminals: React.Dispatch<React.SetStateAction<Terminal[]>>;
   addTerminal: (t: Omit<Terminal, 'id'> & { id?: string }) => void;
@@ -1258,13 +1274,139 @@ const resolveDefaultNavForUser = (user: User | null): ActiveNavModule => {
   return 'executive';
 };
 
+const CASHIER_SLOT_BLUEPRINTS: Array<{
+  slot: number;
+  userId: string;
+  defaultName: string;
+  email: string;
+  defaultPin: string;
+  terminalId: string;
+}> = [
+  { slot: 1, userId: 'USR-003', defaultName: 'Andi Pratama (Kasir 01)', email: 'andi.pos01@jacs-erp.com', defaultPin: '1101', terminalId: 'T-01' },
+  { slot: 2, userId: 'USR-004', defaultName: 'Maya Indah (Kasir 02)', email: 'maya.pos02@jacs-erp.com', defaultPin: '1102', terminalId: 'T-02' },
+  { slot: 3, userId: 'USR-006', defaultName: 'Rian Hidayat (Kasir 03)', email: 'rian.pos03@jacs-erp.com', defaultPin: '1103', terminalId: 'T-03' },
+  { slot: 4, userId: 'USR-007', defaultName: 'Siti Aminah (Kasir 04)', email: 'siti.pos04@jacs-erp.com', defaultPin: '1104', terminalId: 'T-04' },
+  { slot: 5, userId: 'USR-POS-05', defaultName: 'Operator Kasir 05', email: 'kasir05.pos@jacs-erp.com', defaultPin: '1105', terminalId: 'T-05' },
+  { slot: 6, userId: 'USR-POS-06', defaultName: 'Operator Kasir 06', email: 'kasir06.pos@jacs-erp.com', defaultPin: '1106', terminalId: 'T-06' },
+  { slot: 7, userId: 'USR-POS-07', defaultName: 'Operator Kasir 07', email: 'kasir07.pos@jacs-erp.com', defaultPin: '1107', terminalId: 'T-07' },
+  { slot: 8, userId: 'USR-POS-08', defaultName: 'Operator Kasir 08', email: 'kasir08.pos@jacs-erp.com', defaultPin: '1108', terminalId: 'T-08' },
+  { slot: 9, userId: 'USR-POS-09', defaultName: 'Operator Kasir 09', email: 'kasir09.pos@jacs-erp.com', defaultPin: '1109', terminalId: 'T-09' },
+  { slot: 10, userId: 'USR-POS-10', defaultName: 'Operator Kasir 10', email: 'kasir10.pos@jacs-erp.com', defaultPin: '1110', terminalId: 'T-10' },
+];
+
+export const resolveCashierSlotNumber = (u?: Partial<User> | null): number | null => {
+  if (!u) return null;
+  const roleStr = String(u.role || '').toLowerCase();
+  const divStr = String(u.division || '').toLowerCase();
+  if (!roleStr.includes('kasir') && !roleStr.includes('cashier') && !divStr.includes('kasir')) {
+    return null;
+  }
+  const termMatch = String(u.assignedTerminalId || '').match(/(\d+)/);
+  if (termMatch) return parseInt(termMatch[1], 10);
+  const nameMatch = String(u.name || '').match(/kasir\s*0?(\d+)/i);
+  if (nameMatch) return parseInt(nameMatch[1], 10);
+  const bp = CASHIER_SLOT_BLUEPRINTS.find((b) => b.userId === u.user_id || b.userId === u.id);
+  return bp ? bp.slot : null;
+};
+
+export const syncUsersToCashierQuota = (sourceUsers: User[], quotaCount: number): User[] => {
+  const clampedQuota = Math.max(1, Math.min(10, Number(quotaCount) || 2));
+  const nonCashierUsers = (sourceUsers || []).filter((u) => resolveCashierSlotNumber(u) === null);
+  const existingCashiers = (sourceUsers || []).filter((u) => resolveCashierSlotNumber(u) !== null);
+
+  const syncedCashiers: User[] = [];
+  for (const bp of CASHIER_SLOT_BLUEPRINTS) {
+    const existing = existingCashiers.find(
+      (u) =>
+        resolveCashierSlotNumber(u) === bp.slot ||
+        u.user_id === bp.userId ||
+        u.assignedTerminalId === bp.terminalId
+    );
+    if (bp.slot <= clampedQuota) {
+      syncedCashiers.push({
+        user_id: existing?.user_id || bp.userId,
+        id: existing?.id || bp.userId,
+        name: existing?.name
+          ? existing.name.includes('Kasir')
+            ? existing.name
+            : `${existing.name} (Kasir ${String(bp.slot).padStart(2, '0')})`
+          : bp.defaultName,
+        email: existing?.email || bp.email,
+        division: 'POS & Kasir',
+        role: 'Kasir',
+        status: 'Active',
+        pin: existing?.pin || bp.defaultPin,
+        assignedTerminalId: bp.terminalId,
+        avatar: existing?.avatar ?? null,
+        avatarUrl: existing?.avatarUrl ?? null,
+      });
+    } else if (existing) {
+      syncedCashiers.push({
+        ...existing,
+        status: 'Inactive',
+        assignedTerminalId: bp.terminalId,
+      });
+    }
+  }
+
+  // Place SuperAdmin & Executive Manager first, then active/archived cashiers, then other operational staff
+  const topAdmins = nonCashierUsers.filter((u) => {
+    const r = String(u.role || '').toUpperCase();
+    const d = String(u.division || '').toUpperCase();
+    return r.includes('SUPER') || d.includes('SUPER') || r === 'MANAGER' || d.includes('EXECUTIVE');
+  });
+  const otherStaff = nonCashierUsers.filter((u) => !topAdmins.includes(u));
+  return [...topAdmins, ...syncedCashiers, ...otherStaff];
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const auditContext = useAudit();
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [language, setLanguage] = useState<LanguageMode>('id');
+  const [language, setLanguageState] = useState<LanguageMode>(() => {
+    try {
+      const savedLang = localStorage.getItem('jacs_app_language_v1');
+      if (savedLang === 'en' || savedLang === 'id') {
+        return savedLang;
+      }
+    } catch {}
+    return 'id';
+  });
 
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const setLanguage = useCallback((nextLang: LanguageMode) => {
+    const validLang: LanguageMode = nextLang === 'en' ? 'en' : 'id';
+    setLanguageState(validLang);
+    try {
+      localStorage.setItem('jacs_app_language_v1', validLang);
+    } catch {}
+  }, []);
+
+  const [activeCashierQuota, setActiveCashierQuotaState] = useState<number>(() =>
+    getStoredActiveCashierQuota()
+  );
+  const [cashierQuotaLogs, setCashierQuotaLogs] = useState<
+    Array<{
+      id: string;
+      timestamp: string;
+      previousQuota: number;
+      newQuota: number;
+      approvedBy: string;
+      details: string;
+    }>
+  >(() => {
+    try {
+      const raw = localStorage.getItem('jacs_cashier_quota_logs_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const [users, setUsers] = useState<User[]>(() =>
+    syncUsersToCashierQuota(INITIAL_USERS, getStoredActiveCashierQuota())
+  );
   const [pinFailedAttempts, setPinFailedAttempts] = useState<number>(0);
   const [pinLockoutUntil, setPinLockoutUntil] = useState<number>(0);
 
@@ -1602,15 +1744,146 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTerminalOverride, setActiveTerminalOverride] = useState<Terminal | null>(null);
   const [isCashierWorkspaceActive, setIsCashierWorkspaceActive] = useState(false);
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
-  const openAiAssistant = useCallback(() => setIsAiAssistantOpen(true), []);
+  const openAiAssistant = useCallback(() => {
+    if (!currentUser) {
+      setIsAiAssistantOpen(false);
+      return;
+    }
+    const roleStr = String(currentUser.role || '').toUpperCase();
+    const divStr = String(currentUser.division || '').toUpperCase();
+    const idStr = String(currentUser.user_id || currentUser.id || '').toUpperCase();
+    const isSuper =
+      isSuperAdminAuthenticated ||
+      roleStr.includes('SUPER') ||
+      divStr.includes('SUPER') ||
+      idStr.includes('SUPER') ||
+      idStr === 'USR-001';
+    const isExec =
+      activeNav === 'executive' ||
+      activeNav === 'admin' ||
+      roleStr.includes('EXEC') ||
+      divStr.includes('EXEC') ||
+      roleStr === 'MANAGER' ||
+      roleStr === 'OWNER';
+
+    if (!isSuper && !isExec) {
+      setIsAiAssistantOpen(false);
+      return;
+    }
+    setIsAiAssistantOpen(true);
+  }, [currentUser, isSuperAdminAuthenticated, activeNav]);
   const closeAiAssistant = useCallback(() => setIsAiAssistantOpen(false), []);
 
+  const resolveLockedCashierStationCode = useCallback(
+    (userObj: User | null | undefined, isSuperAdmin: boolean): string | null => {
+      if (!userObj || isSuperAdmin) return null;
+      const roleStr = String(userObj.role || '').toUpperCase();
+      const divStr = String(userObj.division || '').toUpperCase();
+      const idStr = String(userObj.user_id || userObj.id || '').toUpperCase();
+      const nameStr = String(userObj.name || '').trim();
+
+      const isManagerOrAdmin =
+        roleStr.includes('SUPER') ||
+        divStr.includes('SUPER') ||
+        idStr.includes('SUPER') ||
+        idStr === 'USR-001' ||
+        roleStr.includes('EXEC') ||
+        divStr.includes('EXEC') ||
+        roleStr === 'MANAGER' ||
+        roleStr === 'OWNER';
+
+      if (isManagerOrAdmin) return null;
+
+      const isCashierUser =
+        roleStr.includes('KASIR') ||
+        roleStr.includes('CASHIER') ||
+        roleStr === 'POS' ||
+        divStr.includes('POS') ||
+        divStr.includes('KASIR') ||
+        nameStr.toLowerCase().includes('kasir');
+
+      if (!isCashierUser) return null;
+
+      // 1. Cek assignedTerminalId eksplisit dari daftar users
+      const matchedRosterUser = users.find(
+        (u) =>
+          (userObj.user_id && u.user_id === userObj.user_id) ||
+          (userObj.id && u.id === userObj.id) ||
+          (nameStr && String(u.name || '').trim().toLowerCase() === nameStr.toLowerCase())
+      );
+
+      const candidateAssigned =
+        userObj.assignedTerminalId || matchedRosterUser?.assignedTerminalId || '';
+      const assignedMatch = String(candidateAssigned).match(/(\d+)/);
+      if (assignedMatch) {
+        const slot = Math.max(1, Math.min(10, parseInt(assignedMatch[1], 10)));
+        return `POS-${String(slot).padStart(2, '0')}`;
+      }
+
+      // 2. Cek nomor urut pada nama akun (misal "Kasir 01" -> POS-01, "Kasir 02" -> POS-02)
+      const nameMatch = nameStr.match(/(?:kasir|pos|loket)\s*[-#]?\s*0?(\d+)/i) || nameStr.match(/0?(\d+)$/);
+      if (nameMatch) {
+        const slot = Math.max(1, Math.min(10, parseInt(nameMatch[1], 10)));
+        return `POS-${String(slot).padStart(2, '0')}`;
+      }
+
+      // 3. Cek dari user_id standar (USR-003 -> POS-01, USR-004 -> POS-02, USR-006 -> POS-03, USR-007 -> POS-04)
+      if (idStr === 'USR-003') return 'POS-01';
+      if (idStr === 'USR-004') return 'POS-02';
+      if (idStr === 'USR-006') return 'POS-03';
+      if (idStr === 'USR-007') return 'POS-04';
+      const slotIdMatch = idStr.match(/USR-KASIR-0?(\d+)/i);
+      if (slotIdMatch) {
+        const slot = Math.max(1, Math.min(10, parseInt(slotIdMatch[1], 10)));
+        return `POS-${String(slot).padStart(2, '0')}`;
+      }
+
+      return 'POS-01';
+    },
+    [users]
+  );
+
+  const lockedCashierStationCode = useMemo(
+    () => resolveLockedCashierStationCode(currentUser, isSuperAdminAuthenticated),
+    [resolveLockedCashierStationCode, currentUser, isSuperAdminAuthenticated]
+  );
+
+  // Otomatis ikat akun Kasir ke loketnya masing-masing (Kasir 01 -> POS-01, Kasir 02 -> POS-02, dst.)
+  useEffect(() => {
+    if (!lockedCashierStationCode || !currentUser) return;
+    const activeSec = resolveCanonicalSector(businessProfile);
+    const primaryModel =
+      businessProfile?.domainConfig?.primaryBusinessModel || businessProfile?.businessType;
+    const syncedStationName = resolveSynchronizedTerminalDisplayName(
+      lockedCashierStationCode,
+      activeSec,
+      primaryModel
+    );
+
+    if (activeTerminalId !== lockedCashierStationCode) {
+      setActiveTerminalId(lockedCashierStationCode);
+    }
+
+    if (!boundStation || boundStation.stationCode !== lockedCashierStationCode) {
+      const saved = setBoundPosStation({
+        stationCode: lockedCashierStationCode,
+        stationName: syncedStationName,
+        boundAt: new Date().toISOString(),
+        boundBy: currentUser.name || 'Kasir',
+      });
+      setBoundStationState(saved);
+    }
+  }, [lockedCashierStationCode, currentUser, businessProfile, activeTerminalId, boundStation]);
+
   const activeTerminal = useMemo(() => {
+    const effectiveTerminalId = lockedCashierStationCode || activeTerminalId;
     const baseTerm =
-      (activeTerminalOverride && activeTerminalOverride.id === activeTerminalId
+      (activeTerminalOverride &&
+      (activeTerminalOverride.id === effectiveTerminalId ||
+        activeTerminalOverride.stationCode === effectiveTerminalId)
         ? activeTerminalOverride
         : null) ||
-      terminals.find((t) => t.id === activeTerminalId || t.stationCode === activeTerminalId) ||
+      terminals.find((t) => t.id === effectiveTerminalId || t.stationCode === effectiveTerminalId) ||
       activeTerminalOverride ||
       terminals[0] ||
       null;
@@ -1618,33 +1891,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const activeSec = resolveCanonicalSector(businessProfile);
     const primaryModel =
       businessProfile?.domainConfig?.primaryBusinessModel || businessProfile?.businessType;
+    const resolvedStationCode = lockedCashierStationCode || baseTerm.stationCode || baseTerm.id || effectiveTerminalId;
     const syncedName = resolveSynchronizedTerminalDisplayName(
-      baseTerm.stationCode || baseTerm.id || activeTerminalId,
+      resolvedStationCode,
       activeSec,
       primaryModel
     );
     return {
       ...baseTerm,
+      id: resolvedStationCode,
+      stationCode: resolvedStationCode,
+      code: resolvedStationCode,
       name: syncedName,
     };
-  }, [terminals, activeTerminalId, activeTerminalOverride, businessProfile]);
+  }, [terminals, activeTerminalId, activeTerminalOverride, businessProfile, lockedCashierStationCode]);
 
-  const setActiveTerminal = useCallback((term: Terminal | null) => {
-    if (term) {
-      setActiveTerminalId(term.id);
-      setActiveTerminalOverride(term);
-    }
-  }, []);
+  const setActiveTerminal = useCallback(
+    (term: Terminal | null) => {
+      if (!term) return;
+      if (lockedCashierStationCode) {
+        const targetCode = normalizeStationCode(term.stationCode || term.id || term.code);
+        if (targetCode !== lockedCashierStationCode) {
+          return;
+        }
+      }
+      setActiveTerminalId(lockedCashierStationCode || term.id);
+      setActiveTerminalOverride(
+        lockedCashierStationCode
+          ? {
+              ...term,
+              id: lockedCashierStationCode,
+              stationCode: lockedCashierStationCode,
+              code: lockedCashierStationCode,
+            }
+          : term
+      );
+    },
+    [lockedCashierStationCode]
+  );
 
-  const bindPosStation = useCallback((binding: PosStationBinding) => {
-    const saved = setBoundPosStation(binding);
-    setBoundStationState(saved);
-  }, []);
+  const bindPosStation = useCallback(
+    (binding: PosStationBinding) => {
+      const enforcedCode = lockedCashierStationCode || normalizeStationCode(binding.stationCode);
+      const saved = setBoundPosStation({
+        ...binding,
+        stationCode: enforcedCode,
+      });
+      setBoundStationState(saved);
+    },
+    [lockedCashierStationCode]
+  );
 
   const unbindPosStation = useCallback(() => {
+    if (lockedCashierStationCode) {
+      showToast(
+        `Akun Kasir terikat permanen ke loket ${lockedCashierStationCode}. Hanya Executive Manager atau SuperAdmin yang dapat melepas/mengganti loket PC.`,
+        'warning'
+      );
+      return;
+    }
     clearBoundPosStation();
     setBoundStationState(null);
-  }, []);
+  }, [lockedCashierStationCode, showToast]);
 
   useEffect(() => {
     const handleStorageSync = (e: StorageEvent) => {
@@ -9118,7 +9426,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Auth / Navigation / System utilities
   const toggleSidebar = useCallback(() => setIsSidebarCollapsed((prev) => !prev), []);
   const toggleTheme = useCallback(() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark')), []);
-  const toggleLanguage = useCallback(() => setLanguage((prev) => (prev === 'id' ? 'en' : 'id')), []);
+  const toggleLanguage = useCallback(() => {
+    setLanguageState((prev) => {
+      const next: LanguageMode = prev === 'id' ? 'en' : 'id';
+      try {
+        localStorage.setItem('jacs_app_language_v1', next);
+      } catch {}
+      showToast(
+        next === 'en'
+          ? 'Language switched to English (EN)'
+          : 'Bahasa diubah ke Bahasa Indonesia (ID)',
+        'info'
+      );
+      return next;
+    });
+  }, [showToast]);
   const toggleGlobalMaintenance = useCallback(() => {
     setIsGlobalMaintenance((prev) => {
       const next = !prev;
@@ -9302,10 +9624,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [showToast]
   );
 
+  const updateActiveCashierQuota = useCallback(
+    (
+      nextQuota: number,
+      approvedBy: string = 'SuperAdmin - Jacs Enterprise'
+    ): { success: boolean; quota: number; message: string } => {
+      const clamped = Math.max(1, Math.min(10, Number(nextQuota) || 2));
+      const prevQuota = activeCashierQuota;
+
+      try {
+        localStorage.setItem(ACTIVE_CASHIER_QUOTA_STORAGE_KEY, String(clamped));
+      } catch {}
+
+      setActiveCashierQuotaState(clamped);
+      setUsers((prev) => syncUsersToCashierQuota(prev, clamped));
+
+      // Sinkronkan jumlah loket ke profil bisnis aktif agar badge [0 / N Kasir Online] langsung sinkron
+      setBusinessProfile((prevProfile) => {
+        const currentDomain = getEffectiveBusinessDomainConfig(prevProfile);
+        const updatedProfile = normalizeBusinessProfileDomain({
+          ...prevProfile,
+          posUnitCount: clamped,
+          cashiers: clamped,
+          domainConfig: {
+            ...currentDomain,
+            activeStationCount: clamped,
+          },
+        });
+        saveActiveBusinessProfileToStorage(updatedProfile);
+        return updatedProfile;
+      });
+
+      const slotRangeLabel =
+        clamped === 1 ? 'Kasir 01' : `Kasir 01 s/d Kasir ${String(clamped).padStart(2, '0')}`;
+      const logEntry = {
+        id: `QUOTA-SYNC-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        previousQuota: prevQuota,
+        newQuota: clamped,
+        approvedBy,
+        details: `Kuota Loket Kasir Aktif diperbarui dari ${prevQuota} ke ${clamped} loket (${slotRangeLabel}). PIN Kasir otomatis dibentuk & disinkronkan di Manajemen Kredensial.`,
+      };
+
+      setCashierQuotaLogs((prevLogs) => {
+        const nextLogs = [logEntry, ...prevLogs].slice(0, 30);
+        try {
+          localStorage.setItem('jacs_cashier_quota_logs_v1', JSON.stringify(nextLogs));
+        } catch {}
+        return nextLogs;
+      });
+
+      addAuditLog(
+        'CASHIER_QUOTA_SYNC_UPDATED',
+        `[${approvedBy}] ${logEntry.details}`,
+        'SECURITY'
+      );
+
+      const msg = `Kuota Kasir Aktif berhasil diperbarui ke ${clamped} loket (${slotRangeLabel}) & disinkronkan ke Manajemen Kredensial!`;
+      showToast(msg, 'success');
+      return { success: true, quota: clamped, message: msg };
+    },
+    [activeCashierQuota, addAuditLog, showToast]
+  );
+
   const verifyDivisionPin = useCallback(
     async (divisionId: string, pin: string): Promise<boolean> => {
       const cleaned = pin.trim();
       if (!cleaned) return false;
+
+      // Untuk divisi POS / Kasir, izinkan juga verifikasi menggunakan PIN akun Kasir aktif (misal Kasir 01 = 1101, Kasir 02 = 1102)
+      if (divisionId.toLowerCase() === 'pos') {
+        const matchedCashier = users.find((u) => {
+          const r = String(u.role || '').toLowerCase();
+          const d = String(u.division || '').toLowerCase();
+          const isCashier = r.includes('kasir') || r.includes('cashier') || d.includes('kasir') || d.includes('pos');
+          if (!isCashier || u.status === 'Inactive') return false;
+          return String(u.pin || '').trim() === cleaned;
+        });
+        if (matchedCashier) {
+          return true;
+        }
+      }
+
       const candidateHash = await hashSha256(cleaned);
       let storedHash = divisionPinHashes[divisionId]?.hash;
       if (!storedHash) {
@@ -9322,7 +9722,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return candidateHash === storedHash;
     },
-    [divisionPinHashes]
+    [divisionPinHashes, users]
   );
 
   const updateDivisionPin = useCallback(
@@ -9533,19 +9933,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const logout = useCallback(() => {
     try {
       localStorage.removeItem('jacs_active_user');
+      sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
+    setIsAiAssistantOpen(false);
     setIsSuperAdminAuthenticated(false);
     setCurrentUser(null);
     setActiveNav('home');
   }, []);
   const exitSuperAdminSession = useCallback(() => {
+    try {
+      sessionStorage.removeItem('jacs_cloud_pin_unlocked');
+    } catch {}
+    setIsAiAssistantOpen(false);
     setIsSuperAdminAuthenticated(false);
     setActiveNav('home');
   }, []);
   const emergencySessionReset = useCallback(() => {
     try {
       localStorage.removeItem('jacs_active_user');
+      sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
+    setIsAiAssistantOpen(false);
     setIsSuperAdminAuthenticated(false);
     setCurrentUser(null);
     setActiveNav('home');
@@ -10628,15 +11036,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveNeonCardsState((prev) => ({ ...prev, [moduleKey]: cardId || moduleKey }));
   }, []);
 
-  const t = useCallback((key: string, params?: Record<string, any>): string => {
-    let str = key;
-    if (params) {
-      Object.keys(params).forEach((pKey) => {
-        str = str.replace(`{${pKey}}`, String(params[pKey]));
-      });
-    }
-    return str;
-  }, []);
+  const t = useCallback(
+    (key: string, params?: Record<string, any>): string => {
+      return getTranslatedText(language, key, params);
+    },
+    [language]
+  );
 
   const resetDemoData = useCallback(() => {
     setIsLedgerReset(false);
@@ -10894,6 +11299,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     users,
     setUsers,
+    activeCashierQuota,
+    cashierQuotaLogs,
+    updateActiveCashierQuota,
     terminals,
     setTerminals,
     addTerminal,

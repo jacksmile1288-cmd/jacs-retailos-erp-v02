@@ -243,7 +243,7 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
     }, 20);
   };
 
-  const getDivisionDetails = (modId: string, inputUsername: string): User => {
+  const getDivisionDetails = (modId: string, inputUsername: string, enteredPin?: string): User => {
     const roleMap: Record<string, User['role']> = {
       executive: 'EXECUTIVE',
       finance: 'FINANCE_MANAGER',
@@ -252,6 +252,37 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
       warehouse: 'WAREHOUSE_HEAD',
       hr: 'HR_MANAGER',
     };
+
+    if (modId === 'pos') {
+      const cleanedName = (inputUsername || 'Kasir 01').trim();
+      const cleanedPin = (enteredPin || '').trim();
+      const pinMatch = cleanedPin.match(/^110(\d)$/);
+      const nameMatch =
+        cleanedName.match(/(?:kasir|pos|loket)\s*[-#]?\s*0?(\d+)/i) || cleanedName.match(/0?(\d+)$/);
+      const slotNum = pinMatch
+        ? Math.max(1, Math.min(10, parseInt(pinMatch[1], 10)))
+        : nameMatch
+        ? Math.max(1, Math.min(10, parseInt(nameMatch[1], 10)))
+        : 1;
+      const stationCode = `POS-${String(slotNum).padStart(2, '0')}`;
+      const normalizedCashierName = nameMatch
+        ? `Kasir ${String(slotNum).padStart(2, '0')}`
+        : pinMatch
+        ? `Kasir ${String(slotNum).padStart(2, '0')}`
+        : cleanedName;
+
+      return {
+        id: `kasir-${String(slotNum).padStart(2, '0')}`,
+        user_id: slotNum === 1 ? 'USR-003' : slotNum === 2 ? 'USR-004' : `USR-KASIR-${String(slotNum).padStart(2, '0')}`,
+        name: normalizedCashierName,
+        role: 'Kasir',
+        division: 'POS',
+        assignedTerminalId: stationCode,
+        email: `kasir${String(slotNum).padStart(2, '0')}@jacs.retailos.id`,
+        status: 'Active',
+        pin: '',
+      };
+    }
 
     return {
       id: modId,
@@ -325,7 +356,7 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
 
     setFailedPinAttempts(0);
     setPinLockoutUntil(0);
-    const userObj = getDivisionDetails(selectedModuleId, username.trim());
+    const userObj = getDivisionDetails(selectedModuleId, username.trim(), pin.trim());
     const signedToken = await signSessionPayload(userObj);
 
     const targetNavModule = selectedModuleId;
@@ -472,16 +503,22 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
 
         {/* 2. SUDUT KIRI ATAS: Watermark Tunggal Logo + Nama Developer */}
         <div className="relative z-20 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-950/50 border border-cyan-400/25 backdrop-blur-md shadow-lg">
+          <div
+            className={`flex items-center gap-2.5 ${
+              theme === 'light'
+                ? 'bg-transparent border-0 shadow-none p-0'
+                : 'px-3 py-1.5 rounded-xl bg-slate-950/50 border border-cyan-400/25 backdrop-blur-md shadow-lg'
+            }`}
+          >
             <img
               src="/logo-jacs-enterprise.png"
               alt="JacS Enterprise"
-              className="h-7 w-7 object-contain rounded"
+              className="h-7 w-7 object-contain shrink-0"
               onError={(e) => {
                 (e.currentTarget as HTMLElement).style.display = 'none';
               }}
             />
-            <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm tracking-wider text-white/95">
+            <span className="font-['Plus_Jakarta_Sans'] font-semibold text-sm tracking-wider text-white drop-shadow-sm">
               JacS Enterprise
             </span>
           </div>
@@ -688,21 +725,27 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
       </div>
 
       {/* 1. Header Atas */}
-      <header className="relative z-10 h-14 px-6 border-b border-slate-300/80 dark:border-slate-800/60 flex items-center justify-between shrink-0 bg-[#F6F8FB]/90 dark:bg-slate-900/55 backdrop-blur-xl">
-        <div className="flex items-center gap-3 select-none group">
+      <header
+        className={`relative z-10 h-14 px-6 flex items-center justify-between shrink-0 ${
+          theme === 'light'
+            ? 'bg-transparent border-b-0'
+            : 'border-b border-slate-800/60 bg-slate-900/55 backdrop-blur-xl'
+        }`}
+      >
+        <div className="flex items-center gap-3 select-none group bg-transparent border-0 shadow-none p-0">
           <img
             src="/logo-jacs-enterprise.png"
             alt="JacS Enterprise Logo"
-            className="h-7 w-7 object-contain rounded shrink-0 transition duration-300 group-hover:scale-105"
+            className="h-7 w-7 object-contain shrink-0 transition duration-300 group-hover:scale-105"
             onError={(e) => {
               (e.currentTarget as HTMLElement).style.display = 'none';
             }}
           />
           <div>
-            <span className="font-['Plus_Jakarta_Sans'] font-normal text-sm tracking-wider block leading-tight text-slate-900 dark:text-white">
+            <span className="font-['Plus_Jakarta_Sans'] font-semibold text-sm tracking-wider block leading-tight text-slate-900 dark:text-white">
               JacS Enterprise
             </span>
-            <p className="text-[10px] text-cyan-600 dark:text-cyan-400 font-['JetBrains_Mono'] leading-tight">
+            <p className="text-[10px] text-cyan-700 dark:text-cyan-400 font-['JetBrains_Mono'] font-medium leading-tight">
               {displayStoreLabel}
             </p>
           </div>
@@ -721,17 +764,6 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
           >
             <MonitorPlay className="w-3.5 h-3.5 text-cyan-500" />
             <span className="hidden sm:inline">Cover 3D</span>
-          </button>
-
-          <button
-            type="button"
-            id="btn-gateway-ask-ai"
-            onClick={openAiAssistant}
-            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/10 via-teal-500/10 to-emerald-500/10 hover:from-cyan-500/20 hover:via-teal-500/20 hover:to-emerald-500/20 border border-cyan-500/35 text-cyan-600 dark:text-cyan-400 hover:border-cyan-400 transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs font-medium font-['Plus_Jakarta_Sans'] shadow-sm"
-            title="Tanya JacS AI Assistant"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
-            <span>Tanya AI</span>
           </button>
 
           <button

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ActiveNavModule } from '../../types';
 import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
-import { DIVISIONS_TRANSLATIONS } from '../../utils/translations';
+import { getDivisionTranslation } from '../../utils/translations';
 import {
   Users,
   Briefcase,
@@ -341,12 +341,11 @@ const HomeModule: React.FC<HomeModuleProps> = ({ onLoginSuccess }) => {
     setActiveNav(targetId as ActiveNavModule);
   };
 
-  const activeDivisionInfo =
-    DIVISIONS_TRANSLATIONS[language][activeRole.id] || {
-      name: activeRole.title,
-      sub: activeRole.subTitle,
-      desc: activeRole.summary,
-    };
+  const activeDivisionInfo = getDivisionTranslation(language, activeRole.id, {
+    name: activeRole.title,
+    sub: activeRole.subTitle,
+    desc: activeRole.summary,
+  });
 
   // Handle clicking a neon card: activate neon glow AND open comprehensive detail modal
   const handleCardClick = (role: RoleModuleData) => {
@@ -380,13 +379,17 @@ const HomeModule: React.FC<HomeModuleProps> = ({ onLoginSuccess }) => {
     <div id="home-module-container" className="min-h-full bg-slate-100 dark:bg-slate-950 p-6 transition-colors w-full max-w-[1360px] mx-auto flex flex-col space-y-4 xl:space-y-5">
       {/* 1. DYNAMIC STORE BRANDING & OPERATIONAL HEADER */}
       <div
-        className="relative overflow-hidden rounded-2xl p-4 sm:p-5 transition duration-200 flex items-start sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 border-2 border-blue-500 dark:border-slate-800 shadow-sm"
+        className={`relative overflow-hidden transition duration-200 flex items-start sm:items-center justify-between gap-4 ${
+          isLight
+            ? 'bg-transparent border-0 shadow-none p-0'
+            : 'rounded-2xl p-4 sm:p-5 bg-slate-900 border-2 border-slate-800 shadow-sm'
+        }`}
       >
         <div className="flex items-start sm:items-center gap-3.5 min-w-0">
           <img
             src="/logo-jacs-enterprise.png"
             alt="JacS Enterprise"
-            className="w-8 h-8 object-contain drop-shadow-md"
+            className="w-8 h-8 object-contain"
           />
           <div className="flex flex-col min-w-0">
             <h1
@@ -396,7 +399,7 @@ const HomeModule: React.FC<HomeModuleProps> = ({ onLoginSuccess }) => {
             >
               JacS Enterprise
             </h1>
-            <p className="text-[9px] text-slate-500 dark:text-slate-400">Enterprise Software Solution & Technology</p>
+            <p className="text-[9px] text-slate-600 dark:text-slate-400">Enterprise Software Solution &amp; Technology</p>
           </div>
         </div>
       </div>
@@ -408,12 +411,11 @@ const HomeModule: React.FC<HomeModuleProps> = ({ onLoginSuccess }) => {
           const isSelected = activeRole.id === role.id;
           const isHovered = hoveredRoleId === role.id;
           const activeStyle = getReactiveNeonGlowStyle(role.colorHex, isSelected, isHovered, isLight);
-          const divisionInfo =
-            DIVISIONS_TRANSLATIONS[language][role.id] || {
-              name: role.title,
-              sub: role.subTitle,
-              desc: role.summary,
-            };
+          const divisionInfo = getDivisionTranslation(language, role.id, {
+            name: role.title,
+            sub: role.subTitle,
+            desc: role.summary,
+          });
 
           const isLocked = isModuleLockedForUser(role.id);
           const mod = { description: divisionInfo.sub };

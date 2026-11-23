@@ -181,3 +181,154 @@ export const COMMON_TRANSLATIONS: Record<Language, Record<string, string>> = {
     add: 'Add',
   },
 };
+
+export const APP_TRANSLATIONS: Record<Language, Record<string, string>> = {
+  id: {
+    ...COMMON_TRANSLATIONS.id,
+    nav_home: 'Beranda Utama',
+    nav_admin: 'Konsol SuperAdmin',
+    nav_executive: 'Eksekutif & Manajemen',
+    nav_finance: 'Keuangan & Akuntansi',
+    nav_purchasing: 'Pengadaan Barang (Purchasing)',
+    nav_pos: 'Kasir & Penjualan (POS)',
+    nav_warehouse: 'Gudang & Inventori',
+    nav_hr: 'SDM & Personalia (HR)',
+    nav_master_data: 'Master Data & Katalog',
+    nav_security: 'Keamanan & Audit',
+    btn_logout: 'Keluar',
+    btn_login: 'Masuk',
+    btn_ask_ai: 'Tanya AI',
+    pos_title: 'Terminal Point of Sale',
+    pos_online_cashiers: 'Kasir Online',
+    pos_open_shift: 'Buka Shift Kasir',
+    pos_close_shift: 'Tutup Shift & Rekonsiliasi',
+    division_label: 'Divisi',
+    division_locked_tooltip: 'Divisi Terkunci • Klik Keluar untuk Pindah Divisi',
+    lang_switched_id: 'Bahasa diubah ke Bahasa Indonesia (ID)',
+    lang_switched_en: 'Language switched to English (EN)',
+  },
+  en: {
+    ...COMMON_TRANSLATIONS.en,
+    nav_home: 'Home Portal',
+    nav_admin: 'SuperAdmin Console',
+    nav_executive: 'Executive & Management',
+    nav_finance: 'Finance & Accounting',
+    nav_purchasing: 'Purchasing & Procurement',
+    nav_pos: 'Point of Sale (POS)',
+    nav_warehouse: 'Warehouse & Inventory',
+    nav_hr: 'Human Resources (HR)',
+    nav_master_data: 'Master Data & Catalog',
+    nav_security: 'Security & Audit',
+    btn_logout: 'Logout',
+    btn_login: 'Sign In',
+    btn_ask_ai: 'Ask AI',
+    pos_title: 'Point of Sale Terminals',
+    pos_online_cashiers: 'Cashiers Online',
+    pos_open_shift: 'Open Cashier Shift',
+    pos_close_shift: 'Close Shift & Reconcile',
+    division_label: 'Division',
+    division_locked_tooltip: 'Division Locked • Click Logout to Switch Division',
+    lang_switched_id: 'Bahasa diubah ke Bahasa Indonesia (ID)',
+    lang_switched_en: 'Language switched to English (EN)',
+  },
+};
+
+const HUMANIZE_FALLBACK_MAP_ID: Record<string, string> = {
+  'pos.title': 'Terminal Point of Sale',
+  'executive.title': 'Eksekutif & Manajemen',
+  'finance.title': 'Keuangan & Akuntansi',
+  'purchasing.title': 'Pengadaan Barang',
+  'warehouse.title': 'Gudang & Inventori',
+  'hr.title': 'SDM & Personalia',
+  'admin.title': 'Konsol SuperAdmin',
+};
+
+/**
+ * Mengambil teks terjemahan sesuai bahasa aktif (ID / EN) dengan proteksi fallback otomatis:
+ * 1. Kamus bahasa aktif (EN / ID)
+ * 2. Fallback wajib ke kamus Bahasa Indonesia (ID) jika kunci EN belum terdaftar atau kosong
+ * 3. Normalisasi human-readable jika kunci tidak ada di kamus agar tidak pernah menampilkan kode key mentah atau string kosong
+ */
+export function getTranslatedText(
+  lang: Language | string | undefined,
+  key: string,
+  params?: Record<string, any>,
+  defaultIdFallback?: string
+): string {
+  const safeKey = String(key || '').trim();
+  if (!safeKey) return defaultIdFallback || 'Teks';
+
+  const normalizedLang: Language = String(lang || 'id').toLowerCase() === 'en' ? 'en' : 'id';
+  const normalizedUnderscoreKey = safeKey.replace(/\./g, '_');
+
+  const candidateActive =
+    APP_TRANSLATIONS[normalizedLang]?.[safeKey] ||
+    APP_TRANSLATIONS[normalizedLang]?.[normalizedUnderscoreKey] ||
+    COMMON_TRANSLATIONS[normalizedLang]?.[safeKey];
+
+  const candidateIdFallback =
+    APP_TRANSLATIONS.id?.[safeKey] ||
+    APP_TRANSLATIONS.id?.[normalizedUnderscoreKey] ||
+    COMMON_TRANSLATIONS.id?.[safeKey] ||
+    HUMANIZE_FALLBACK_MAP_ID[safeKey] ||
+    defaultIdFallback;
+
+  let resolved =
+    (typeof candidateActive === 'string' && candidateActive.trim().length > 0
+      ? candidateActive
+      : undefined) ||
+    (typeof candidateIdFallback === 'string' && candidateIdFallback.trim().length > 0
+      ? candidateIdFallback
+      : undefined);
+
+  if (!resolved) {
+    // Jika input sudah berupa kalimat biasa (mengandung spasi), gunakan langsung; jika berupa kode key mentah (pos.title / nav_pos), ubah jadi teks rapi
+    if (safeKey.includes(' ')) {
+      resolved = safeKey;
+    } else {
+      resolved = safeKey
+        .replace(/^(nav_|btn_|pos_|col_|tab_|stat_)/i, '')
+        .replace(/[._-]+/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+  }
+
+  if (params && typeof params === 'object') {
+    Object.keys(params).forEach((pKey) => {
+      resolved = (resolved as string).replace(new RegExp(`\\{${pKey}\\}`, 'g'), String(params[pKey] ?? ''));
+    });
+  }
+
+  return resolved;
+}
+
+export function getDivisionTranslation(
+  lang: Language | string | undefined,
+  divisionId: string,
+  fallback?: Partial<DivisionText>
+): DivisionText {
+  const normalizedLang: Language = String(lang || 'id').toLowerCase() === 'en' ? 'en' : 'id';
+  const activeEntry = DIVISIONS_TRANSLATIONS[normalizedLang]?.[divisionId];
+  const idFallbackEntry = DIVISIONS_TRANSLATIONS.id?.[divisionId];
+
+  return {
+    id: divisionId,
+    code: activeEntry?.code || idFallbackEntry?.code || fallback?.code || '00',
+    name:
+      (activeEntry?.name && activeEntry.name.trim()) ||
+      (idFallbackEntry?.name && idFallbackEntry.name.trim()) ||
+      fallback?.name ||
+      divisionId.toUpperCase(),
+    sub:
+      (activeEntry?.sub && activeEntry.sub.trim()) ||
+      (idFallbackEntry?.sub && idFallbackEntry.sub.trim()) ||
+      fallback?.sub ||
+      'Modul Operasional ERP',
+    desc:
+      (activeEntry?.desc && activeEntry.desc.trim()) ||
+      (idFallbackEntry?.desc && idFallbackEntry.desc.trim()) ||
+      fallback?.desc ||
+      'Modul operasional terintegrasi RetailOS ERP.',
+  };
+}
+

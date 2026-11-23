@@ -441,6 +441,9 @@ export const SuperAdminModule: React.FC = () => {
     testGasConnection,
     gasOfflineQueueCount,
     syncOfflineQueues,
+    activeCashierQuota,
+    cashierQuotaLogs,
+    updateActiveCashierQuota,
   } = useApp();
 
   const { recordAudit } = useAudit();
@@ -635,6 +638,44 @@ export const SuperAdminModule: React.FC = () => {
     'AUTO' | 'SUPERADMIN' | 'EXECUTIVE_MANAGER'
   >('AUTO');
   const [standardResetPinInput, setStandardResetPinInput] = useState<string>('1234');
+
+  // Pengaturan Kuota Loket Kasir Aktif di Legalitas Usaha (Khusus SuperAdmin + Konfirmasi PIN Master)
+  const [pendingCashierQuota, setPendingCashierQuota] = useState<number>(() => activeCashierQuota || 2);
+  const [quotaMasterPinInput, setQuotaMasterPinInput] = useState<string>('');
+  const [quotaMasterPinError, setQuotaMasterPinError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPendingCashierQuota(activeCashierQuota || 2);
+  }, [activeCashierQuota]);
+
+  const isCashierUserRow = (u?: any): boolean => {
+    if (!u) return false;
+    const roleStr = String(u.role || '').toLowerCase();
+    const divStr = String(u.division || '').toLowerCase();
+    return roleStr.includes('kasir') || roleStr.includes('cashier') || divStr.includes('kasir');
+  };
+
+  const getCashierSlotFromRow = (u?: any): number | null => {
+    if (!isCashierUserRow(u)) return null;
+    const termMatch = String(u?.assignedTerminalId || '').match(/(\d+)/);
+    if (termMatch) return parseInt(termMatch[1], 10);
+    const nameMatch = String(u?.name || '').match(/kasir\s*0?(\d+)/i);
+    if (nameMatch) return parseInt(nameMatch[1], 10);
+    if (u?.user_id === 'USR-003') return 1;
+    if (u?.user_id === 'USR-004') return 2;
+    if (u?.user_id === 'USR-006') return 3;
+    if (u?.user_id === 'USR-007') return 4;
+    return null;
+  };
+
+  const isActiveUserWithinCashierQuota = (u?: any): boolean => {
+    if (!u) return false;
+    if (!isCashierUserRow(u)) return true;
+    if (u.status === 'Inactive') return false;
+    const slotNum = getCashierSlotFromRow(u);
+    if (slotNum !== null && slotNum > (activeCashierQuota || 2)) return false;
+    return true;
+  };
 
   const isSuperAdminAccountRow = (u?: any): boolean => {
     if (!u) return false;
@@ -2749,7 +2790,7 @@ export const SuperAdminModule: React.FC = () => {
                   1,
                   Math.min(
                     10,
-                    Number(activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 1) || 1
+                    Number(activeCashierQuota ?? activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 2) || 2
                   )
                 );
                 const cleanedName = clean(profileForm.name);
@@ -3235,72 +3276,266 @@ export const SuperAdminModule: React.FC = () => {
                     3) PO belum dikonfirmasi, selisih stok, atau jurnal Finance belum diposting tidak menghambat buka/tutup shift kasir.
                   </div>
 
-                  {/* Input Jumlah Loket / PC Kasir Aktif (1 - 10 PC) */}
+                  {/* Input Jumlah Kuota Loket Kasir Aktif (Khusus SuperAdmin + Konfirmasi PIN Master) */}
                   {(() => {
                     const currentStationCount = Math.max(
                       1,
                       Math.min(
                         10,
-                        Number(activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 1) || 1
+                        Number(activeCashierQuota ?? activeDomainConfig.activeStationCount ?? profileForm.posUnitCount ?? 2) || 2
                       )
                     );
+                    const isExecReadOnly = activeCredentialAuthorityMode === 'EXECUTIVE_MANAGER';
+                    const previewStationCount = isExecReadOnly ? currentStationCount : pendingCashierQuota;
                     const generatedStations = generatePosStations(
-                      currentStationCount,
+                      previewStationCount,
                       activeDomainConfig.activePosTypes,
                       activeDomainConfig.primaryBusinessModel
                     );
+
+                    const handleConfirmAndSaveCashierQuota = () => {
+                      if (isExecReadOnly) {
+                        showToast(
+                          'Penambahan loket kasir & aktivasi sinkronisasi hanya diproses oleh SuperAdmin - Jacs Enterprise',
+                          'warning'
+                        );
+                        return;
+                      }
+                      const trimmedPin = quotaMasterPinInput.trim();
+                      if (!trimmedPin) {
+                        setQuotaMasterPinError('Masukkan PIN Master SuperAdmin untuk mengonfirmasi perubahan kuota kasir!');
+                        showToast('Konfirmasi PIN Master SuperAdmin wajib diisi!', 'warning');
+                        return;
+                      }
+                      if (!verifyOwnerCloudPinInput(trimmedPin)) {
+                        setQuotaMasterPinError('PIN Master SuperAdmin tidak cocok! Perubahan kuota loket kasir ditolak.');
+                        showToast('PIN Master SuperAdmin salah!', 'error');
+                        return;
+                      }
+                      setQuotaMasterPinError(null);
+                      const clampedQuota = Math.max(1, Math.min(10, Number(pendingCashierQuota) || 2));
+                      handleChangeStationCount(clampedQuota);
+                      updateActiveCashierQuota(clampedQuota, 'SuperAdmin - Jacs Enterprise');
+                      setQuotaMasterPinInput('');
+                    };
+
                     return (
-                      <div className={`pt-3 border-t space-y-3 ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div>
-                            <label className={`block font-semibold text-xs ${isLight ? 'text-slate-800' : 'text-gray-200'}`}>
-                              Jumlah Loket / PC Kasir Aktif (1–10 PC): <span className="text-rose-400">*</span>
-                            </label>
-                            <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
-                              Otomatis menghasilkan daftar terminal POS-01 s/d POS-{String(currentStationCount).padStart(2, '0')} sesuai Tipe POS yang dicentang.
+                      <div className={`pt-3 border-t space-y-3.5 ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <label className={`block font-semibold text-xs ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                Jumlah Kuota Loket Kasir Aktif (Standar Default: 2 Kasir): <span className="text-rose-400">*</span>
+                              </label>
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase border ${
+                                  !isExecReadOnly
+                                    ? isLight
+                                      ? 'bg-rose-50 text-rose-700 border-rose-400'
+                                      : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                                    : isLight
+                                    ? 'bg-amber-50 text-amber-700 border-amber-400'
+                                    : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                                }`}
+                              >
+                                <ShieldCheck className="w-3 h-3" />
+                                {!isExecReadOnly
+                                  ? 'MODE OTORITAS: SUPERADMIN'
+                                  : 'MODE OTORITAS: EXECUTIVE MANAGER (READ-ONLY)'}
+                              </span>
+                            </div>
+                            <p className={`text-[11px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                              Kuota Aktif Saat Ini: <strong className="font-mono text-cyan-400">{currentStationCount} Loket</strong> (
+                              <span className="font-mono">
+                                Kasir 01 s/d Kasir {String(currentStationCount).padStart(2, '0')}
+                              </span>
+                              ) — Selaras dengan indikator header <span className="font-mono font-semibold">[0 / {currentStationCount} Kasir Online]</span>.
                             </p>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <input
-                              type="number"
-                              min={1}
-                              max={10}
-                              value={currentStationCount}
-                              onChange={(e) => handleChangeStationCount(parseInt(e.target.value, 10) || 1)}
-                              className={`w-16 px-2.5 py-1.5 rounded-lg border text-center font-mono font-bold text-xs outline-none ${
-                                isLight
-                                  ? 'bg-white border-cyan-500 text-slate-900'
-                                  : 'bg-[#161b22] border-cyan-500/60 text-cyan-300'
+
+                          {/* Tombol Simulasi Mode Otoritas untuk Verifikasi Read-Only Executive vs SuperAdmin */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setCredentialAuthorityOverride('SUPERADMIN')}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer transition ${
+                                !isExecReadOnly
+                                  ? 'bg-rose-600 text-white border-rose-500'
+                                  : isLight
+                                  ? 'bg-slate-100 text-slate-600 border-slate-300'
+                                  : 'bg-[#161b22] text-slate-400 border-gray-700'
                               }`}
-                            />
-                            <span className={`text-xs font-mono font-semibold ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
-                              PC Loket
-                            </span>
+                            >
+                              Otoritas SuperAdmin
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCredentialAuthorityOverride('EXECUTIVE_MANAGER')}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-pointer transition ${
+                                isExecReadOnly
+                                  ? 'bg-amber-600 text-white border-amber-500'
+                                  : isLight
+                                  ? 'bg-slate-100 text-slate-600 border-slate-300'
+                                  : 'bg-[#161b22] text-slate-400 border-gray-700'
+                              }`}
+                            >
+                              Otoritas Executive Manager
+                            </button>
                           </div>
                         </div>
 
-                        {/* Quick Pills 1..10 PC */}
-                        <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
-                          {Array.from({ length: 10 }, (_, idx) => idx + 1).map((num) => {
-                            const active = currentStationCount === num;
-                            return (
-                              <button
-                                key={`station-qty-${num}`}
-                                type="button"
-                                onClick={() => handleChangeStationCount(num)}
-                                className={`py-1.5 rounded-lg border font-mono text-[11px] font-bold transition cursor-pointer ${
-                                  active
-                                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
-                                    : isLight
-                                    ? 'bg-white border-slate-300 text-slate-700 hover:border-cyan-400'
-                                    : 'bg-[#161b22] border-gray-700 text-gray-300 hover:border-cyan-500/45'
-                                }`}
-                              >
-                                {num}
-                              </button>
-                            );
-                          })}
-                        </div>
+                        {isExecReadOnly ? (
+                          <div
+                            className={`p-3.5 rounded-xl border flex items-start gap-3 ${
+                              isLight
+                                ? 'bg-amber-50 border-amber-400 text-amber-950'
+                                : 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                            }`}
+                          >
+                            <Lock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                            <div className="space-y-1 text-xs">
+                              <div className="font-bold">
+                                Form Kuota Kasir Terkunci (Read-Only untuk Executive Manager)
+                              </div>
+                              <p className="text-[11px] leading-relaxed font-medium">
+                                Penambahan loket kasir &amp; aktivasi sinkronisasi hanya diproses oleh SuperAdmin - Jacs Enterprise
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className={`p-3.5 rounded-xl border space-y-3 ${
+                              isLight
+                                ? 'bg-white border-cyan-400/70'
+                                : 'bg-[#161b22] border-cyan-500/35'
+                            }`}
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div>
+                                <div className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                  Pilih Jumlah Kuota Loket Kasir Aktif (1–10 Loket):
+                                </div>
+                                <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                                  Saat kuota diubah (misal ke 3), sistem otomatis membentuk PIN <span className="font-mono">Kasir 01..Kasir 0N</span> di Manajemen Kredensial dan mencatat log pembaruan kuota sinkronisasi.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  disabled={isExecReadOnly}
+                                  value={pendingCashierQuota}
+                                  onChange={(e) =>
+                                    setPendingCashierQuota(
+                                      Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 2))
+                                    )
+                                  }
+                                  className={`w-16 px-2.5 py-1.5 rounded-lg border text-center font-mono font-bold text-xs outline-none ${
+                                    isLight
+                                      ? 'bg-white border-cyan-500 text-slate-900'
+                                      : 'bg-[#0d1117] border-cyan-500/60 text-cyan-300'
+                                  }`}
+                                />
+                                <span className={`text-xs font-mono font-semibold ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                                  Loket Kasir
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Quick Pills 1..10 Loket */}
+                            <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
+                              {Array.from({ length: 10 }, (_, idx) => idx + 1).map((num) => {
+                                const active = pendingCashierQuota === num;
+                                return (
+                                  <button
+                                    key={`station-qty-${num}`}
+                                    type="button"
+                                    disabled={isExecReadOnly}
+                                    onClick={() => setPendingCashierQuota(num)}
+                                    className={`py-1.5 rounded-lg border font-mono text-[11px] font-bold transition cursor-pointer ${
+                                      active
+                                        ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.3)]'
+                                        : isLight
+                                        ? 'bg-white border-slate-300 text-slate-700 hover:border-cyan-400'
+                                        : 'bg-[#0d1117] border-gray-700 text-gray-300 hover:border-cyan-500/45'
+                                    }`}
+                                  >
+                                    {num}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Konfirmasi PIN Master SuperAdmin untuk Simpan Kuota Kasir */}
+                            <div className={`pt-2.5 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                              isLight ? 'border-slate-200' : 'border-gray-800'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                <KeyRound className="w-4 h-4 text-rose-400 shrink-0" />
+                                <span className={`text-[11px] font-medium ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                                  Konfirmasi PIN Master SuperAdmin untuk Aktivasi Kuota:
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                  type="password"
+                                  maxLength={12}
+                                  value={quotaMasterPinInput}
+                                  onChange={(e) => {
+                                    setQuotaMasterPinInput(e.target.value);
+                                    if (quotaMasterPinError) setQuotaMasterPinError(null);
+                                  }}
+                                  placeholder="PIN Master SuperAdmin..."
+                                  className={`w-44 px-3 py-1.5 rounded-lg border font-mono text-xs outline-none ${
+                                    isLight
+                                      ? 'bg-slate-50 border-rose-400 text-slate-900'
+                                      : 'bg-[#0d1117] border-rose-500/50 text-rose-200'
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleConfirmAndSaveCashierQuota}
+                                  className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-semibold text-xs cursor-pointer transition flex items-center gap-1.5 shadow-sm"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                  <span>Simpan &amp; Aktifkan Kuota ({pendingCashierQuota} Kasir)</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {quotaMasterPinError && (
+                              <div className="text-[11px] font-mono text-rose-400">
+                                ⚠ {quotaMasterPinError}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Log Pembaruan Kuota & Sinkronisasi Kasir */}
+                        {cashierQuotaLogs && cashierQuotaLogs.length > 0 && (
+                          <div
+                            className={`p-3 rounded-xl border space-y-1.5 ${
+                              isLight
+                                ? 'bg-slate-50 border-slate-200 text-slate-800'
+                                : 'bg-[#161b22] border-gray-800 text-slate-200'
+                            }`}
+                          >
+                            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400">
+                              Log Pembaruan Kuota Loket &amp; Sinkronisasi Kredensial ({cashierQuotaLogs.length})
+                            </div>
+                            <div className="space-y-1 max-h-28 overflow-y-auto text-[11px] font-mono">
+                              {cashierQuotaLogs.slice(0, 5).map((log) => (
+                                <div key={log.id} className="flex flex-wrap items-center justify-between gap-2 py-0.5 border-b border-gray-800/40 last:border-b-0">
+                                  <span>
+                                    [{new Date(log.timestamp).toLocaleTimeString('id-ID')}] <strong>{log.previousQuota} → {log.newQuota} Kasir</strong> — {log.details}
+                                  </span>
+                                  <span className="text-[10px] text-emerald-400 shrink-0">{log.approvedBy}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Preview Daftar Terminal Loket POS-01 .. POS-N */}
                         <div className="space-y-2">
@@ -5165,6 +5400,41 @@ export const SuperAdminModule: React.FC = () => {
               )}
             </div>
 
+            {/* Ringkasan Kuota Loket Kasir Aktif di Manajemen Kredensial */}
+            <div
+              className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                isLight
+                  ? 'bg-cyan-50/60 border-cyan-300 text-slate-800'
+                  : 'bg-[#0d1117] border-cyan-500/30 text-slate-200'
+              }`}
+            >
+              <div className="space-y-0.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span>
+                    Kuota Loket Kasir Aktif: {activeCashierQuota} Loket (Kasir 01 s/d Kasir {String(activeCashierQuota).padStart(2, '0')})
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    Selaras [0 / {activeCashierQuota} Kasir Online]
+                  </span>
+                </div>
+                <p className={`text-[11px] ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                  {activeCredentialAuthorityMode === 'SUPERADMIN'
+                    ? 'Slot kasir di luar kuota aktif diarsipkan otomatis. Untuk menambah/mengurangi jumlah slot kasir aktif, gunakan pengaturan Kuota Loket Kasir di tab Legalitas Usaha.'
+                    : 'Penambahan loket kasir & aktivasi sinkronisasi hanya diproses oleh SuperAdmin - Jacs Enterprise (Executive Manager hanya dapat mengubah PIN kasir dalam kuota aktif).'}
+                </p>
+              </div>
+
+              {activeCredentialAuthorityMode === 'SUPERADMIN' && (
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('legality')}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer transition shrink-0"
+                >
+                  Atur Kuota Kasir di Legalitas Usaha
+                </button>
+              )}
+            </div>
+
             <div className={`overflow-x-auto rounded-xl border ${isLight ? 'border-cyan-500/45' : 'border-gray-800'}`}>
               <table className="w-full text-left text-xs">
                 <thead className={`text-[10px] font-mono font-medium uppercase tracking-wider ${isLight ? 'bg-slate-100 text-slate-600' : 'bg-[#0d1117] text-gray-400'}`}>
@@ -5177,7 +5447,7 @@ export const SuperAdminModule: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className={`divide-y font-normal ${isLight ? 'divide-slate-200 bg-white' : 'divide-gray-800'}`}>
-                  {users.map((u) => {
+                  {users.filter((u) => isActiveUserWithinCashierQuota(u)).map((u) => {
                     const isSuperRow = isSuperAdminAccountRow(u);
                     const isExecRow = isExecutiveManagerAccountRow(u);
                     const isRowLockedForCurrentMode =

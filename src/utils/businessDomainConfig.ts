@@ -804,6 +804,23 @@ export const resolveBusinessModelId = (modelOrCategory?: string | null): Busines
   return 'MINIMARKET';
 };
 
+export const ACTIVE_CASHIER_QUOTA_STORAGE_KEY = 'jacs_active_cashier_quota_v1';
+
+export const getStoredActiveCashierQuota = (): number => {
+  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(ACTIVE_CASHIER_QUOTA_STORAGE_KEY);
+      if (raw) {
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 10) {
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return 2;
+};
+
 export const createBusinessDomainConfig = (
   modelOrCategory?: BusinessModelId | string,
   overrides?: {
@@ -817,13 +834,15 @@ export const createBusinessDomainConfig = (
 ): BusinessDomainConfig => {
   const modelId = resolveBusinessModelId(modelOrCategory);
   const def = getBusinessModelDefinition(modelId);
+
   const resolvedPosTypes =
     overrides?.activePosTypes && overrides.activePosTypes.length > 0
       ? Array.from(new Set(overrides.activePosTypes))
       : [def.defaultPosType];
+  const storedQuota = getStoredActiveCashierQuota();
   const resolvedStationCount = Math.max(
     1,
-    Math.min(10, Number(overrides?.activeStationCount ?? def.recommendedPosUnitCount ?? 1) || 1)
+    Math.min(10, Number(overrides?.activeStationCount ?? storedQuota ?? 2) || 2)
   );
 
   return {
@@ -851,6 +870,11 @@ export const getEffectiveBusinessDomainConfig = (
   }
 
   const resolvedTopology: OperationalTopologyMode = 'NON_BLOCKING_ERP';
+  const storedQuota = getStoredActiveCashierQuota();
+  const hasExplicitSuperAdminQuota =
+    typeof window !== 'undefined' &&
+    typeof localStorage !== 'undefined' &&
+    Boolean(localStorage.getItem(ACTIVE_CASHIER_QUOTA_STORAGE_KEY));
 
   if (profile.domainConfig?.primaryBusinessModel) {
     const resolvedModelId = resolveBusinessModelId(profile.domainConfig.primaryBusinessModel);
@@ -867,12 +891,16 @@ export const getEffectiveBusinessDomainConfig = (
         : [def.defaultPosType];
 
     const rawSub = (profile.domainConfig.subFeatures || {}) as Partial<BusinessDomainSubFeatures>;
-    const rawStationCount =
+    const rawCandidateCount =
       profile.domainConfig.activeStationCount ??
       profile.posUnitCount ??
-      def.recommendedPosUnitCount ??
-      1;
-    const activeStationCount = Math.max(1, Math.min(10, Number(rawStationCount) || 1));
+      2;
+    const rawStationCount = hasExplicitSuperAdminQuota
+      ? storedQuota
+      : Number(rawCandidateCount) === 10
+      ? 2
+      : rawCandidateCount || 2;
+    const activeStationCount = Math.max(1, Math.min(10, Number(rawStationCount) || 2));
 
     return {
       primaryBusinessModel: def.id,
@@ -898,7 +926,7 @@ export const getEffectiveBusinessDomainConfig = (
 
   return createBusinessDomainConfig(profile.businessType || profile.category, {
     operationalTopology: resolvedTopology,
-    activeStationCount: profile.cashiers ?? profile.posUnitCount,
+    activeStationCount: hasExplicitSuperAdminQuota ? storedQuota : 2,
   });
 };
 
@@ -917,7 +945,7 @@ export const normalizeBusinessProfileDomain = <T extends BusinessEntityProfile>(
   const def = getBusinessModelDefinition(domainConfig.primaryBusinessModel);
   const canonicalSector = resolveCanonicalSector(domainConfig);
   const effectiveName = profile.name || profile.businessName || 'JacS Enterprise';
-  const effectiveStations = domainConfig.activeStationCount ?? profile.cashiers ?? profile.posUnitCount ?? 1;
+  const effectiveStations = domainConfig.activeStationCount ?? 2;
   return {
     ...profile,
     name: effectiveName,

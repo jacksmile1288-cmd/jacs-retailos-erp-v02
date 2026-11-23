@@ -9,20 +9,26 @@ export interface JacSLogoProps {
   imgOnly?: boolean;
 }
 
-export const JacSLogo: React.FC<JacSLogoProps> = ({ imgOnly, className }) => {
+export const JacSLogo: React.FC<JacSLogoProps> = ({ imgOnly, className, isLight }) => {
   const [imgError, setImgError] = React.useState(false);
 
   const imageElement = (
-    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden bg-[#0d1117]/80 border border-[#30363d]/60 p-1 shadow-md ${className || ''}`}>
+    <div
+      className={`w-10 h-10 flex items-center justify-center shrink-0 overflow-hidden ${
+        isLight
+          ? 'bg-transparent border-0 shadow-none p-0 rounded-none'
+          : 'rounded-xl bg-transparent dark:bg-[#0d1117]/80 border-0 dark:border dark:border-[#30363d]/60 p-0 dark:p-1 shadow-none dark:shadow-md'
+      } ${className || ''}`}
+    >
       {!imgError ? (
         <img
           src="/logo-jacs-enterprise.png"
           alt="JacS Enterprise Logo"
-          className="w-full h-full object-contain drop-shadow-[0_0_8px_rgba(0,82,255,0.4)]"
+          className="w-full h-full object-contain"
           onError={() => setImgError(true)}
         />
       ) : (
-        <div className="w-full h-full rounded-lg bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center text-white font-black text-lg select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]">
+        <div className="w-full h-full rounded-lg bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center text-white font-black text-lg select-none">
           J
         </div>
       )}

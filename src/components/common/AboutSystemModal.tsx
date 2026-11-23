@@ -85,18 +85,20 @@ export const AboutSystemModal: React.FC<AboutSystemModalProps> = ({
           <div className="flex items-center gap-4">
             {/* 3D High-Res Brand Logo */}
             <div className="relative group shrink-0">
-              <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-600 via-cyan-500 to-indigo-600 rounded-2xl blur-md opacity-50 group-hover:opacity-80 transition duration-300" />
+              {!isLight && (
+                <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-600 via-cyan-500 to-indigo-600 rounded-2xl blur-md opacity-50 group-hover:opacity-80 transition duration-300" />
+              )}
               <div
-                className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center p-2 border shadow-lg ${
+                className={`relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center ${
                   isLight
-                    ? 'bg-white border-slate-200 shadow-slate-200'
-                    : 'bg-[#0d1117] border-cyan-500/40 shadow-[0_0_20px_rgba(0,82,255,0.3)]'
+                    ? 'bg-transparent border-0 shadow-none p-0 rounded-none'
+                    : 'rounded-2xl p-2 border bg-[#0d1117] border-cyan-500/40 shadow-[0_0_20px_rgba(0,82,255,0.3)]'
                 }`}
               >
                 <img
                   src="/logo-jacs-enterprise.png"
                   alt="JacS Enterprise Logo"
-                  className="w-full h-full object-contain aspect-square select-none drop-shadow-[0_2px_8px_rgba(0,82,255,0.5)]"
+                  className="w-full h-full object-contain aspect-square select-none"
                   onError={(e) => {
                     const target = e.currentTarget;
                     if (!target.src.endsWith('logo-jacs-enterprise.png')) {

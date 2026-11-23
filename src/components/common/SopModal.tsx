@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useApp } from '../../context/AppContext';
 import { getReactiveNeonGlowStyle } from '../../utils/neonGlow';
-import { DIVISIONS_TRANSLATIONS } from '../../utils/translations';
+import { getDivisionTranslation } from '../../utils/translations';
 import {
   BookOpen,
   X,
@@ -234,8 +234,9 @@ export const SopModal: React.FC<SopModalProps> = ({ isOpen, onClose }) => {
   const isLight = theme === 'light';
   const isEn = language === 'en';
   const selectedDivision = SOP_DATA.find((d) => d.id === selectedDivisionId) || SOP_DATA[0];
-  const selectedDivisionName =
-    DIVISIONS_TRANSLATIONS[language][selectedDivision.id]?.name || selectedDivision.name;
+  const selectedDivisionName = getDivisionTranslation(language, selectedDivision.id, {
+    name: selectedDivision.name,
+  }).name;
 
   const filteredSopList = selectedDivision.sopList.filter((item) => {
     if (!searchQuery.trim()) return true;
@@ -343,8 +344,9 @@ export const SopModal: React.FC<SopModalProps> = ({ isOpen, onClose }) => {
               const Icon = division.icon;
               const isSelected = selectedDivisionId === division.id;
               const isHovered = hoveredDivisionId === division.id;
-              const divName =
-                DIVISIONS_TRANSLATIONS[language][division.id]?.name || division.name;
+              const divName = getDivisionTranslation(language, division.id, {
+                name: division.name,
+              }).name;
               const reactiveStyle = getReactiveNeonGlowStyle(
                 division.color,
                 isSelected,

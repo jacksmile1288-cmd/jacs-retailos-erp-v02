@@ -171,7 +171,7 @@ export const INITIAL_USERS: User[] = [
   {
     user_id: 'USR-003',
     id: 'USR-003',
-    name: 'Andi Pratama',
+    name: 'Andi Pratama (Kasir 01)',
     email: 'andi.pos01@jacs-erp.com',
     division: 'POS & Kasir',
     role: 'Kasir',
@@ -185,7 +185,7 @@ export const INITIAL_USERS: User[] = [
   {
     user_id: 'USR-004',
     id: 'USR-004',
-    name: 'Maya Indah',
+    name: 'Maya Indah (Kasir 02)',
     email: 'maya.pos02@jacs-erp.com',
     division: 'POS & Kasir',
     role: 'Kasir',
@@ -195,29 +195,29 @@ export const INITIAL_USERS: User[] = [
     avatar: null,
     avatarUrl: null,
   },
-  // Kasir 03: Rian Hidayat (PIN: 1103, Terminal T-03)
+  // Kasir 03: Rian Hidayat (PIN: 1103, Terminal T-03) — Diarsipkan secara default (Kuota Awal: 2 Kasir)
   {
     user_id: 'USR-006',
     id: 'USR-006',
-    name: 'Rian Hidayat',
+    name: 'Rian Hidayat (Kasir 03)',
     email: 'rian.pos03@jacs-erp.com',
     division: 'POS & Kasir',
     role: 'Kasir',
-    status: 'Active',
+    status: 'Inactive',
     pin: '1103',
     assignedTerminalId: 'T-03',
     avatar: null,
     avatarUrl: null,
   },
-  // Kasir 04: Siti Aminah (PIN: 1104, Terminal T-04)
+  // Kasir 04: Siti Aminah (PIN: 1104, Terminal T-04) — Diarsipkan secara default (Kuota Awal: 2 Kasir)
   {
     user_id: 'USR-007',
     id: 'USR-007',
-    name: 'Siti Aminah',
+    name: 'Siti Aminah (Kasir 04)',
     email: 'siti.pos04@jacs-erp.com',
     division: 'POS & Kasir',
     role: 'Kasir',
-    status: 'Active',
+    status: 'Inactive',
     pin: '1104',
     assignedTerminalId: 'T-04',
     avatar: null,
@@ -1622,9 +1622,10 @@ export const DEFAULT_BUSINESS_PROFILE: import('../types').BusinessEntityProfile 
   isConfigured: true,
   domainConfig: createBusinessDomainConfig('MINIMARKET', {
     isHybridMultiUnit: false,
+    activeStationCount: 2,
   }),
-  posUnitCount: 10,
+  posUnitCount: 2,
   cashierArchitecture: 'CENTRALIZED_FRONTEND',
-  terminalConfigs: generateTerminalConfigs(10, 'CENTRALIZED_FRONTEND', 'Minimarket'),
+  terminalConfigs: generateTerminalConfigs(2, 'CENTRALIZED_FRONTEND', 'Minimarket'),
 };
 
