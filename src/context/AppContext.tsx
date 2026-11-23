@@ -9203,20 +9203,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [developerPassword, users, currentUser]
   );
+  const isSuperAdminAccount = useCallback((u?: Partial<User> | null): boolean => {
+    if (!u) return false;
+    const roleStr = String(u.role || '').toUpperCase();
+    const divStr = String(u.division || '').toUpperCase();
+    const idStr = String(u.user_id || u.id || '').toUpperCase();
+    return (
+      roleStr.includes('SUPER') ||
+      divStr.includes('SUPER') ||
+      idStr === 'USR-001' ||
+      idStr === 'USR-SUPERADMIN'
+    );
+  }, []);
+
   const updateUserPin = useCallback(
     (userId: string, newPin: string) => {
-      setUsers((prev) => prev.map((u) => (u.user_id === userId || u.id === userId ? { ...u, pin: newPin } : u)));
-      if (currentUser && (currentUser.user_id === userId || currentUser.id === userId)) {
-        setCurrentUser((prev) => (prev ? { ...prev, pin: newPin } : null));
+      const target = users.find((u) => u.user_id === userId || u.id === userId);
+      if (target && isSuperAdminAccount(target)) {
+        showToast(
+          'TERKUNCI PERMANEN (MASTER SUPERADMIN): PIN pemulihan utama SuperAdmin bersifat permanen dan tidak dapat diubah.',
+          'warning'
+        );
+        return;
       }
+      const cleanedPin = String(newPin || '').trim();
+      if (!cleanedPin) return;
+      setUsers((prev) =>
+        prev.map((u) => {
+          if (u.user_id === userId || u.id === userId) {
+            if (isSuperAdminAccount(u)) return u;
+            return { ...u, pin: cleanedPin };
+          }
+          return u;
+        })
+      );
+      if (currentUser && (currentUser.user_id === userId || currentUser.id === userId) && !isSuperAdminAccount(currentUser)) {
+        setCurrentUser((prev) => (prev ? { ...prev, pin: cleanedPin } : null));
+      }
+      addAuditLog(
+        'OPERATIONAL_USER_PIN_UPDATED',
+        `PIN/Sandi operasional untuk akun ${target?.name || userId} (${target?.role || 'Staf'}) berhasil diperbarui.`,
+        'SECURITY'
+      );
     },
-    [currentUser]
+    [users, currentUser, isSuperAdminAccount, showToast, addAuditLog]
   );
-  const resetAllUserPinsToDefault = useCallback((defaultPin: string = '1234') => {
-    setUsers((prev) => prev.map((u) => ({ ...u, pin: defaultPin })));
-    showToast(`Seluruh PIN pengguna direset ke ${defaultPin}`, 'info');
-  }, [showToast]);
-  const updateDeveloperPassword = useCallback((newPwd: string) => setDeveloperPassword(newPwd), []);
+
+  const resetAllUserPinsToDefault = useCallback(
+    (defaultPin: string = '1234') => {
+      const cleanedDefault = String(defaultPin || '1234').trim() || '1234';
+      setUsers((prev) =>
+        prev.map((u) => (isSuperAdminAccount(u) ? u : { ...u, pin: cleanedDefault }))
+      );
+      if (currentUser && !isSuperAdminAccount(currentUser)) {
+        setCurrentUser((prev) => (prev ? { ...prev, pin: cleanedDefault } : null));
+      }
+      hashSha256(cleanedDefault)
+        .then((defaultHash) => {
+          const nowIso = new Date().toISOString();
+          const updatedBy = currentUser?.name || 'Super Admin';
+          const operationalDivisions = ['executive', 'finance', 'purchasing', 'pos', 'warehouse', 'hr'];
+          setDivisionPinHashes((prev) => {
+            const next = { ...prev };
+            operationalDivisions.forEach((divId) => {
+              next[divId] = {
+                hash: defaultHash,
+                updatedAt: nowIso,
+                updatedBy,
+              };
+            });
+            try {
+              localStorage.setItem(DIVISION_PIN_HASHES_KEY, JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+        })
+        .catch(() => {});
+      addAuditLog(
+        'OPERATIONAL_PINS_TOTAL_RESET',
+        `Reset Total Semua Sandi Operasional ke standar (${cleanedDefault}) dijalankan. PIN Master SuperAdmin tetap TERKUNCI PERMANEN.`,
+        'SECURITY'
+      );
+      showToast(
+        `Reset Total Sandi Operasional berhasil: Seluruh akun operasional direset ke ${cleanedDefault} (PIN SuperAdmin tetap TERKUNCI PERMANEN).`,
+        'info'
+      );
+    },
+    [isSuperAdminAccount, currentUser, addAuditLog, showToast]
+  );
+
+  const updateDeveloperPassword = useCallback(
+    (_newPwd: string) => {
+      showToast(
+        'TERKUNCI PERMANEN (MASTER SUPERADMIN): Sandi & PIN Master Developer/SuperAdmin dikunci permanen sebagai kunci pemulihan utama sistem.',
+        'warning'
+      );
+    },
+    [showToast]
+  );
 
   const verifyDivisionPin = useCallback(
     async (divisionId: string, pin: string): Promise<boolean> => {

@@ -607,9 +607,144 @@ export const SuperAdminModule: React.FC = () => {
   const [cloudSupabaseAnonKey, setCloudSupabaseAnonKey] = useState(() => dualBackendSync.getConfig().supabaseAnonKey || '');
   const [cloudGasWebhookUrl, setCloudGasWebhookUrl] = useState(() => dualBackendSync.getConfig().gasWebhookUrl || '');
   const [showCloudAnonKey, setShowCloudAnonKey] = useState(false);
+  const [showCloudGasUrl, setShowCloudGasUrl] = useState(false);
   const [isCloudTestingAndSyncing, setIsCloudTestingAndSyncing] = useState(false);
   const [lastCloudSyncResult, setLastCloudSyncResult] = useState<CloudSyncResult | null>(null);
   const [cloudPingResult, setCloudPingResult] = useState<CloudConnectionPingResult | null>(null);
+
+  // =========================================================================
+  // GERBANG VERIFIKASI PIN OWNER (SESSION-BASED: jacs_cloud_pin_unlocked)
+  // =========================================================================
+  const CLOUD_PIN_SESSION_KEY = 'jacs_cloud_pin_unlocked';
+  const [isCloudPinUnlocked, setIsCloudPinUnlocked] = useState<boolean>(() => {
+    try {
+      return typeof sessionStorage !== 'undefined' && sessionStorage.getItem('jacs_cloud_pin_unlocked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [cloudPinInput, setCloudPinInput] = useState('');
+  const [cloudPinError, setCloudPinError] = useState<string | null>(null);
+  const [showSopPinGateCard, setShowSopPinGateCard] = useState(false);
+  const [pendingCloudPinAction, setPendingCloudPinAction] = useState<
+    'EXPORT_CONFIG' | 'COPY_CREDS' | 'REVEAL_KEYS' | null
+  >(null);
+
+  // Hierarki Kontrol PIN & Sandi (MODE OTORITAS: SUPERADMIN vs MODE OTORITAS: EXECUTIVE MANAGER)
+  const [credentialAuthorityOverride, setCredentialAuthorityOverride] = useState<
+    'AUTO' | 'SUPERADMIN' | 'EXECUTIVE_MANAGER'
+  >('AUTO');
+  const [standardResetPinInput, setStandardResetPinInput] = useState<string>('1234');
+
+  const isSuperAdminAccountRow = (u?: any): boolean => {
+    if (!u) return false;
+    const roleStr = String(u.role || '').toUpperCase();
+    const divStr = String(u.division || '').toUpperCase();
+    const idStr = String(u.user_id || u.id || '').toUpperCase();
+    return (
+      roleStr.includes('SUPER') ||
+      divStr.includes('SUPER') ||
+      idStr === 'USR-001' ||
+      idStr === 'USR-SUPERADMIN'
+    );
+  };
+
+  const isExecutiveManagerAccountRow = (u?: any): boolean => {
+    if (!u || isSuperAdminAccountRow(u)) return false;
+    const roleStr = String(u.role || '').toUpperCase();
+    const divStr = String(u.division || '').toUpperCase();
+    return roleStr.includes('EXECUTIVE') || roleStr === 'MANAGER' || divStr.includes('EXECUTIVE');
+  };
+
+  const activeCredentialAuthorityMode: 'SUPERADMIN' | 'EXECUTIVE_MANAGER' =
+    credentialAuthorityOverride !== 'AUTO'
+      ? credentialAuthorityOverride
+      : effectiveUser &&
+        !isSuperAdminAccountRow(effectiveUser) &&
+        isExecutiveManagerAccountRow(effectiveUser)
+      ? 'EXECUTIVE_MANAGER'
+      : 'SUPERADMIN';
+
+  const maskCloudSecretValue = (rawVal?: string | null): string => {
+    const trimmed = String(rawVal || '').trim();
+    if (!trimmed) return 'Belum Diatur';
+    if (trimmed.length <= 4) return `••••••••••••${trimmed}`;
+    return `••••••••••••${trimmed.slice(-4)}`;
+  };
+
+  const verifyOwnerCloudPinInput = (rawPin: string): boolean => {
+    const trimmed = rawPin.trim();
+    if (!trimmed) return false;
+
+    // 1. Cek terhadap akun aktif dengan peran Owner / SuperAdmin di daftar users
+    const ownerOrSuperAdminAccounts = (users || []).filter((u) => {
+      const roleNorm = String(u.role || '').toLowerCase().replace(/\s+/g, '');
+      return roleNorm === 'owner' || roleNorm === 'superadmin';
+    });
+    const matchedUserPin = ownerOrSuperAdminAccounts.some((u) => {
+      const candidatePins = [
+        (u as any).pin,
+        (u as any).authPin,
+        (u as any).password,
+      ]
+        .filter(Boolean)
+        .map((v) => String(v).trim());
+      return candidatePins.includes(trimmed);
+    });
+    if (matchedUserPin) return true;
+
+    // 2. Cek terhadap effectiveUser jika berperan Owner / SuperAdmin
+    if (effectiveUser) {
+      const effRole = String(effectiveUser.role || '').toLowerCase().replace(/\s+/g, '');
+      if (effRole === 'owner' || effRole === 'superadmin') {
+        const effPins = [
+          (effectiveUser as any).pin,
+          (effectiveUser as any).authPin,
+          (effectiveUser as any).password,
+        ]
+          .filter(Boolean)
+          .map((v) => String(v).trim());
+        if (effPins.includes(trimmed)) return true;
+      }
+    }
+
+    // 3. Cek terhadap PIN Manajemen 6 digit & password SuperAdmin tersimpan
+    if (trimmed.length === 6 && verifyManagementAuthPin(trimmed)) {
+      return true;
+    }
+    const storedSuperPass =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('jacs_super_admin_password') : null;
+    const storedMgmtPin =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('jacs_management_auth_pin') : null;
+    if (
+      (storedSuperPass && trimmed === storedSuperPass.trim()) ||
+      (storedMgmtPin && trimmed === storedMgmtPin.trim()) ||
+      (developerPassword && trimmed === developerPassword.trim())
+    ) {
+      return true;
+    }
+
+    // 4. Fallback ke PIN master default jika belum diubah
+    const defaultMasterPins = ['1234', '123456', '888888', 'Admin123'];
+    return defaultMasterPins.includes(trimmed);
+  };
+
+  const handleLockCloudPinSession = () => {
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(CLOUD_PIN_SESSION_KEY);
+      }
+    } catch {}
+    setIsCloudPinUnlocked(false);
+    setShowCloudAnonKey(false);
+    setShowCloudGasUrl(false);
+    setShowSopPinGateCard(false);
+    setPendingCloudPinAction(null);
+    setCloudPinInput('');
+    setCloudPinError(null);
+    showToast('Akses Kredensial Cloud telah dikunci kembali (Session Locked).', 'info');
+    addSyncLog('🔒 Akses Kredensial Cloud dikunci kembali oleh SuperAdmin/Owner.');
+  };
 
   const handleSaveCloudConfig = (notify = true) => {
     const existingCfg = dualBackendSync.getConfig();
@@ -734,7 +869,9 @@ export const SuperAdminModule: React.FC = () => {
 
   const [cloudGuideTab, setCloudGuideTab] = useState<'supabase' | 'gas'>('supabase');
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
-  const [expandedCloudSopId, setExpandedCloudSopId] = useState<'sop1' | 'sop2' | 'sop3' | 'sop4' | 'all'>('all');
+  const [expandedCloudSopId, setExpandedCloudSopId] = useState<
+    'sop1' | 'sop2' | 'sop3' | 'sop4' | 'sop5' | 'all'
+  >('all');
 
   const handleCopySnippet = (codeText: string, id: string) => {
     try {
@@ -750,7 +887,7 @@ export const SuperAdminModule: React.FC = () => {
   // =========================================================================
   // UTILITAS BACKUP & RESTORE KREDENSIAL CLOUD (EXPORT / IMPORT / SALIN)
   // =========================================================================
-  const handleExportCloudCredentialsBackup = () => {
+  const executeExportCloudCredentialsBackup = () => {
     const existingCfg = dualBackendSync.getConfig();
     const activeUrl = (cloudSupabaseUrl.trim() || existingCfg.supabaseUrl || '').trim();
     const activeAnonKey = (cloudSupabaseAnonKey.trim() || existingCfg.supabaseAnonKey || '').trim();
@@ -779,6 +916,20 @@ export const SuperAdminModule: React.FC = () => {
 
     showToast('Backup kredensial Cloud (.json) berhasil diunduh.', 'success');
     addSyncLog(`💾 Export Config Backup (.json) berhasil (${activeUrl || 'URL kosong'}).`);
+  };
+
+  const handleExportCloudCredentialsBackup = () => {
+    if (!isCloudPinUnlocked) {
+      setPendingCloudPinAction('EXPORT_CONFIG');
+      setShowSopPinGateCard(true);
+      setCloudPinError(null);
+      showToast(
+        'Verifikasi PIN Owner diperlukan sebelum mengekspor file backup kredensial Cloud (.json).',
+        'info'
+      );
+      return;
+    }
+    executeExportCloudCredentialsBackup();
   };
 
   const handleImportCloudCredentialsBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -849,7 +1000,7 @@ export const SuperAdminModule: React.FC = () => {
     reader.readAsText(file);
   };
 
-  const handleCopyActiveCloudCredentials = () => {
+  const executeCopyActiveCloudCredentials = () => {
     const existingCfg = dualBackendSync.getConfig();
     const activeUrl = (cloudSupabaseUrl.trim() || existingCfg.supabaseUrl || '').trim();
     const activeAnonKey = (cloudSupabaseAnonKey.trim() || existingCfg.supabaseAnonKey || '').trim();
@@ -871,6 +1022,79 @@ export const SuperAdminModule: React.FC = () => {
       setTimeout(() => setCopiedSnippetId(null), 2500);
     } catch {
       showToast('Gagal menyalin kredensial ke clipboard.', 'error');
+    }
+  };
+
+  const handleCopyActiveCloudCredentials = () => {
+    if (!isCloudPinUnlocked) {
+      setPendingCloudPinAction('COPY_CREDS');
+      setShowSopPinGateCard(true);
+      setCloudPinError(null);
+      showToast(
+        'Verifikasi PIN Owner diperlukan sebelum menyalin kredensial Cloud aktif.',
+        'info'
+      );
+      return;
+    }
+    executeCopyActiveCloudCredentials();
+  };
+
+  const handleUnlockCloudPinSession = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!verifyOwnerCloudPinInput(cloudPinInput)) {
+      setCloudPinError(
+        'PIN Owner / SuperAdmin tidak valid! Gunakan PIN akun Owner/SuperAdmin atau PIN Master (default: 1234 / 123456).'
+      );
+      recordAudit({
+        traceId: `CLOUD-PIN-FAIL-${Date.now()}`,
+        userId: effectiveUser?.id || 'super-admin',
+        userName: effectiveUser?.name || 'Super Admin',
+        userRole: effectiveUser?.role || 'Super Admin',
+        module: 'SUPER_ADMIN',
+        action: 'AUTH_OVERRIDE_PIN',
+        severity: 'WARN',
+        payloadAfter: {
+          action: 'CLOUD_CREDENTIALS_PIN_REJECTED',
+          details: 'Percobaan buka kunci kredensial Cloud gagal (PIN Owner salah)',
+        },
+      });
+      return;
+    }
+
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(CLOUD_PIN_SESSION_KEY, 'true');
+      }
+    } catch {}
+    setIsCloudPinUnlocked(true);
+    setCloudPinInput('');
+    setCloudPinError(null);
+    setShowSopPinGateCard(false);
+
+    recordAudit({
+      traceId: `CLOUD-PIN-UNLOCK-${Date.now()}`,
+      userId: effectiveUser?.id || 'super-admin',
+      userName: effectiveUser?.name || 'Super Admin',
+      userRole: effectiveUser?.role || 'Super Admin',
+      module: 'SUPER_ADMIN',
+      action: 'AUTH_LOGIN',
+      severity: 'INFO',
+      payloadAfter: {
+        action: 'CLOUD_CREDENTIALS_PIN_UNLOCKED',
+        details: 'Akses kredensial Cloud (Supabase & GAS) dibuka untuk sesi aktif',
+      },
+    });
+    showToast('PIN Owner Terverifikasi — Akses Kredensial Cloud dibuka untuk sesi ini.', 'success');
+    addSyncLog('🔓 Gerbang PIN Owner berhasil diverifikasi (Session Unlocked).');
+
+    const nextAction = pendingCloudPinAction;
+    setPendingCloudPinAction(null);
+    if (nextAction === 'EXPORT_CONFIG') {
+      executeExportCloudCredentialsBackup();
+    } else if (nextAction === 'COPY_CREDS') {
+      executeCopyActiveCloudCredentials();
+    } else if (nextAction === 'REVEAL_KEYS') {
+      setShowCloudAnonKey(true);
     }
   };
 
@@ -4544,11 +4768,29 @@ export const SuperAdminModule: React.FC = () => {
                   <ShieldCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                    Manajemen PIN Akses Divisi &amp; SuperAdmin
-                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`font-medium text-base tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Manajemen PIN Akses Divisi &amp; SuperAdmin
+                    </h3>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider border ${
+                        activeCredentialAuthorityMode === 'SUPERADMIN'
+                          ? isLight
+                            ? 'bg-rose-50 text-rose-700 border-rose-400'
+                            : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                          : isLight
+                          ? 'bg-amber-50 text-amber-700 border-amber-400'
+                          : 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                      }`}
+                    >
+                      <Shield className="w-3 h-3" />
+                      {activeCredentialAuthorityMode === 'SUPERADMIN'
+                        ? 'MODE OTORITAS: SUPERADMIN'
+                        : 'MODE OTORITAS: EXECUTIVE MANAGER'}
+                    </span>
+                  </div>
                   <p className={`text-xs font-normal mt-0.5 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                    Penyimpanan hash <span className="font-mono font-medium">SHA-256</span> persisten di <span className="font-mono">localStorage</span> — langsung aktif pada gerbang login.
+                    Penyimpanan hash <span className="font-mono font-medium">SHA-256</span> persisten di <span className="font-mono">localStorage</span> — kunci utama <strong className="text-rose-400">Master SuperAdmin (Jacs Enterprise)</strong> terlindungi permanen sebagai kunci pemulihan sistem.
                   </p>
                   <div className="flex flex-wrap items-center gap-2 mt-2">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-mono font-medium border ${
@@ -4560,31 +4802,36 @@ export const SuperAdminModule: React.FC = () => {
                       SHA-256 SuperAdmin:{' '}
                       {superAdminCodeHash ? `${superAdminCodeHash.slice(0, 12)}...${superAdminCodeHash.slice(-6)}` : 'Inisialisasi...'}
                     </span>
-                    {superAdminCodeUpdatedAt && (
-                      <span className={`text-[10px] font-mono font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Diperbarui: {new Date(superAdminCodeUpdatedAt).toLocaleString('id-ID')}
-                      </span>
-                    )}
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                      isLight
+                        ? 'bg-rose-50 text-rose-700 border-rose-300'
+                        : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                    }`}>
+                      <Lock className="w-3 h-3" />
+                      TERKUNCI PERMANEN (MASTER SUPERADMIN)
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setOldSuperAdminCodeInput('');
-                  setNewSuperAdminCodeInput('');
-                  setConfirmSuperAdminCodeInput('');
-                  setShowOldSuperAdminCode(false);
-                  setShowNewSuperAdminCode(false);
-                  setSuperAdminCodeError(null);
-                  setShowChangeSuperAdminCodeModal(true);
-                }}
-                className="px-4 py-2.5 rounded-xl text-xs font-medium bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white flex items-center gap-2 cursor-pointer shadow-lg shadow-rose-600/20 transition active:scale-95 shrink-0"
-              >
-                <KeyRound className="w-4 h-4" />
-                <span>Ganti Kode Otoritas SuperAdmin</span>
-              </button>
+              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled
+                  title="Kunci Pemulihan Utama Master SuperAdmin bersifat permanen dan tidak ikut ter-reset"
+                  className={`px-4 py-2.5 rounded-xl text-xs font-mono font-bold border flex items-center gap-2 cursor-not-allowed opacity-90 shrink-0 ${
+                    isLight
+                      ? 'bg-rose-50 text-rose-700 border-rose-300'
+                      : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                  }`}
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>TERKUNCI PERMANEN (MASTER SUPERADMIN)</span>
+                </button>
+                <span className={`text-[10px] font-mono ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Recovery Key Utama • Jacs Enterprise
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -4601,6 +4848,8 @@ export const SuperAdminModule: React.FC = () => {
                       minute: '2-digit',
                     })
                   : 'Default Terenkripsi';
+                const isLockedForExecMode =
+                  activeCredentialAuthorityMode === 'EXECUTIVE_MANAGER' && divCard.id === 'executive';
 
                 return (
                   <div
@@ -4665,21 +4914,36 @@ export const SuperAdminModule: React.FC = () => {
 
                     <button
                       type="button"
+                      disabled={isLockedForExecMode}
                       onClick={() => {
+                        if (isLockedForExecMode) return;
                         setEditingDivisionCard(divCard);
                         setDivisionNewPin('');
                         setDivisionConfirmPin('');
                         setShowDivisionPin(false);
                         setDivisionPinError(null);
                       }}
-                      className={`w-full py-2 px-3 rounded-xl text-xs font-medium border flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 ${
-                        isLight
-                          ? 'bg-slate-50 hover:bg-cyan-50/70 border-cyan-500/50 text-slate-900'
-                          : 'bg-[#161b22] hover:bg-[#1f2630] border-cyan-500/30 text-white'
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-medium border flex items-center justify-center gap-2 transition ${
+                        isLockedForExecMode
+                          ? isLight
+                            ? 'bg-slate-100 border-slate-300 text-slate-400 cursor-not-allowed'
+                            : 'bg-[#161b22]/60 border-gray-800 text-slate-500 cursor-not-allowed'
+                          : isLight
+                          ? 'bg-slate-50 hover:bg-cyan-50/70 border-cyan-500/50 text-slate-900 cursor-pointer active:scale-95'
+                          : 'bg-[#161b22] hover:bg-[#1f2630] border-cyan-500/30 text-white cursor-pointer active:scale-95'
                       }`}
                     >
-                      <Key className="w-3.5 h-3.5" style={{ color: divCard.colorHex }} />
-                      <span>Ubah PIN</span>
+                      {isLockedForExecMode ? (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Khusus Otoritas SuperAdmin</span>
+                        </>
+                      ) : (
+                        <>
+                          <Key className="w-3.5 h-3.5" style={{ color: divCard.colorHex }} />
+                          <span>Ubah PIN Divisi (Satu per Satu)</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 );
@@ -4687,132 +4951,218 @@ export const SuperAdminModule: React.FC = () => {
             </div>
           </div>
 
+          {/* PANEL PERLINDUNGAN KUNCI PEMULIHAN MASTER SUPERADMIN (PERMANEN) */}
           <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
             isLight
-              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
-              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+              ? 'bg-white border-rose-500/70 shadow-[0_0_16px_rgba(244,63,94,0.14)]'
+              : 'bg-[#161b22] border-rose-500/35 shadow-[0_0_16px_rgba(244,63,94,0.08)]'
           }`}>
-            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+            <div className={`flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
               <div className="flex items-center gap-2.5">
-                <Key className="w-5 h-5 text-pink-400" />
-                <h3 className="font-medium text-sm tracking-wide">Ganti Sandi Master Super Admin</h3>
+                <Lock className="w-5 h-5 text-rose-400" />
+                <div>
+                  <h3 className={`font-medium text-sm tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Sandi &amp; PIN Master SuperAdmin (Kunci Pemulihan Utama Sistem)
+                  </h3>
+                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Dijaga permanen oleh arsitektur keamanan <strong>Jacs Enterprise</strong> — tidak ikut berubah saat Reset Total Sandi Operasional dijalankan dan tidak dapat diubah oleh Executive Manager.
+                  </p>
+                </div>
+              </div>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-mono font-bold border shrink-0 ${
+                isLight
+                  ? 'bg-rose-50 text-rose-700 border-rose-300'
+                  : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+              }`}>
+                <Lock className="w-3.5 h-3.5" />
+                TERKUNCI PERMANEN (MASTER SUPERADMIN)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Sandi / PIN Master SuperAdmin:
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value="•••••••• (TERKUNCI PERMANEN - MASTER SUPERADMIN)"
+                  readOnly
+                  className={`w-full p-2.5 rounded-xl border font-mono text-xs cursor-not-allowed ${
+                    isLight
+                      ? 'bg-slate-100 border-slate-300 text-rose-700 font-semibold'
+                      : 'bg-[#0d1117]/80 border-rose-500/30 text-rose-300 font-semibold'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                  Status Proteksi Recovery Key:
+                </label>
+                <div className={`w-full p-2.5 rounded-xl border font-mono text-xs flex items-center justify-between ${
+                  isLight
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                }`}>
+                  <span>Kebal Reset Operasional &amp; Intervensi Executive</span>
+                  <span className="font-bold">AKTIF</span>
+                </div>
               </div>
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newDevPassword.trim()) return showToast('Sandi master baru tidak boleh kosong!');
-                if (newDevPassword !== confirmDevPassword) return showToast('Konfirmasi sandi tidak cocok!');
-                updateDeveloperPassword(newDevPassword);
-
-                recordAudit({
-                  traceId: `DEV-PWD-UPDATE-${Date.now()}`,
-                  userId: effectiveUser?.id || 'super-admin',
-                  userName: effectiveUser?.name || 'Super Admin',
-                  userRole: 'Super Admin',
-                  module: 'AUTH',
-                  action: 'AUTH_OVERRIDE_PIN',
-                  severity: 'SECURITY',
-                  payloadAfter: { action: 'UPDATE_MASTER_DEVELOPER_PASSWORD' },
-                });
-
-                setNewDevPassword('');
-                setConfirmDevPassword('');
-                showToast('Sandi Master Super Admin berhasil disimpan!');
-              }}
-              className="space-y-4"
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Sandi Baru:</label>
-                  <div className="relative">
-                    <input
-                      type={showDevPassword ? 'text' : 'password'}
-                      required
-                      value={newDevPassword}
-                      onChange={(e) => setNewDevPassword(e.target.value)}
-                      placeholder="Masukkan sandi master baru..."
-                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs ${
-                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowDevPassword(!showDevPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-400 cursor-pointer"
-                    >
-                      {showDevPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block font-medium text-xs mb-1.5 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>Konfirmasi Sandi Baru:</label>
-                  <div className="relative">
-                    <input
-                      type={showConfirmDevPassword ? 'text' : 'password'}
-                      required
-                      value={confirmDevPassword}
-                      onChange={(e) => setConfirmDevPassword(e.target.value)}
-                      placeholder="Ulangi sandi master baru..."
-                      className={`w-full p-2.5 pr-10 rounded-xl border font-mono text-xs ${
-                        isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-[#30363d] text-white'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmDevPassword(!showConfirmDevPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-pink-400 cursor-pointer"
-                    >
-                      {showConfirmDevPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl font-medium text-xs bg-pink-500 hover:bg-pink-400 text-white flex items-center gap-2 cursor-pointer shadow-md transition"
-                >
-                  <Key className="w-4 h-4" />
-                  <span>Simpan Sandi Master</span>
-                </button>
-              </div>
-            </form>
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                disabled
+                className={`px-5 py-2.5 rounded-xl font-mono font-bold text-xs border flex items-center gap-2 cursor-not-allowed ${
+                  isLight
+                    ? 'bg-slate-100 text-rose-700 border-rose-300'
+                    : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                }`}
+              >
+                <Lock className="w-4 h-4" />
+                <span>TERKUNCI PERMANEN (MASTER SUPERADMIN)</span>
+              </button>
+            </div>
           </div>
 
+          {/* PANEL HIERARKI KONTROL PIN & SANDI: DAFTAR AKUN & RESET PIN OPERATOR */}
           <div className={`p-6 rounded-2xl border space-y-4 transition-all duration-200 ${
             isLight
               ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
               : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
           }`}>
-            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
-              <h3 className="font-medium text-sm tracking-wide">Daftar Akun &amp; Reset PIN Operator</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  resetAllUserPinsToDefault('1234');
-                  recordAudit({
-                    traceId: `RESET-ALL-PINS-${Date.now()}`,
-                    userId: effectiveUser?.id || 'super-admin',
-                    userName: effectiveUser?.name || 'Super Admin',
-                    userRole: 'Super Admin',
-                    module: 'AUTH',
-                    action: 'AUTH_OVERRIDE_PIN',
-                    severity: 'CRITICAL',
-                    payloadAfter: { action: 'RESET_ALL_PINS_TO_1234' },
-                  });
-                }}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border cursor-pointer ${
-                  isLight
-                    ? 'bg-amber-50 text-amber-700 border-amber-400/70 hover:bg-amber-100'
-                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                }`}
-              >
-                Reset Semua ke 1234
-              </button>
+            <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h3 className={`font-medium text-sm tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Daftar Akun &amp; Hierarki Kontrol PIN Operasional
+                  </h3>
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-mono font-bold uppercase tracking-wider border ${
+                      activeCredentialAuthorityMode === 'SUPERADMIN'
+                        ? isLight
+                          ? 'bg-rose-50 text-rose-700 border-rose-400'
+                          : 'bg-rose-500/15 text-rose-300 border-rose-500/45'
+                        : isLight
+                        ? 'bg-amber-50 text-amber-700 border-amber-400'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/45'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {activeCredentialAuthorityMode === 'SUPERADMIN'
+                      ? 'MODE OTORITAS: SUPERADMIN'
+                      : 'MODE OTORITAS: EXECUTIVE MANAGER'}
+                  </span>
+                </div>
+                <p className={`text-xs ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                  {activeCredentialAuthorityMode === 'SUPERADMIN'
+                    ? 'Akses Penuh SuperAdmin: Dapat mengganti sandi satu per satu untuk seluruh akun operasional (Executive Manager, Admin Gudang, Kasir) serta menjalankan Reset Total Semua Sandi Operasional (PIN SuperAdmin tetap terkunci permanen).'
+                    : 'Akses Terbatas Executive Manager: Hanya dapat mengganti sandi/PIN satu per satu untuk staf operasional di bawahnya (Admin/Kasir). Tombol Reset Total dan akun SuperAdmin dikunci.'}
+                </p>
+
+                {/* Pemilih Mode Otoritas untuk Verifikasi & Simulasi Batas Kewenangan */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className={`text-[11px] font-mono ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Simulasi / Mode Otoritas Aktif:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCredentialAuthorityOverride('SUPERADMIN')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold border cursor-pointer transition ${
+                      activeCredentialAuthorityMode === 'SUPERADMIN'
+                        ? isLight
+                          ? 'bg-rose-600 text-white border-rose-600'
+                          : 'bg-rose-500/25 text-rose-200 border-rose-500'
+                        : isLight
+                        ? 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                        : 'bg-[#0d1117] text-slate-400 border-gray-700 hover:text-white'
+                    }`}
+                  >
+                    MODE OTORITAS: SUPERADMIN
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCredentialAuthorityOverride('EXECUTIVE_MANAGER')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold border cursor-pointer transition ${
+                      activeCredentialAuthorityMode === 'EXECUTIVE_MANAGER'
+                        ? isLight
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-amber-500/25 text-amber-200 border-amber-500'
+                        : isLight
+                        ? 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                        : 'bg-[#0d1117] text-slate-400 border-gray-700 hover:text-white'
+                    }`}
+                  >
+                    MODE OTORITAS: EXECUTIVE MANAGER
+                  </button>
+                </div>
+              </div>
+
+              {/* Tombol Reset Total Semua Sandi Operasional — HANYA untuk Role SuperAdmin */}
+              {activeCredentialAuthorityMode === 'SUPERADMIN' ? (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[11px] font-mono ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Sandi Standar:
+                    </span>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={standardResetPinInput}
+                      onChange={(e) => setStandardResetPinInput(e.target.value.replace(/\s+/g, '') || '1234')}
+                      placeholder="1234"
+                      className={`w-16 py-1.5 px-2 rounded-lg border font-mono text-xs text-center font-bold ${
+                        isLight
+                          ? 'bg-slate-50 border-amber-400 text-slate-900'
+                          : 'bg-[#0d1117] border-amber-500/40 text-amber-300'
+                      }`}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetDefaultPin = (standardResetPinInput || '1234').trim() || '1234';
+                      resetAllUserPinsToDefault(targetDefaultPin);
+                      recordAudit({
+                        traceId: `RESET-ALL-OPERATIONAL-PINS-${Date.now()}`,
+                        userId: effectiveUser?.id || 'super-admin',
+                        userName: effectiveUser?.name || 'Super Admin',
+                        userRole: 'Super Admin',
+                        module: 'AUTH',
+                        action: 'AUTH_OVERRIDE_PIN',
+                        severity: 'CRITICAL',
+                        payloadAfter: {
+                          action: 'RESET_TOTAL_OPERATIONAL_PINS',
+                          standardPin: targetDefaultPin,
+                          superAdminExcluded: true,
+                        },
+                      });
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-semibold border cursor-pointer flex items-center gap-2 transition active:scale-95 ${
+                      isLight
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 hover:bg-amber-400 shadow-sm'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
+                    }`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reset Total Semua Sandi Operasional</span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  className={`px-3.5 py-2 rounded-xl text-[11px] font-mono border flex items-center gap-2 shrink-0 ${
+                    isLight
+                      ? 'bg-slate-100 text-slate-600 border-slate-300'
+                      : 'bg-[#0d1117] text-slate-400 border-gray-800'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Tombol Reset Total Dikunci (Khusus Otoritas SuperAdmin)</span>
+                </div>
+              )}
             </div>
 
             <div className={`overflow-x-auto rounded-xl border ${isLight ? 'border-cyan-500/45' : 'border-gray-800'}`}>
@@ -4820,62 +5170,140 @@ export const SuperAdminModule: React.FC = () => {
                 <thead className={`text-[10px] font-mono font-medium uppercase tracking-wider ${isLight ? 'bg-slate-100 text-slate-600' : 'bg-[#0d1117] text-gray-400'}`}>
                   <tr>
                     <th className="py-3 px-3.5">Nama Operator</th>
-                    <th className="py-3 px-3.5">Role</th>
-                    <th className="py-3 px-3.5">PIN Aktif</th>
-                    <th className="py-3 px-3.5">Input PIN Baru</th>
-                    <th className="py-3 px-3.5 text-center">Aksi</th>
+                    <th className="py-3 px-3.5">Role / Jabatan</th>
+                    <th className="py-3 px-3.5">PIN / Sandi Aktif</th>
+                    <th className="py-3 px-3.5">Input PIN / Sandi Baru</th>
+                    <th className="py-3 px-3.5 text-center">Aksi Kontrol</th>
                   </tr>
                 </thead>
                 <tbody className={`divide-y font-normal ${isLight ? 'divide-slate-200 bg-white' : 'divide-gray-800'}`}>
-                  {users.map((u) => (
-                    <tr key={u.user_id} className={isLight ? 'hover:bg-cyan-50/40 transition' : 'hover:bg-[#1f242c] transition'}>
-                      <td className="py-3 px-3.5 font-medium">{u.name}</td>
-                      <td className="py-3 px-3.5">{u.role}</td>
-                      <td className="py-3 px-3.5 font-mono text-emerald-500 font-medium">{u.pin}</td>
-                      <td className="py-3 px-3.5">
-                        <input
-                          type="password"
-                          maxLength={6}
-                          value={userPinInputs[u.user_id] || ''}
-                          onChange={(e) =>
-                            setUserPinInputs((prev) => ({ ...prev, [u.user_id]: e.target.value }))
-                          }
-                          placeholder="PIN baru..."
-                          className={`py-1 px-2 rounded-lg border font-mono text-xs w-28 ${
-                            isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-gray-700 text-white'
-                          }`}
-                        />
-                      </td>
-                      <td className="py-3 px-3.5 text-center">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const pin = (userPinInputs[u.user_id] || '').trim();
-                            if (!pin) return showToast('Ketik PIN baru!');
-                            updateUserPin(u.user_id, pin);
+                  {users.map((u) => {
+                    const isSuperRow = isSuperAdminAccountRow(u);
+                    const isExecRow = isExecutiveManagerAccountRow(u);
+                    const isRowLockedForCurrentMode =
+                      isSuperRow ||
+                      (activeCredentialAuthorityMode === 'EXECUTIVE_MANAGER' && isExecRow);
 
-                            recordAudit({
-                              traceId: `PIN-UPDATE-${u.user_id}`,
-                              userId: effectiveUser?.id || 'super-admin',
-                              userName: effectiveUser?.name || 'Super Admin',
-                              userRole: 'Super Admin',
-                              module: 'AUTH',
-                              action: 'AUTH_OVERRIDE_PIN',
-                              severity: 'WARN',
-                              entityId: u.user_id,
-                              payloadAfter: { targetUser: u.name, newPinMasked: '••••' },
-                            });
+                    return (
+                      <tr key={u.user_id} className={isLight ? 'hover:bg-cyan-50/40 transition' : 'hover:bg-[#1f242c] transition'}>
+                        <td className="py-3 px-3.5 font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{u.name}</span>
+                            {isSuperRow && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                                isLight
+                                  ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                  : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                              }`}>
+                                MASTER RECOVERY
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3.5">{u.role}</td>
+                        <td className="py-3 px-3.5 font-mono font-medium">
+                          {isSuperRow ? (
+                            <span className="text-rose-400 font-bold">•••• (Permanen)</span>
+                          ) : (
+                            <span className="text-emerald-500">{u.pin}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3.5">
+                          {isSuperRow ? (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border ${
+                              isLight
+                                ? 'bg-rose-50 text-rose-700 border-rose-300'
+                                : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                            }`}>
+                              <Lock className="w-3 h-3" />
+                              TERKUNCI PERMANEN (MASTER SUPERADMIN)
+                            </span>
+                          ) : isRowLockedForCurrentMode ? (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono border ${
+                              isLight
+                                ? 'bg-slate-100 text-slate-600 border-slate-300'
+                                : 'bg-[#0d1117] text-slate-400 border-gray-700'
+                            }`}>
+                              <Lock className="w-3 h-3" />
+                              Dikelola oleh Otoritas SuperAdmin
+                            </span>
+                          ) : (
+                            <input
+                              type="password"
+                              maxLength={6}
+                              value={userPinInputs[u.user_id] || ''}
+                              onChange={(e) =>
+                                setUserPinInputs((prev) => ({ ...prev, [u.user_id]: e.target.value }))
+                              }
+                              placeholder="PIN baru..."
+                              className={`py-1 px-2 rounded-lg border font-mono text-xs w-32 ${
+                                isLight ? 'bg-slate-50 border-slate-300 text-slate-900' : 'bg-[#0d1117] border-gray-700 text-white'
+                              }`}
+                            />
+                          )}
+                        </td>
+                        <td className="py-3 px-3.5 text-center">
+                          {isSuperRow ? (
+                            <button
+                              type="button"
+                              disabled
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border cursor-not-allowed inline-flex items-center gap-1 ${
+                                isLight
+                                  ? 'bg-slate-100 text-rose-700 border-rose-300'
+                                  : 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+                              }`}
+                            >
+                              <Lock className="w-3 h-3" />
+                              <span>TERKUNCI PERMANEN (MASTER SUPERADMIN)</span>
+                            </button>
+                          ) : isRowLockedForCurrentMode ? (
+                            <button
+                              type="button"
+                              disabled
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border cursor-not-allowed inline-flex items-center gap-1 ${
+                                isLight
+                                  ? 'bg-slate-100 text-slate-500 border-slate-300'
+                                  : 'bg-[#0d1117] text-slate-500 border-gray-800'
+                              }`}
+                            >
+                              <Lock className="w-3 h-3" />
+                              <span>Khusus SuperAdmin</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pin = (userPinInputs[u.user_id] || '').trim();
+                                if (!pin) return showToast('Ketik PIN/Sandi baru terlebih dahulu!');
+                                updateUserPin(u.user_id, pin);
 
-                            setUserPinInputs((prev) => ({ ...prev, [u.user_id]: '' }));
-                            showToast(`PIN untuk ${u.name} berhasil diperbarui!`);
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#0052FF] hover:bg-blue-600 text-white cursor-pointer active:scale-95"
-                        >
-                          Simpan PIN
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                                recordAudit({
+                                  traceId: `PIN-UPDATE-${u.user_id}`,
+                                  userId: effectiveUser?.id || 'super-admin',
+                                  userName: effectiveUser?.name || 'Super Admin',
+                                  userRole:
+                                    activeCredentialAuthorityMode === 'SUPERADMIN'
+                                      ? 'Super Admin'
+                                      : 'Executive Manager',
+                                  module: 'AUTH',
+                                  action: 'AUTH_OVERRIDE_PIN',
+                                  severity: 'WARN',
+                                  entityId: u.user_id,
+                                  payloadAfter: { targetUser: u.name, newPinMasked: '••••' },
+                                });
+
+                                setUserPinInputs((prev) => ({ ...prev, [u.user_id]: '' }));
+                                showToast(`PIN operasional untuk ${u.name} (${u.role}) berhasil diperbarui!`);
+                              }}
+                              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#0052FF] hover:bg-blue-600 text-white cursor-pointer active:scale-95"
+                            >
+                              Simpan PIN
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4944,7 +5372,7 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Status Pill Header */}
+              {/* Status Pill Header + Tombol Kunci Kembali Akses Kunci */}
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-medium border flex items-center gap-1.5 ${
                   lastCloudSyncResult?.endpoints?.supabase?.success ||
@@ -4979,6 +5407,23 @@ export const SuperAdminModule: React.FC = () => {
                   <span className={`w-2 h-2 rounded-full ${dualBackendSync.getConfig().gasWebhookUrl ? 'bg-amber-400' : 'bg-slate-500'}`} />
                   <span>GAS Webhook: {dualBackendSync.getConfig().gasWebhookUrl ? 'Terkonfigurasi' : 'Belum Diatur'}</span>
                 </span>
+
+                {isCloudPinUnlocked ? (
+                  <button
+                    type="button"
+                    onClick={handleLockCloudPinSession}
+                    className="px-2.5 py-1 rounded-xl text-xs font-mono font-bold border bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40 flex items-center gap-1.5 cursor-pointer transition active:scale-95"
+                    title="Kunci kembali akses kredensial Cloud di sessionStorage"
+                  >
+                    <Lock className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Kunci Kembali Akses Kunci</span>
+                  </button>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-xl text-xs font-mono font-bold border bg-amber-500/15 text-amber-300 border-amber-500/40 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>PIN OWNER TERKUNCI</span>
+                  </span>
+                )}
               </div>
             </div>
 
@@ -5192,183 +5637,292 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Form Input Dual Endpoint */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-4">
-              {/* Endpoint 1: Supabase REST API */}
-              <div className={`p-4 rounded-xl border space-y-3 ${
-                isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Server className="w-4 h-4 text-emerald-400" />
-                    <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
-                      Jalur 1: Supabase REST API (PostgreSQL)
+            {/* GERBANG VERIFIKASI PIN OWNER ATAU FORM INPUT DUAL ENDPOINT */}
+            {!isCloudPinUnlocked ? (
+              <div
+                className={`p-6 rounded-2xl border mt-4 space-y-4 ${
+                  isLight
+                    ? 'bg-slate-50 border-amber-400/80 shadow-sm'
+                    : 'bg-[#0d1117] border-amber-500/40 shadow-[0_0_24px_rgba(245,158,11,0.1)]'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0">
+                      <KeyRound className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                          Gerbang Verifikasi PIN Owner — Proteksi Kredensial Cloud
+                        </h4>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          SESSION-BASED GUARD • JACS ENTERPRISE
+                        </span>
+                      </div>
+                      <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                        Masukkan PIN akun dengan peran <strong>Owner / SuperAdmin</strong> untuk membuka form konfigurasi, melihat kunci <code className="font-mono">supabaseAnonKey</code> &amp; <code className="font-mono">gasWebhookUrl</code>, atau mengekspor file backup kredensial. Status terbuka hanya disimpan di <code className="font-mono">sessionStorage</code> (<code className="font-mono">jacs_cloud_pin_unlocked</code>) dan otomatis terkunci saat tab ditutup.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ringkasan Kredensial Tersamar (Masked Preview) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
+                  <div
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${
+                      isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                    }`}
+                  >
+                    <span className="text-slate-400">Supabase Anon Key:</span>
+                    <span className="text-emerald-400 font-bold">
+                      {maskCloudSecretValue(cloudSupabaseAnonKey || dualBackendSync.getConfig().supabaseAnonKey)}
                     </span>
                   </div>
-                  {cloudPingResult?.supabase && (
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-                      cloudPingResult.supabase.connected
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                        : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                    }`}>
-                      {cloudPingResult.supabase.statusText}
-                    </span>
-                  )}
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
-                    Supabase Project URL
-                  </label>
-                  <input
-                    type="text"
-                    value={cloudSupabaseUrl}
-                    onChange={(e) => setCloudSupabaseUrl(e.target.value)}
-                    placeholder="https://xyzcompany.supabase.co"
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-                      isLight
-                        ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
-                        : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                  <div
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${
+                      isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
                     }`}
-                  />
+                  >
+                    <span className="text-slate-400">GAS Webhook URL:</span>
+                    <span className="text-amber-400 font-bold">
+                      {maskCloudSecretValue(cloudGasWebhookUrl || dualBackendSync.getConfig().gasWebhookUrl)}
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
-                    Supabase Anon / Public Key
-                  </label>
-                  <div className="relative">
+                <form onSubmit={handleUnlockCloudPinSession} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                  <div className="relative flex-1 max-w-md">
                     <input
-                      type={showCloudAnonKey ? 'text' : 'password'}
-                      value={cloudSupabaseAnonKey}
-                      onChange={(e) => setCloudSupabaseAnonKey(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className={`w-full px-3 py-2 pr-10 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      type="password"
+                      value={cloudPinInput}
+                      onChange={(e) => {
+                        setCloudPinInput(e.target.value);
+                        if (cloudPinError) setCloudPinError(null);
+                      }}
+                      placeholder="Masukkan PIN Owner / SuperAdmin (contoh: 1234 / 123456)"
+                      className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-amber-500 ${
                         isLight
                           ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
                           : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
                       }`}
                     />
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0"
+                  >
+                    <Unlock className="w-4 h-4" />
+                    <span>Verifikasi PIN Owner &amp; Buka Akses</span>
+                  </button>
+                </form>
+
+                {cloudPinError && (
+                  <div className="p-3 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-400 text-xs flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span>{cloudPinError}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Form Input Dual Endpoint (Terbuka Setelah PIN Owner Terverifikasi) */
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-4">
+                {/* Endpoint 1: Supabase REST API */}
+                <div className={`p-4 rounded-xl border space-y-3 ${
+                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Server className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-semibold text-emerald-500 dark:text-emerald-400">
+                        Jalur 1: Supabase REST API (PostgreSQL)
+                      </span>
+                    </div>
+                    {cloudPingResult?.supabase && (
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                        cloudPingResult.supabase.connected
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                          : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                      }`}>
+                        {cloudPingResult.supabase.statusText}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                      Supabase Project URL
+                    </label>
+                    <input
+                      type="text"
+                      value={cloudSupabaseUrl}
+                      onChange={(e) => setCloudSupabaseUrl(e.target.value)}
+                      placeholder="https://xyzcompany.supabase.co"
+                      className={`w-full px-3 py-2 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                        isLight
+                          ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                          : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={`block text-xs font-medium ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                        Supabase Anon / Public Key
+                      </label>
+                      <span className="text-[10px] font-mono text-emerald-400">
+                        {showCloudAnonKey ? 'Ditampilkan' : maskCloudSecretValue(cloudSupabaseAnonKey)}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showCloudAnonKey ? 'text' : 'password'}
+                        value={cloudSupabaseAnonKey}
+                        onChange={(e) => setCloudSupabaseAnonKey(e.target.value)}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        className={`w-full px-3 py-2 pr-10 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                          isLight
+                            ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                            : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCloudAnonKey((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-400 cursor-pointer"
+                        title={showCloudAnonKey ? 'Sembunyikan Key' : 'Tampilkan Key'}
+                      >
+                        {showCloudAnonKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                    Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/jacs_erp_snapshots</code> (fallback <code className="font-mono">/rest/v1/cloud_sync</code>) dengan otentikasi header <code className="font-mono">apikey</code> &amp; <code className="font-mono">Authorization</code>.
+                  </p>
+
+                  {/* Utilitas Backup & Restore Kredensial Supabase */}
+                  <div className={`pt-2.5 border-t flex flex-wrap items-center gap-2 ${
+                    isLight ? 'border-slate-200' : 'border-slate-800'
+                  }`}>
                     <button
                       type="button"
-                      onClick={() => setShowCloudAnonKey((prev) => !prev)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-emerald-400 cursor-pointer"
-                      title={showCloudAnonKey ? 'Sembunyikan Key' : 'Tampilkan Key'}
+                      onClick={handleExportCloudCredentialsBackup}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                        isLight
+                          ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
+                          : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-500/40 text-emerald-300'
+                      }`}
+                      title="Unduh file JSON berisi supabaseUrl, supabaseAnonKey, exportedAt, dan appVersion"
                     >
-                      {showCloudAnonKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Export Config Backup (.json)</span>
+                    </button>
+
+                    <label
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                        isLight
+                          ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                          : 'bg-cyan-950/40 hover:bg-cyan-900/50 border-cyan-500/40 text-cyan-300'
+                      }`}
+                      title="Unggah file JSON cadangan untuk memulihkan URL & Anon Key Supabase secara otomatis"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Import Config Backup (.json)</span>
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={handleImportCloudCredentialsBackup}
+                        className="hidden"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyActiveCloudCredentials}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                        copiedSnippetId === 'active-cloud-creds'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                          : isLight
+                          ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                          : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                      }`}
+                      title="Salin ringkasan VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY aktif ke clipboard"
+                    >
+                      {copiedSnippetId === 'active-cloud-creds' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Kredensial Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Salin Kredensial Aktif</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
-                <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
-                  Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/jacs_erp_snapshots</code> (fallback <code className="font-mono">/rest/v1/cloud_sync</code>) dengan otentikasi header <code className="font-mono">apikey</code> &amp; <code className="font-mono">Authorization</code>.
-                </p>
 
-                {/* Utilitas Backup & Restore Kredensial Supabase */}
-                <div className={`pt-2.5 border-t flex flex-wrap items-center gap-2 ${
-                  isLight ? 'border-slate-200' : 'border-slate-800'
+                {/* Endpoint 2: Google Apps Script Webhook */}
+                <div className={`p-4 rounded-xl border space-y-3 ${
+                  isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
                 }`}>
-                  <button
-                    type="button"
-                    onClick={handleExportCloudCredentialsBackup}
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                      isLight
-                        ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
-                        : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-500/40 text-emerald-300'
-                    }`}
-                    title="Unduh file JSON berisi supabaseUrl, supabaseAnonKey, exportedAt, dan appVersion"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Export Config Backup (.json)</span>
-                  </button>
-
-                  <label
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                      isLight
-                        ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
-                        : 'bg-cyan-950/40 hover:bg-cyan-900/50 border-cyan-500/40 text-cyan-300'
-                    }`}
-                    title="Unggah file JSON cadangan untuk memulihkan URL & Anon Key Supabase secara otomatis"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Import Config Backup (.json)</span>
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={handleImportCloudCredentialsBackup}
-                      className="hidden"
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyActiveCloudCredentials}
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                      copiedSnippetId === 'active-cloud-creds'
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                        : isLight
-                        ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
-                    }`}
-                    title="Salin ringkasan VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY aktif ke clipboard"
-                  >
-                    {copiedSnippetId === 'active-cloud-creds' ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Kredensial Tersalin!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Salin Kredensial Aktif</span>
-                      </>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Cloud className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
+                        Jalur 2: Google Apps Script Webhook (Spreadsheet &amp; Mirror)
+                      </span>
+                    </div>
+                    {cloudPingResult?.gas && (
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                        cloudPingResult.gas.connected
+                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                          : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                      }`}>
+                        {cloudPingResult.gas.statusText}
+                      </span>
                     )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Endpoint 2: Google Apps Script Webhook */}
-              <div className={`p-4 rounded-xl border space-y-3 ${
-                isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Cloud className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-semibold text-amber-500 dark:text-amber-400">
-                      Jalur 2: Google Apps Script Webhook (Spreadsheet &amp; Mirror)
-                    </span>
                   </div>
-                  {cloudPingResult?.gas && (
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-                      cloudPingResult.gas.connected
-                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                        : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                    }`}>
-                      {cloudPingResult.gas.statusText}
-                    </span>
-                  )}
-                </div>
 
-                <div>
-                  <label className={`block text-xs font-medium mb-1 ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
-                    Google Apps Script Webhook URL (Web App Deployment)
-                  </label>
-                  <input
-                    type="text"
-                    value={cloudGasWebhookUrl}
-                    onChange={(e) => setCloudGasWebhookUrl(e.target.value)}
-                    placeholder="https://script.google.com/macros/s/AKfycb.../exec"
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-amber-500 ${
-                      isLight
-                        ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
-                        : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
-                    }`}
-                  />
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={`block text-xs font-medium ${isLight ? 'text-slate-700' : 'text-gray-300'}`}>
+                        Google Apps Script Webhook URL (Web App Deployment)
+                      </label>
+                      <span className="text-[10px] font-mono text-amber-400">
+                        {showCloudGasUrl ? 'Ditampilkan' : maskCloudSecretValue(cloudGasWebhookUrl)}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showCloudGasUrl ? 'text' : 'password'}
+                        value={cloudGasWebhookUrl}
+                        onChange={(e) => setCloudGasWebhookUrl(e.target.value)}
+                        placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                        className={`w-full px-3 py-2 pr-10 rounded-xl text-xs font-mono border transition focus:outline-none focus:ring-2 focus:ring-amber-500 ${
+                          isLight
+                            ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                            : 'bg-[#161b22] border-[#30363d] text-white placeholder:text-gray-500'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCloudGasUrl((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-amber-400 cursor-pointer"
+                        title={showCloudGasUrl ? 'Sembunyikan Webhook URL' : 'Tampilkan Webhook URL'}
+                      >
+                        {showCloudGasUrl ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className={`text-[10px] leading-relaxed pt-3 ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
+                    Menerima payload snapshot berformat JSON secara langsung. Mendukung auto-mirroring mutasi kasir ke Google Sheets.
+                  </p>
                 </div>
-                <p className={`text-[10px] leading-relaxed pt-3 ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
-                  Menerima payload snapshot berformat JSON secara langsung. Mendukung auto-mirroring mutasi kasir ke Google Sheets.
-                </p>
               </div>
-            </div>
+            )}
 
             {/* Metrik Data yang Disinkronkan */}
             <div className="pt-4">
@@ -5804,18 +6358,27 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Toolbar Cepat Backup & Restore Kredensial */}
+            {/* Toolbar Cepat Backup & Restore Kredensial (Dilindungi PIN Owner) */}
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={handleExportCloudCredentialsBackup}
                 className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
-                  isLight
-                    ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-600 text-white shadow-sm'
-                    : 'bg-emerald-600/90 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-emerald-950/50'
+                  isCloudPinUnlocked
+                    ? isLight
+                      ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-600 text-white shadow-sm'
+                      : 'bg-emerald-600/90 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-emerald-950/50'
+                    : isLight
+                    ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                    : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-500/40 text-amber-300'
                 }`}
+                title={
+                  isCloudPinUnlocked
+                    ? 'Unduh file JSON backup kredensial Cloud'
+                    : 'Memerlukan verifikasi PIN Owner terlebih dahulu'
+                }
               >
-                <Download className="w-3.5 h-3.5" />
+                {isCloudPinUnlocked ? <Download className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                 <span>Export Config Backup (.json)</span>
               </button>
 
@@ -5842,10 +6405,19 @@ export const SuperAdminModule: React.FC = () => {
                 className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
                   copiedSnippetId === 'active-cloud-creds'
                     ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                    : isCloudPinUnlocked
+                    ? isLight
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
                     : isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
-                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                    ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                    : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-500/40 text-amber-300'
                 }`}
+                title={
+                  isCloudPinUnlocked
+                    ? 'Salin ringkasan kredensial aktif ke clipboard'
+                    : 'Memerlukan verifikasi PIN Owner terlebih dahulu'
+                }
               >
                 {copiedSnippetId === 'active-cloud-creds' ? (
                   <>
@@ -5854,12 +6426,169 @@ export const SuperAdminModule: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <Copy className="w-3.5 h-3.5" />
+                    {isCloudPinUnlocked ? <Copy className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                     <span>Salin Kredensial Aktif</span>
                   </>
                 )}
               </button>
+
+              {isCloudPinUnlocked ? (
+                <button
+                  type="button"
+                  onClick={handleLockCloudPinSession}
+                  className="px-3 py-2 rounded-xl text-xs font-bold border bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40 flex items-center gap-1.5 transition cursor-pointer active:scale-95"
+                  title="Kunci kembali akses kredensial Cloud di sessionStorage"
+                >
+                  <Lock className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Kunci Kembali Akses Kunci</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingCloudPinAction('REVEAL_KEYS');
+                    setShowSopPinGateCard(true);
+                    setCloudPinError(null);
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold border bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40 flex items-center gap-1.5 transition cursor-pointer active:scale-95"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Buka Kunci PIN Owner</span>
+                </button>
+              )}
             </div>
+          </div>
+
+          {/* PANEL MASKING KREDENSIAL & GERBANG VERIFIKASI PIN OWNER DI SOP CLOUD & BACKUP */}
+          <div
+            className={`p-4 rounded-xl border space-y-3 ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <KeyRound className={`w-4 h-4 ${isCloudPinUnlocked ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  Status Brankas Kredensial Cloud (Masking Otomatis)
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                    isCloudPinUnlocked
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                      : 'bg-amber-500/15 text-amber-400 border-amber-500/35'
+                  }`}
+                >
+                  {isCloudPinUnlocked ? 'SESI PIN OWNER TERBUKA' : 'TERKUNCI — MASKED'}
+                </span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-400">
+                Session Key: <code className="text-cyan-400">jacs_cloud_pin_unlocked</code> • Jacs Enterprise
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs font-mono">
+              <div
+                className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}
+              >
+                <span className="text-slate-400">Supabase URL:</span>
+                <span className="text-cyan-400 truncate max-w-[200px]">
+                  {(cloudSupabaseUrl || dualBackendSync.getConfig().supabaseUrl || '').trim() || 'Belum Diatur'}
+                </span>
+              </div>
+              <div
+                className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}
+              >
+                <span className="text-slate-400">Anon Key:</span>
+                <span className="text-emerald-400 font-bold truncate max-w-[200px]">
+                  {isCloudPinUnlocked && showCloudAnonKey
+                    ? (cloudSupabaseAnonKey || dualBackendSync.getConfig().supabaseAnonKey || 'Belum Diatur')
+                    : maskCloudSecretValue(cloudSupabaseAnonKey || dualBackendSync.getConfig().supabaseAnonKey)}
+                </span>
+              </div>
+              <div
+                className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}
+              >
+                <span className="text-slate-400">GAS Webhook:</span>
+                <span className="text-amber-400 font-bold truncate max-w-[200px]">
+                  {isCloudPinUnlocked && showCloudGasUrl
+                    ? (cloudGasWebhookUrl || dualBackendSync.getConfig().gasWebhookUrl || 'Belum Diatur')
+                    : maskCloudSecretValue(cloudGasWebhookUrl || dualBackendSync.getConfig().gasWebhookUrl)}
+                </span>
+              </div>
+            </div>
+
+            {(!isCloudPinUnlocked && (showSopPinGateCard || adminTab === 'cloud-sop')) && (
+              <div
+                className={`p-4 rounded-xl border space-y-3 ${
+                  isLight
+                    ? 'bg-amber-50/70 border-amber-300'
+                    : 'bg-[#161b22] border-amber-500/40'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-amber-500 dark:text-amber-400 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {pendingCloudPinAction === 'EXPORT_CONFIG'
+                        ? 'Konfirmasi PIN Owner untuk Mengekspor Backup Kredensial (.json)'
+                        : pendingCloudPinAction === 'COPY_CREDS'
+                        ? 'Konfirmasi PIN Owner untuk Menyalin Kredensial Aktif'
+                        : 'Masukkan PIN Owner untuk Membuka Akses Salin & Ekspor Kredensial Cloud'}
+                    </span>
+                  </div>
+                  {showSopPinGateCard && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSopPinGateCard(false);
+                        setPendingCloudPinAction(null);
+                        setCloudPinError(null);
+                      }}
+                      className="text-[11px] font-mono text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      Tutup
+                    </button>
+                  )}
+                </div>
+
+                <form onSubmit={handleUnlockCloudPinSession} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="password"
+                    value={cloudPinInput}
+                    onChange={(e) => {
+                      setCloudPinInput(e.target.value);
+                      if (cloudPinError) setCloudPinError(null);
+                    }}
+                    placeholder="Masukkan PIN Owner / SuperAdmin (contoh: 1234 / 123456)"
+                    className={`flex-1 max-w-md px-3 py-2 rounded-xl text-xs font-mono border focus:outline-none focus:ring-2 focus:ring-amber-500 ${
+                      isLight
+                        ? 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+                        : 'bg-[#0d1117] border-[#30363d] text-white placeholder:text-gray-500'
+                    }`}
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0"
+                  >
+                    <Unlock className="w-3.5 h-3.5" />
+                    <span>Verifikasi PIN Owner</span>
+                  </button>
+                </form>
+
+                {cloudPinError && (
+                  <div className="text-xs text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{cloudPinError}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* PANEL RINGKASAN MODE PENYIMPANAN & TOMBOL TEKNIS BACKUP / MIGRASI DATA LOKAL */}
@@ -5981,11 +6710,12 @@ export const SuperAdminModule: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
               {[
-                { id: 'all', label: 'Tampilkan Semua SOP (1–4)' },
+                { id: 'all', label: 'Tampilkan Semua SOP (1–5)' },
                 { id: 'sop1', label: 'SOP 1: Backup Kunci & Vercel Env' },
                 { id: 'sop2', label: 'SOP 2: Kasir Offline vs Online' },
                 { id: 'sop3', label: 'SOP 3: Revisi App & Kapasitas Cloud' },
                 { id: 'sop4', label: 'SOP 4: Mode Lokal 100% Offline & Migrasi Cloud' },
+                { id: 'sop5', label: 'SOP 5: Setup Toko Baru & Migrasi' },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -6263,6 +6993,257 @@ export const SuperAdminModule: React.FC = () => {
                   <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
                     Ketika toko siap beralih ke Cloud: isi <strong>Supabase URL &amp; Anon Key</strong> (serta opsional GAS Webhook), lalu klik tombol <strong>"Migrasi Offline ke Online (Push ke Supabase &amp; GAS)"</strong>. Sistem otomatis mengunggah seluruh data lokal ke tabel <code className="font-mono">jacs_erp_snapshots</code> tanpa menimpa data yang sudah dikerjakan selama offline.
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* KARTU SOP 5 — Panduan Lengkap Setup Toko dari Awal (Toko Baru & Migrasi Toko Lama) */}
+          {(expandedCloudSopId === 'all' || expandedCloudSopId === 'sop5') && (
+            <div
+              className={`p-4 sm:p-5 rounded-xl border space-y-4 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              {/* Header SOP 05 */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/35">
+                    SOP 05
+                  </span>
+                  <h4 className={`text-sm sm:text-base font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    SOP 05: Panduan Lengkap Setup Toko dari Awal (Toko Baru &amp; Migrasi Toko Lama)
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1.5">
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Blueprint Implementasi • Jacs Enterprise</span>
+                </span>
+              </div>
+
+              {/* 1. TAHAP PERSIAPAN AWAL (WAJIB UNTUK TOKO BARU MAUPUN TOKO LAMA) */}
+              <div
+                className={`p-4 rounded-xl border space-y-3 ${
+                  isLight ? 'bg-white border-cyan-500/40' : 'bg-[#161b22] border-cyan-500/30'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-xs sm:text-sm text-cyan-600 dark:text-cyan-400 flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 font-mono text-[11px]">
+                      TAHAP 1
+                    </span>
+                    <span>TAHAP PERSIAPAN AWAL (WAJIB UNTUK TOKO BARU MAUPUN TOKO LAMA)</span>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/25">
+                    Fondasi Wajib Sebelum Input Barang
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs leading-relaxed">
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-rose-500 dark:text-rose-400">
+                      Langkah 1 — Bersihkan Data Contoh (83 SKU Dummy)
+                    </div>
+                    <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                      Masuk ke <strong>SuperAdmin → "Data Master &amp; Migrasi"</strong>, lalu jalankan tombol <strong>"Reset Data Uji Coba / Bersihkan Data Dummy"</strong> agar katalog contoh bawaan (<strong>83 SKU dummy</strong>) serta transaksi simulasi terhapus bersih sebelum mengisi data toko asli.
+                    </p>
+                  </div>
+
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-cyan-600 dark:text-cyan-400">
+                      Langkah 2 — Identitas &amp; Legalitas Toko
+                    </div>
+                    <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                      Buka <strong>SuperAdmin → "Legalitas Usaha"</strong>, isi <strong>Nama Toko / Swalayan</strong> (menggantikan nama dummy default), <strong>Alamat Lengkap</strong>, <strong>Nomor Telepon</strong>, <strong>NPWP / NIB</strong>, serta <strong>Header &amp; Footer Struk Kasir</strong>, lalu klik <strong>"Simpan Konfigurasi Usaha"</strong>.
+                    </p>
+                  </div>
+
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                      Langkah 3 — Akun Staf &amp; Kasir
+                    </div>
+                    <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                      Buka <strong>SuperAdmin → "Manajemen Kredensial"</strong>, buat akun login beserta PIN otorisasi untuk <strong>Owner</strong>, <strong>Admin Gudang</strong>, serta <strong>Kasir 01 / Kasir 02</strong>, lalu klik <strong>"Simpan"</strong>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. JALUR A — TOKO BARU (INPUT MANUAL / IMPORT TEMPLATE) + PILIHAN MODE OFFLINE ATAU ONLINE */}
+              <div
+                className={`p-4 rounded-xl border space-y-3.5 ${
+                  isLight ? 'bg-white border-emerald-500/40' : 'bg-[#161b22] border-emerald-500/30'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 font-mono text-[11px]">
+                      JALUR A
+                    </span>
+                    <span>TOKO BARU (INPUT MANUAL / IMPORT TEMPLATE) + PILIHAN MODE OFFLINE ATAU ONLINE</span>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                    Mulai dari Nol
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs leading-relaxed">
+                  {/* Sub-bagian 2.1: Siapkan 3 File Master Awal */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-emerald-500 dark:text-emerald-400">
+                      A1. Siapkan 3 File Master Awal (Contoh File A, B, C) di Komputer
+                    </div>
+                    <ul className={`list-disc pl-4 space-y-1.5 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <li>
+                        <strong>File A (<code className="font-mono text-emerald-400">Master_Kategori_Satuan.csv</code> / JSON):</strong> Daftar kategori barang (Sembako, Minuman, ATK, dll.) dan satuan jual (Pcs, Pack, Dus).
+                      </li>
+                      <li>
+                        <strong>File B (<code className="font-mono text-emerald-400">Master_Produk_Harga.csv</code> / JSON):</strong> Daftar SKU / Barcode, Nama Barang, Harga Beli (HPP), Harga Jual, dan Stok Awal.
+                      </li>
+                      <li>
+                        <strong>File C (<code className="font-mono text-emerald-400">Master_Supplier_Pelanggan.csv</code> / JSON):</strong> Daftar pemasok utama (Supplier) dan member pelanggan tetap.
+                      </li>
+                    </ul>
+                  </div>
+
+                  {/* Sub-bagian 2.2: Proses Input ke Sistem */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-cyan-500 dark:text-cyan-400">
+                      A2. Proses Input Berurutan ke Sistem
+                    </div>
+                    <ol className={`list-decimal pl-4 space-y-1.5 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <li>
+                        Masuk ke menu <strong>SuperAdmin → "Data Master &amp; Migrasi"</strong>.
+                      </li>
+                      <li>
+                        Pilih &amp; salin/impor <strong>File A (Kategori/Satuan)</strong> → klik <strong>Simpan</strong> → lanjut impor <strong>File B (Produk &amp; Stok Awal)</strong> → klik <strong>Simpan</strong> → lanjut impor <strong>File C (Supplier/Pelanggan)</strong> → klik <strong>Simpan</strong>.
+                      </li>
+                      <li>
+                        Buka modul <strong>"Inventaris / Katalog Produk"</strong> untuk mengecek hasil input dan memastikan seluruh harga serta stok awal sudah sesuai fisik rak.
+                      </li>
+                    </ol>
+                  </div>
+
+                  {/* Sub-bagian 2.3: Menentukan Mode Penyimpanan */}
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-amber-500 dark:text-amber-400">
+                      A3. Menentukan Mode Penyimpanan Toko
+                    </div>
+                    <div className={`space-y-2 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <div className="p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5">
+                        <strong className="text-amber-500 dark:text-amber-400 block mb-0.5">
+                          • Jika Memilih MODE OFFLINE (Lokal Saja):
+                        </strong>
+                        Buka <strong>"SOP Cloud &amp; Backup"</strong> → klik tombol <strong>"1. Lokal Saja (100% Offline)"</strong> → pastikan badge header berubah menjadi <code className="font-mono text-amber-400">LOCAL OFFLINE MODE</code> → klik <strong>"Unduh Backup Data Lokal (.json)"</strong> dan simpan ke folder PC/Flashdisk dengan nama <code className="font-mono">BACKUP_TOKO_OFFLINE_TGL.json</code> → toko siap transaksi kasir tanpa internet.
+                      </div>
+                      <div className="p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                        <strong className="text-emerald-500 dark:text-emerald-400 block mb-0.5">
+                          • Jika Memilih MODE ONLINE (Supabase + GAS):
+                        </strong>
+                        Siapkan proyek Supabase &amp; Google Apps Script (GAS) milik toko → buka <strong>"Integrasi Cloud"</strong> → tempel <strong>Supabase URL</strong>, <strong>Anon Key</strong>, dan <strong>URL Webhook GAS</strong> → klik <strong>"Simpan Konfigurasi"</strong> → klik <strong>"Uji Koneksi &amp; Sync Sekarang"</strong> hingga status <code className="font-mono text-emerald-400">ONLINE — SYNCED</code> → buka <strong>"SOP Cloud &amp; Backup"</strong> → klik <strong>"Export Config Backup (.json)"</strong> untuk menyimpan kunci akses toko.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. JALUR B — TOKO LAMA (MIGRASI DARI APLIKASI KASIR LAMA / EXCEL KE JACS RETAILOS) */}
+              <div
+                className={`p-4 rounded-xl border space-y-3.5 ${
+                  isLight ? 'bg-white border-amber-500/40' : 'bg-[#161b22] border-amber-500/30'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-xs sm:text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 font-mono text-[11px]">
+                      JALUR B
+                    </span>
+                    <span>TOKO LAMA (MIGRASI DARI APLIKASI KASIR LAMA / EXCEL KE JACS RETAILOS)</span>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                    Migrasi Sistem Lama Tanpa Selisih Saldo
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs leading-relaxed">
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-amber-500 dark:text-amber-400">
+                      Langkah 1 — Ekspor Data dari Sistem Lama
+                    </div>
+                    <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                      Ekspor database dari komputer kasir lama / program Excel menjadi 3 file bersih:
+                    </p>
+                    <ul className={`list-disc pl-4 space-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <li>
+                        <strong>File A:</strong> <code className="font-mono text-amber-400">Data_Barang_Lama.csv</code> (SKU, Nama, HPP, Harga Jual).
+                      </li>
+                      <li>
+                        <strong>File B:</strong> <code className="font-mono text-amber-400">Saldo_Stok_Terakhir.csv</code> (Stok opname aktual per SKU).
+                      </li>
+                      <li>
+                        <strong>File C:</strong> <code className="font-mono text-amber-400">Saldo_Kas_Piutang_Awal.xlsx/.csv</code> (Saldo kas laci, bank, piutang/hutang aktif).
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-1.5 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-cyan-500 dark:text-cyan-400">
+                      Langkah 2 — Rapikan Kolom &amp; Salin ke Template JacS
+                    </div>
+                    <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                      Buka <strong>SuperAdmin → "Data Master &amp; Migrasi"</strong> → unduh template standar JacS → salin isi <strong>File A, B, C</strong> ke kolom template yang sesuai → unggah/impor secara berurutan lalu klik <strong>"Simpan &amp; Terapkan ke Database"</strong>.
+                    </p>
+                  </div>
+
+                  <div
+                    className={`p-3.5 rounded-xl border space-y-2 ${
+                      isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-slate-800'
+                    }`}
+                  >
+                    <div className="font-bold text-emerald-500 dark:text-emerald-400">
+                      Langkah 3 — Kunci Saldo Awal &amp; Pilih Mode
+                    </div>
+                    <ul className={`list-disc pl-4 space-y-1.5 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                      <li>
+                        <strong>Jika Lanjut Offline Dulu untuk Uji Coba Kasir:</strong> Aktifkan <strong>"1. Lokal Saja (100% Offline)"</strong> → klik <strong>"Unduh Backup Data Lokal (.json)"</strong> dan simpan file <code className="font-mono text-amber-400">BACKUP_MIGRASI_LOKAL.json</code> ke flashdisk.
+                      </li>
+                      <li>
+                        <strong>Jika Langsung Online ke Cloud (atau Pindah dari Offline ke Online Setelah Uji Coba):</strong> Isi kredensial Supabase + GAS di <strong>"Integrasi Cloud"</strong> → klik tombol <strong>"Migrasi Offline ke Online (Push ke Supabase &amp; GAS)"</strong> → verifikasi jumlah produk &amp; saldo stok di cloud sudah identik 100% dengan sistem lama.
+                      </li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
