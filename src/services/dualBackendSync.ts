@@ -1,3 +1,6 @@
+export type StorageOperationalMode = 'LOCAL_ONLY' | 'ONLINE_CLOUD' | 'HYBRID_MIGRATION';
+export const STORAGE_MODE_KEY = 'jacs_storage_mode';
+
 export interface SyncStatusSnapshot {
   isOnline: boolean;
   isSyncing: boolean;
@@ -7,6 +10,7 @@ export interface SyncStatusSnapshot {
   gasStatus: 'CONNECTED' | 'DISCONNECTED' | 'CONFIG_REQUIRED';
   lastSyncFailed?: boolean;
   lastSyncErrorMessage?: string | null;
+  storageMode?: StorageOperationalMode;
 }
 
 export interface SyncQueueItem {
@@ -130,6 +134,7 @@ class DualBackendSyncEngine {
   private lastSyncFailed = false;
   private lastSyncErrorMessage: string | null = null;
   private supabaseLastConnected: boolean | null = null;
+  private storageMode: StorageOperationalMode = 'ONLINE_CLOUD';
   private listeners: Set<(snap: SyncStatusSnapshot) => void> = new Set();
 
   private remoteChannel: BroadcastChannel | null = null;
@@ -203,6 +208,21 @@ class DualBackendSyncEngine {
       }
     } catch {}
     try {
+      const savedMode = localStorage.getItem(STORAGE_MODE_KEY);
+      if (
+        savedMode === 'LOCAL_ONLY' ||
+        savedMode === 'ONLINE_CLOUD' ||
+        savedMode === 'HYBRID_MIGRATION'
+      ) {
+        this.storageMode = savedMode;
+      } else {
+        const hasCloud = Boolean(
+          (this.config.supabaseUrl && this.config.supabaseAnonKey) || this.config.gasWebhookUrl
+        );
+        this.storageMode = hasCloud ? 'ONLINE_CLOUD' : 'ONLINE_CLOUD';
+      }
+    } catch {}
+    try {
       const savedClover = localStorage.getItem('jacs_clover_config');
       const legacyToken = localStorage.getItem('jacs_superadmin_api_key') || '';
       if (savedClover) {
@@ -238,6 +258,51 @@ class DualBackendSyncEngine {
 
   public getConfig(): DualBackendConfig {
     return { ...this.config };
+  }
+
+  public getStorageMode(): StorageOperationalMode {
+    try {
+      const savedMode =
+        typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_MODE_KEY) : null;
+      if (
+        savedMode === 'LOCAL_ONLY' ||
+        savedMode === 'ONLINE_CLOUD' ||
+        savedMode === 'HYBRID_MIGRATION'
+      ) {
+        this.storageMode = savedMode;
+      }
+    } catch {}
+    return this.storageMode;
+  }
+
+  public setStorageMode(mode: StorageOperationalMode) {
+    this.storageMode = mode;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_MODE_KEY, mode);
+      }
+    } catch {}
+    if (mode === 'LOCAL_ONLY' || mode === 'HYBRID_MIGRATION') {
+      this.lastSyncFailed = false;
+      this.lastSyncErrorMessage = null;
+    }
+    if (mode === 'LOCAL_ONLY') {
+      this.config = { ...this.config, provider: 'LOCAL' };
+    } else if (mode === 'ONLINE_CLOUD') {
+      const nextProvider: BackendProvider =
+        this.config.supabaseUrl && this.config.supabaseAnonKey
+          ? 'SUPABASE'
+          : this.config.gasWebhookUrl
+          ? 'GAS'
+          : 'SUPABASE';
+      this.config = { ...this.config, provider: nextProvider };
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('jacs_dual_backend_config', JSON.stringify(this.config));
+      }
+    } catch {}
+    this.notify();
   }
 
   public saveConfig(cfg: Partial<DualBackendConfig>) {
@@ -406,6 +471,7 @@ class DualBackendSyncEngine {
 
   public getSnapshot(): SyncStatusSnapshot {
     const hasSupabase = Boolean(this.config.supabaseUrl && this.config.supabaseAnonKey);
+    const activeMode = this.getStorageMode();
     return {
       isOnline: this.isOnline,
       isSyncing: this.isSyncing,
@@ -417,8 +483,9 @@ class DualBackendSyncEngine {
         ? 'DISCONNECTED'
         : 'CONNECTED',
       gasStatus: this.config.gasWebhookUrl ? 'CONNECTED' : 'CONFIG_REQUIRED',
-      lastSyncFailed: this.lastSyncFailed,
-      lastSyncErrorMessage: this.lastSyncErrorMessage,
+      lastSyncFailed: activeMode === 'LOCAL_ONLY' ? false : this.lastSyncFailed,
+      lastSyncErrorMessage: activeMode === 'LOCAL_ONLY' ? null : this.lastSyncErrorMessage,
+      storageMode: activeMode,
     };
   }
 
@@ -446,6 +513,11 @@ class DualBackendSyncEngine {
   }
 
   public enqueue(type: string, action: 'UPSERT' | 'DELETE' | 'INSERT', payload: any) {
+    const mode = this.getStorageMode();
+    if (mode === 'LOCAL_ONLY') {
+      // Mode 1: Lokal Saja (100% Offline — Tanpa Cloud) -> Tidak membuat panggilan otomatis ke Cloud
+      return;
+    }
     const txUuid = payload?.tx_uuid || payload?.transaction_id || payload?.id;
     if (txUuid && this.queue.some(q => (q.payload?.tx_uuid === txUuid || q.payload?.transaction_id === txUuid || q.payload?.id === txUuid))) {
       return; // Skip duplicate queue item (Idempotency via tx_uuid)
@@ -461,12 +533,13 @@ class DualBackendSyncEngine {
     this.saveQueue();
     this.notify();
 
-    if (this.isOnline) {
+    if (this.isOnline && mode === 'ONLINE_CLOUD') {
       this.processQueue();
     }
   }
 
   public async processQueue() {
+    if (this.getStorageMode() === 'LOCAL_ONLY') return;
     if (this.isSyncing || this.queue.length === 0 || !this.isOnline) return;
 
     this.isSyncing = true;
@@ -715,8 +788,10 @@ class DualBackendSyncEngine {
         ? localStorage.getItem('jacs_session_sig') || 'JACS-SECURE-SIG'
         : 'JACS-SECURE-SIG';
 
-    // 1. Poll Supabase remote_commands (if configured)
-    if (this.config.supabaseUrl && this.config.supabaseAnonKey && this.isOnline) {
+    const isLocalOnlyMode = this.getStorageMode() === 'LOCAL_ONLY';
+
+    // 1. Poll Supabase remote_commands (if configured and not LOCAL_ONLY)
+    if (!isLocalOnlyMode && this.config.supabaseUrl && this.config.supabaseAnonKey && this.isOnline) {
       try {
         const url = `${this.config.supabaseUrl}/rest/v1/remote_commands?or=(target_branch_id.eq.ALL_BRANCHES,target_branch_id.eq.${encodeURIComponent(branchId)})&order=issued_at.desc&limit=15`;
         const res = await fetch(url, {
@@ -748,8 +823,8 @@ class DualBackendSyncEngine {
       } catch {}
     }
 
-    // 2. Poll Google Apps Script (if configured)
-    if (this.config.gasWebhookUrl && this.isOnline) {
+    // 2. Poll Google Apps Script (if configured and not LOCAL_ONLY)
+    if (!isLocalOnlyMode && this.config.gasWebhookUrl && this.isOnline) {
       try {
         const res = await fetch(this.config.gasWebhookUrl, {
           method: 'POST',
@@ -813,7 +888,8 @@ class DualBackendSyncEngine {
       this.remoteChannel?.postMessage({ kind: 'REMOTE_TELEMETRY', payload: report });
     } catch {}
 
-    // Best-effort upload to configured GAS/Supabase
+    // Best-effort upload to configured GAS/Supabase (skip in LOCAL_ONLY mode)
+    if (this.getStorageMode() === 'LOCAL_ONLY') return;
     const txUuid = generateTxUuid();
     if (this.config.gasWebhookUrl && this.isOnline) {
       try {

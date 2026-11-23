@@ -147,6 +147,7 @@ import {
   BranchTelemetryReport,
   CloverConfig,
   DualBackendConfig,
+  StorageOperationalMode,
 } from '../services/dualBackendSync';
 import {
   pushSyncData,
@@ -472,6 +473,8 @@ export interface AppContextType {
   testCloudEndpoints: (customConfig?: DualBackendConfig) => Promise<CloudConnectionPingResult>;
   activeBackendProvider: 'SUPABASE' | 'GAS' | 'LOCAL';
   setActiveBackendProvider: (provider: 'SUPABASE' | 'GAS' | 'LOCAL') => void;
+  storageOperationalMode: StorageOperationalMode;
+  setStorageOperationalMode: (mode: StorageOperationalMode) => void;
   gasWebhookUrl: string;
   setGasWebhookUrl: (url: string) => void;
   testGasConnection: () => Promise<{ ok: boolean; message: string; status: number }>;
@@ -3850,6 +3853,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const isAutoSyncRunningRef = useRef<boolean>(false);
 
   const triggerAutoCloudSync = useCallback((reason: string = 'DATA_CHANGE') => {
+    const mode = dualBackendSync.getStorageMode();
+    if (mode === 'LOCAL_ONLY' || mode === 'HYBRID_MIGRATION') {
+      // Mode Lokal Saja (100% Offline) atau Hybrid Buffer: Nonaktifkan panggilan otomatis latar belakang
+      return;
+    }
     const config = dualBackendSync.getConfig();
     // Non-blocking auto-sync: hanya berjalan jika supabaseUrl atau gasWebhookUrl sudah terisi
     if (!config.supabaseUrl?.trim() && !config.gasWebhookUrl?.trim()) {
@@ -3861,6 +3869,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     autoSyncDebounceTimerRef.current = setTimeout(async () => {
+      if (
+        dualBackendSync.getStorageMode() === 'LOCAL_ONLY' ||
+        dualBackendSync.getStorageMode() === 'HYBRID_MIGRATION'
+      ) {
+        return;
+      }
       if (isAutoSyncRunningRef.current) {
         setTimeout(() => triggerAutoCloudSync(reason), 1500);
         return;
@@ -3921,7 +3935,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [products, triggerAutoCloudSync]);
 
+  const [storageOperationalMode, setStorageOperationalModeState] = useState<StorageOperationalMode>(
+    () => dualBackendSync.getStorageMode()
+  );
+
   const [activeBackendProvider, setActiveBackendProviderState] = useState<'SUPABASE' | 'GAS' | 'LOCAL'>(() => {
+    if (dualBackendSync.getStorageMode() === 'LOCAL_ONLY') return 'LOCAL';
     const cfg = dualBackendSync.getConfig();
     if (cfg.provider) return cfg.provider;
     if (cfg.gasWebhookUrl && !cfg.supabaseUrl) return 'GAS';
@@ -3929,9 +3948,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return 'LOCAL';
   });
 
+  const setStorageOperationalMode = useCallback(
+    (mode: StorageOperationalMode) => {
+      setStorageOperationalModeState(mode);
+      dualBackendSync.setStorageMode(mode);
+      if (mode === 'LOCAL_ONLY') {
+        setActiveBackendProviderState('LOCAL');
+        showToast(
+          'Mode Penyimpanan diatur ke: Lokal Saja (100% Offline — Tanpa Cloud). Panggilan otomatis cloud dinonaktifkan.',
+          'info'
+        );
+      } else if (mode === 'HYBRID_MIGRATION') {
+        showToast(
+          'Mode Penyimpanan diatur ke: Hybrid (Offline Buffer → Siap Migrasi ke Online Cloud).',
+          'info'
+        );
+      } else {
+        const cfg = dualBackendSync.getConfig();
+        const nextProvider =
+          cfg.supabaseUrl && cfg.supabaseAnonKey
+            ? 'SUPABASE'
+            : cfg.gasWebhookUrl
+            ? 'GAS'
+            : 'SUPABASE';
+        setActiveBackendProviderState(nextProvider);
+        showToast(
+          'Mode Penyimpanan diatur ke: Online Cloud (Supabase + Google Apps Script Aktif).',
+          'success'
+        );
+      }
+    },
+    [showToast]
+  );
+
   const setActiveBackendProvider = useCallback((provider: 'SUPABASE' | 'GAS' | 'LOCAL') => {
     setActiveBackendProviderState(provider);
     dualBackendSync.saveConfig({ provider });
+    if (provider === 'LOCAL' && dualBackendSync.getStorageMode() === 'ONLINE_CLOUD') {
+      setStorageOperationalModeState('HYBRID_MIGRATION');
+      dualBackendSync.setStorageMode('HYBRID_MIGRATION');
+    } else if ((provider === 'SUPABASE' || provider === 'GAS') && dualBackendSync.getStorageMode() === 'LOCAL_ONLY') {
+      setStorageOperationalModeState('ONLINE_CLOUD');
+      dualBackendSync.setStorageMode('ONLINE_CLOUD');
+    }
     showToast(`Provider backend aktif diatur ke: ${provider}`, 'success');
   }, [showToast]);
 
@@ -5949,74 +6008,79 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showReceipt(newSale);
 
       const txUuid = generateTxUuid();
+      const currentStorageMode = dualBackendSync.getStorageMode();
 
-      // 1. Enqueue to dual-backend sync engine (Supabase & GAS REST)
-      dualBackendSync.enqueue('POS_TRANSACTION', 'INSERT', {
-        ...newSale,
-        tx_uuid: txUuid,
-      });
-
-      // 2. Enqueue to GAS offline queue & webhook
-      pushTransactionToGAS({
-        receiptNumber: newSale.receipt_number,
-        shiftId: payload.shiftId,
-        terminalId: payload.terminalId || activeTerminalId,
-        stationCode: resolvedStationCode,
-        cashierName: newSale.cashier_name,
-        customerId: payload.customerId,
-        customerName: payload.customerName,
-        items: payload.items,
-        total: payload.total,
-        paymentMethod: newSale.payment_method,
-        cashTendered: payload.cashTendered,
-        changeDue: payload.changeDue,
-        tx_uuid: txUuid,
-      }).catch(() => {});
-
-      for (const item of payload.items) {
-        const delta = -((item.quantity || 0) * (item.conversionFactor || 1));
-        const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-
-        pushStockMovementToSupabase({
-          id: movementId,
-          productId: item.product.id,
-          sku: item.product.sku || item.product.id,
-          productName: item.product.name,
-          deltaQty: delta,
-          movementType: 'SALE',
-          referenceId: newSale.receipt_number,
-          notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
-          createdBy: newSale.cashier_name,
-        }).catch(() => {});
-
-        pushStockMovementToGAS({
-          id: movementId,
-          productId: item.product.id,
-          sku: item.product.sku || item.product.id,
-          productName: item.product.name,
-          deltaQty: delta,
-          movementType: 'SALE',
-          referenceId: newSale.receipt_number,
-          notes: `POS Sale GAS (${resolvedStationCode})`,
-          createdBy: newSale.cashier_name,
-        }).catch(() => {});
+      if (currentStorageMode !== 'LOCAL_ONLY') {
+        // 1. Enqueue to dual-backend sync engine (Supabase & GAS REST)
+        dualBackendSync.enqueue('POS_TRANSACTION', 'INSERT', {
+          ...newSale,
+          tx_uuid: txUuid,
+        });
       }
 
-      // Trigger Atomic Supabase RPC transaction processing (non-blocking)
-      pushTransactionAtomicRpc({
-        receiptNumber: newSale.receipt_number,
-        shiftId: payload.shiftId,
-        terminalId: payload.terminalId || activeTerminalId,
-        stationCode: resolvedStationCode,
-        cashierName: newSale.cashier_name,
-        customerId: payload.customerId,
-        customerName: payload.customerName,
-        items: payload.items,
-        total: payload.total,
-        paymentMethod: newSale.payment_method,
-        cashTendered: payload.cashTendered,
-        changeDue: payload.changeDue,
-      }).catch(() => {});
+      if (currentStorageMode === 'ONLINE_CLOUD') {
+        // 2. Enqueue to GAS offline queue & webhook
+        pushTransactionToGAS({
+          receiptNumber: newSale.receipt_number,
+          shiftId: payload.shiftId,
+          terminalId: payload.terminalId || activeTerminalId,
+          stationCode: resolvedStationCode,
+          cashierName: newSale.cashier_name,
+          customerId: payload.customerId,
+          customerName: payload.customerName,
+          items: payload.items,
+          total: payload.total,
+          paymentMethod: newSale.payment_method,
+          cashTendered: payload.cashTendered,
+          changeDue: payload.changeDue,
+          tx_uuid: txUuid,
+        }).catch(() => {});
+
+        for (const item of payload.items) {
+          const delta = -((item.quantity || 0) * (item.conversionFactor || 1));
+          const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+          pushStockMovementToSupabase({
+            id: movementId,
+            productId: item.product.id,
+            sku: item.product.sku || item.product.id,
+            productName: item.product.name,
+            deltaQty: delta,
+            movementType: 'SALE',
+            referenceId: newSale.receipt_number,
+            notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
+            createdBy: newSale.cashier_name,
+          }).catch(() => {});
+
+          pushStockMovementToGAS({
+            id: movementId,
+            productId: item.product.id,
+            sku: item.product.sku || item.product.id,
+            productName: item.product.name,
+            deltaQty: delta,
+            movementType: 'SALE',
+            referenceId: newSale.receipt_number,
+            notes: `POS Sale GAS (${resolvedStationCode})`,
+            createdBy: newSale.cashier_name,
+          }).catch(() => {});
+        }
+
+        // Trigger Atomic Supabase RPC transaction processing (non-blocking)
+        pushTransactionAtomicRpc({
+          receiptNumber: newSale.receipt_number,
+          shiftId: payload.shiftId,
+          terminalId: payload.terminalId || activeTerminalId,
+          stationCode: resolvedStationCode,
+          cashierName: newSale.cashier_name,
+          customerId: payload.customerId,
+          customerName: payload.customerName,
+          items: payload.items,
+          total: payload.total,
+          paymentMethod: newSale.payment_method,
+          cashTendered: payload.cashTendered,
+          changeDue: payload.changeDue,
+        }).catch(() => {});
+      }
 
       setGasOfflineQueueCount(getGasOfflineQueue().length);
 
@@ -10774,6 +10838,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     testCloudEndpoints: testCloudEndpointsHandler,
     activeBackendProvider,
     setActiveBackendProvider,
+    storageOperationalMode,
+    setStorageOperationalMode,
     gasWebhookUrl: gasWebhookUrlState,
     setGasWebhookUrl,
     testGasConnection: testGasConnectionHandler,

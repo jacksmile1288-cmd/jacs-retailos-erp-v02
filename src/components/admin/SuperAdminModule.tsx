@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { useAudit } from '../../audit';
-import { CloverEnvironment, dualBackendSync, RemoteCommandType } from '../../services/dualBackendSync';
+import {
+  CloverEnvironment,
+  dualBackendSync,
+  RemoteCommandType,
+  StorageOperationalMode,
+} from '../../services/dualBackendSync';
 import { CloverSyncResult } from '../../services/cloverSyncService';
 import { CloudSyncResult, CloudConnectionPingResult, CloudPullResult } from '../../services/cloudSyncService';
 import { OperationalTopologyMode, Terminal, UserRole } from '../../types';
@@ -429,6 +434,8 @@ export const SuperAdminModule: React.FC = () => {
     pullCloudSyncData,
     activeBackendProvider,
     setActiveBackendProvider,
+    storageOperationalMode,
+    setStorageOperationalMode,
     gasWebhookUrl,
     setGasWebhookUrl,
     testGasConnection,
@@ -727,6 +734,7 @@ export const SuperAdminModule: React.FC = () => {
 
   const [cloudGuideTab, setCloudGuideTab] = useState<'supabase' | 'gas'>('supabase');
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+  const [expandedCloudSopId, setExpandedCloudSopId] = useState<'sop1' | 'sop2' | 'sop3' | 'sop4' | 'all'>('all');
 
   const handleCopySnippet = (codeText: string, id: string) => {
     try {
@@ -737,6 +745,274 @@ export const SuperAdminModule: React.FC = () => {
     } catch {
       showToast('Gagal menyalin kode secara otomatis.', 'error');
     }
+  };
+
+  // =========================================================================
+  // UTILITAS BACKUP & RESTORE KREDENSIAL CLOUD (EXPORT / IMPORT / SALIN)
+  // =========================================================================
+  const handleExportCloudCredentialsBackup = () => {
+    const existingCfg = dualBackendSync.getConfig();
+    const activeUrl = (cloudSupabaseUrl.trim() || existingCfg.supabaseUrl || '').trim();
+    const activeAnonKey = (cloudSupabaseAnonKey.trim() || existingCfg.supabaseAnonKey || '').trim();
+    const activeGasUrl = (cloudGasWebhookUrl.trim() || existingCfg.gasWebhookUrl || '').trim();
+
+    const payload = {
+      supabaseUrl: activeUrl,
+      supabaseAnonKey: activeAnonKey,
+      gasWebhookUrl: activeGasUrl,
+      provider: activeBackendProvider,
+      exportedAt: new Date().toISOString(),
+      appVersion: '2.5.0-ENTERPRISE',
+      developer: 'Jacs Enterprise',
+    };
+
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JacS_Cloud_Credentials_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast('Backup kredensial Cloud (.json) berhasil diunduh.', 'success');
+    addSyncLog(`💾 Export Config Backup (.json) berhasil (${activeUrl || 'URL kosong'}).`);
+  };
+
+  const handleImportCloudCredentialsBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const rawText = String(ev.target?.result || '');
+        const parsed = JSON.parse(rawText);
+        if (!parsed || typeof parsed !== 'object') {
+          showToast('Format file JSON backup kredensial tidak valid.', 'error');
+          return;
+        }
+
+        const importedUrl = String(
+          parsed.supabaseUrl ?? parsed.supabase_url ?? parsed.VITE_SUPABASE_URL ?? ''
+        ).trim();
+        const importedKey = String(
+          parsed.supabaseAnonKey ?? parsed.supabase_anon_key ?? parsed.VITE_SUPABASE_ANON_KEY ?? ''
+        ).trim();
+        const importedGas = String(
+          parsed.gasWebhookUrl ?? parsed.gas_webhook_url ?? ''
+        ).trim();
+
+        if (!importedUrl && !importedKey && !importedGas) {
+          showToast('File JSON tidak berisi supabaseUrl atau supabaseAnonKey yang valid.', 'error');
+          return;
+        }
+
+        if (importedUrl) setCloudSupabaseUrl(importedUrl);
+        if (importedKey) setCloudSupabaseAnonKey(importedKey);
+        if (importedGas) setCloudGasWebhookUrl(importedGas);
+
+        const existingCfg = dualBackendSync.getConfig();
+        const mergedCfg = {
+          supabaseUrl: importedUrl || existingCfg.supabaseUrl || '',
+          supabaseAnonKey: importedKey || existingCfg.supabaseAnonKey || '',
+          gasWebhookUrl: importedGas || existingCfg.gasWebhookUrl || '',
+          provider:
+            parsed.provider === 'SUPABASE' || parsed.provider === 'GAS' || parsed.provider === 'LOCAL'
+              ? parsed.provider
+              : importedUrl
+              ? 'SUPABASE'
+              : existingCfg.provider,
+        };
+        dualBackendSync.saveConfig(mergedCfg);
+        if (mergedCfg.provider) {
+          setActiveBackendProvider(mergedCfg.provider);
+        }
+
+        showToast(
+          'Backup kredensial Cloud (.json) berhasil dipulihkan & disimpan ke sistem!',
+          'success'
+        );
+        addSyncLog(
+          `📂 Import Config Backup (.json) berhasil dipulihkan (${mergedCfg.supabaseUrl || 'Supabase'}).`
+        );
+      } catch (err: any) {
+        showToast(
+          `Gagal membaca file backup kredensial: ${err?.message || 'JSON tidak valid'}`,
+          'error'
+        );
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleCopyActiveCloudCredentials = () => {
+    const existingCfg = dualBackendSync.getConfig();
+    const activeUrl = (cloudSupabaseUrl.trim() || existingCfg.supabaseUrl || '').trim();
+    const activeAnonKey = (cloudSupabaseAnonKey.trim() || existingCfg.supabaseAnonKey || '').trim();
+    const activeGasUrl = (cloudGasWebhookUrl.trim() || existingCfg.gasWebhookUrl || '').trim();
+
+    const summary = [
+      '# JacS RetailOS ERP — Active Cloud Credentials (Jacs Enterprise)',
+      `VITE_SUPABASE_URL=${activeUrl}`,
+      `VITE_SUPABASE_ANON_KEY=${activeAnonKey}`,
+      ...(activeGasUrl ? [`VITE_GAS_WEBHOOK_URL=${activeGasUrl}`] : []),
+      `EXPORTED_AT=${new Date().toISOString()}`,
+    ].join('\n');
+
+    try {
+      navigator.clipboard.writeText(summary);
+      setCopiedSnippetId('active-cloud-creds');
+      showToast('Ringkasan URL & Anon Key aktif berhasil disalin ke clipboard!', 'success');
+      addSyncLog('📋 Kredensial aktif Supabase (URL & Anon Key) disalin ke clipboard.');
+      setTimeout(() => setCopiedSnippetId(null), 2500);
+    } catch {
+      showToast('Gagal menyalin kredensial ke clipboard.', 'error');
+    }
+  };
+
+  // =========================================================================
+  // TOMBOL TEKNIS BACKUP DATA LOKAL (.JSON) & MIGRASI OFFLINE KE ONLINE CLOUD
+  // =========================================================================
+  const handleDownloadLocalDataBackupJson = () => {
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const exporterName = effectiveUser?.name || 'Super Admin';
+    const localSnapshotPayload = {
+      metadata: {
+        app: 'JacS RetailOS ERP',
+        version: 'v2.5.0-ENTERPRISE',
+        developer: 'Jacs Enterprise',
+        storageMode: storageOperationalMode,
+        exportedAt: new Date().toISOString(),
+        exportedBy: exporterName,
+      },
+      products: products || [],
+      transactions: sales || [],
+      sales: sales || [],
+      accounts: financeEntries || [],
+      financeEntries: financeEntries || [],
+      journalEntries: journalEntries || [],
+      branches: branches || [],
+      employees: employees || [],
+      suppliers: suppliers || [],
+      customers: customers || [],
+      purchaseOrders: purchasing || [],
+      cashierShifts: cashierShifts || [],
+      businessProfile,
+      systemSettings: {
+        businessProfile,
+        sheetConfig,
+        isProductionMode,
+        isGlobalMaintenance,
+        theme,
+        language,
+        storageMode: storageOperationalMode,
+        dualBackendConfig: dualBackendSync.getConfig(),
+      },
+    };
+
+    const jsonStr = JSON.stringify(localSnapshotPayload, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `JacS_Local_Store_Backup_${dateStamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(
+      `Backup Data Lokal (.json) berhasil diunduh (${(products || []).length} Produk, ${(sales || []).length} Transaksi).`,
+      'success'
+    );
+    addSyncLog(
+      `💾 Unduh Backup Data Lokal (.json) selesai (${(products || []).length} produk, ${(sales || []).length} transaksi).`
+    );
+  };
+
+  const handleRestoreLocalDataBackupJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const rawText = String(ev.target?.result || '');
+        const rawParsed = JSON.parse(rawText);
+        if (!rawParsed || typeof rawParsed !== 'object') {
+          showToast('Format file backup data lokal (.json) tidak valid.', 'error');
+          return;
+        }
+
+        // Dukung file signed backup envelope maupun file snapshot JSON langsung
+        const snapshotData =
+          rawParsed.payload && typeof rawParsed.payload === 'object'
+            ? rawParsed.payload
+            : rawParsed.snapshotPayload && typeof rawParsed.snapshotPayload === 'object'
+            ? rawParsed.snapshotPayload
+            : rawParsed;
+
+        const normalizedSnapshot = {
+          ...snapshotData,
+          sales: Array.isArray(snapshotData.sales)
+            ? snapshotData.sales
+            : Array.isArray(snapshotData.transactions)
+            ? snapshotData.transactions
+            : undefined,
+          financeEntries: Array.isArray(snapshotData.financeEntries)
+            ? snapshotData.financeEntries
+            : Array.isArray(snapshotData.accounts)
+            ? snapshotData.accounts
+            : Array.isArray(snapshotData.finance)
+            ? snapshotData.finance
+            : undefined,
+        };
+
+        const res = restoreSystemSnapshot(normalizedSnapshot);
+        if (res.success) {
+          recordAudit({
+            traceId: `LOCAL-BACKUP-RESTORE-${Date.now()}`,
+            userId: effectiveUser?.id || 'super-admin',
+            userName: effectiveUser?.name || 'Super Admin',
+            userRole: effectiveUser?.role || 'Super Admin',
+            module: 'SUPER_ADMIN',
+            action: 'CONFIG_CHANGE',
+            severity: 'INFO',
+            payloadAfter: {
+              action: 'RESTORE_LOCAL_JSON_BACKUP',
+              fileName: file.name,
+              restoredKeys: res.restoredKeys,
+            },
+          });
+          showToast(
+            `Data toko lokal berhasil dipulihkan dari "${file.name}" (${res.restoredKeys.join(', ')}).`,
+            'success'
+          );
+          addSyncLog(`📂 Pulihkan Data Lokal (.json) berhasil dari file "${file.name}".`);
+        } else {
+          showToast(res.message || 'Gagal memulihkan file snapshot lokal.', 'error');
+        }
+      } catch (err: any) {
+        showToast(
+          `Gagal membaca file backup data lokal: ${err?.message || 'JSON tidak valid'}`,
+          'error'
+        );
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleMigrateOfflineToOnlineCloud = async () => {
+    setStorageOperationalMode('ONLINE_CLOUD');
+    addSyncLog(
+      '🚀 Memulai Migrasi Data Lokal ke Cloud (beralih ke Mode Online Cloud & mengirim snapshot ke Supabase/GAS)...'
+    );
+    await handleTestAndSyncNow();
   };
 
   const handleSyncCloverLive = async () => {
@@ -839,6 +1115,7 @@ export const SuperAdminModule: React.FC = () => {
     | 'migration'
     | 'branches'
     | 'master-data'
+    | 'cloud-sop'
     | 'sop';
   const setAdminTab = (tab: any) => {
     if (IS_CLIENT_TRIAL_MODE && tab !== 'legality') {
@@ -2126,6 +2403,7 @@ export const SuperAdminModule: React.FC = () => {
           {[
             { id: 'system', label: 'Status Sistem', icon: Activity, color: '#00f2fe' },
             { id: 'cloud', label: 'Integrasi Cloud', icon: Cloud, color: '#38bdf8' },
+            { id: 'cloud-sop', label: 'SOP Cloud & Backup', icon: ShieldCheck, color: '#10b981' },
             { id: 'legality', label: 'Legalitas Usaha', icon: Building2, color: '#10b981' },
             { id: 'branches', label: 'Jaringan Cabang', icon: Store, color: '#10b981' },
             { id: 'master-data', label: 'Data Master & Migrasi', icon: Database, color: '#06b6d4' },
@@ -4704,6 +4982,155 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             </div>
 
+            {/* PEMILIH MODE PENYIMPANAN & OPERASIONAL TOKO (3 OPSI FLEKSIBEL) */}
+            <div
+              className={`p-4 rounded-xl border mt-4 space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Mode Penyimpanan &amp; Operasional Toko (Tersimpan di <code className="font-mono text-cyan-400">jacs_storage_mode</code>)
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase border ${
+                        storageOperationalMode === 'LOCAL_ONLY'
+                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/35'
+                          : storageOperationalMode === 'HYBRID_MIGRATION'
+                          ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/35'
+                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                      }`}
+                    >
+                      {storageOperationalMode === 'LOCAL_ONLY'
+                        ? 'MODE 1: LOKAL SAJA (100% OFFLINE)'
+                        : storageOperationalMode === 'HYBRID_MIGRATION'
+                        ? 'MODE 3: HYBRID (OFFLINE BUFFER → MIGRASI)'
+                        : 'MODE 2: ONLINE CLOUD (SUPABASE + GAS)'}
+                    </span>
+                  </div>
+                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                    Pilih cara penyimpanan utama toko. Dapat diganti kapan saja dari Lokal 100% Offline ke Online Cloud tanpa kehilangan data transaksi.
+                  </p>
+                </div>
+
+                {(storageOperationalMode === 'LOCAL_ONLY' || storageOperationalMode === 'HYBRID_MIGRATION') && (
+                  <button
+                    type="button"
+                    onClick={handleMigrateOfflineToOnlineCloud}
+                    disabled={isCloudTestingAndSyncing}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white shadow-md flex items-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0 disabled:opacity-50"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>
+                      {isCloudTestingAndSyncing
+                        ? 'Memigrasikan Data ke Cloud...'
+                        : 'Migrasi Data Lokal ke Cloud Sekarang'}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Mode 1: Lokal Saja */}
+                <button
+                  type="button"
+                  onClick={() => setStorageOperationalMode('LOCAL_ONLY')}
+                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                    storageOperationalMode === 'LOCAL_ONLY'
+                      ? isLight
+                        ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/30'
+                        : 'bg-amber-950/30 border-amber-500/70 ring-2 ring-amber-500/20'
+                      : isLight
+                      ? 'bg-white hover:bg-slate-100 border-slate-200'
+                      : 'bg-[#161b22] hover:bg-slate-800/70 border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-amber-500 dark:text-amber-400 flex items-center gap-1.5">
+                        <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                        <span>Mode 1: Lokal Saja (100% Offline)</span>
+                      </span>
+                      {storageOperationalMode === 'LOCAL_ONLY' && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500 text-slate-950">
+                          AKTIF
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Semua transaksi POS, produk, stok, keuangan &amp; jurnal disimpan 100% di <code className="font-mono">localStorage</code> browser. Mematikan panggilan otomatis ke Supabase &amp; GAS (bebas error jaringan, badge <code className="font-mono">LOCAL OFFLINE MODE</code>).
+                    </p>
+                  </div>
+                </button>
+
+                {/* Mode 2: Online Cloud (Supabase + GAS) */}
+                <button
+                  type="button"
+                  onClick={() => setStorageOperationalMode('ONLINE_CLOUD')}
+                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                    storageOperationalMode === 'ONLINE_CLOUD'
+                      ? isLight
+                        ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/30'
+                        : 'bg-emerald-950/30 border-emerald-500/70 ring-2 ring-emerald-500/20'
+                      : isLight
+                      ? 'bg-white hover:bg-slate-100 border-slate-200'
+                      : 'bg-[#161b22] hover:bg-slate-800/70 border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-emerald-500 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Cloud className="w-3.5 h-3.5 shrink-0" />
+                        <span>Mode 2: Online Cloud (Supabase + GAS)</span>
+                      </span>
+                      {storageOperationalMode === 'ONLINE_CLOUD' && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-emerald-500 text-slate-950">
+                          AKTIF
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Mengaktifkan sinkronisasi langsung ke Jalur 1 (Supabase REST <code className="font-mono">jacs_erp_snapshots</code>) dan/atau Jalur 2 (Google Apps Script Webhook) sesuai kredensial yang dikonfigurasi.
+                    </p>
+                  </div>
+                </button>
+
+                {/* Mode 3: Hybrid (Offline Buffer -> Migrasi ke Online) */}
+                <button
+                  type="button"
+                  onClick={() => setStorageOperationalMode('HYBRID_MIGRATION')}
+                  className={`p-3.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-2 ${
+                    storageOperationalMode === 'HYBRID_MIGRATION'
+                      ? isLight
+                        ? 'bg-cyan-50 border-cyan-500 ring-2 ring-cyan-500/30'
+                        : 'bg-cyan-950/30 border-cyan-500/70 ring-2 ring-cyan-500/20'
+                      : isLight
+                      ? 'bg-white hover:bg-slate-100 border-slate-200'
+                      : 'bg-[#161b22] hover:bg-slate-800/70 border-slate-800'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-cyan-500 dark:text-cyan-400 flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                        <span>Mode 3: Hybrid (Offline Buffer → Online)</span>
+                      </span>
+                      {storageOperationalMode === 'HYBRID_MIGRATION' && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-500 text-slate-950">
+                          AKTIF
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-[11px] leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                      Mulai operasional secara lokal terlebih dahulu dengan antrean buffer, lalu migrasikan seluruh data lokal ke Supabase + GAS kapan saja dalam 1 klik saat internet/cloud siap.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             {/* Pilihan Provider Aktif (Supabase / Google Apps Script / Lokal) */}
             <div className={`p-4 rounded-xl border mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
               isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
@@ -4835,6 +5262,68 @@ export const SuperAdminModule: React.FC = () => {
                 <p className={`text-[10px] leading-relaxed ${isLight ? 'text-slate-500' : 'text-gray-400'}`}>
                   Mendukung endpoint REST <code className="text-emerald-500 font-mono">/rest/v1/jacs_erp_snapshots</code> (fallback <code className="font-mono">/rest/v1/cloud_sync</code>) dengan otentikasi header <code className="font-mono">apikey</code> &amp; <code className="font-mono">Authorization</code>.
                 </p>
+
+                {/* Utilitas Backup & Restore Kredensial Supabase */}
+                <div className={`pt-2.5 border-t flex flex-wrap items-center gap-2 ${
+                  isLight ? 'border-slate-200' : 'border-slate-800'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={handleExportCloudCredentialsBackup}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                      isLight
+                        ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
+                        : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-500/40 text-emerald-300'
+                    }`}
+                    title="Unduh file JSON berisi supabaseUrl, supabaseAnonKey, exportedAt, dan appVersion"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Export Config Backup (.json)</span>
+                  </button>
+
+                  <label
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                      isLight
+                        ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
+                        : 'bg-cyan-950/40 hover:bg-cyan-900/50 border-cyan-500/40 text-cyan-300'
+                    }`}
+                    title="Unggah file JSON cadangan untuk memulihkan URL & Anon Key Supabase secara otomatis"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import Config Backup (.json)</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleImportCloudCredentialsBackup}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyActiveCloudCredentials}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                      copiedSnippetId === 'active-cloud-creds'
+                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                        : isLight
+                        ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                    }`}
+                    title="Salin ringkasan VITE_SUPABASE_URL & VITE_SUPABASE_ANON_KEY aktif ke clipboard"
+                  >
+                    {copiedSnippetId === 'active-cloud-creds' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Kredensial Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Salin Kredensial Aktif</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Endpoint 2: Google Apps Script Webhook */}
@@ -5280,6 +5769,504 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* PANEL / SUB-TAB KHUSUS: SOP CLOUD & BACKUP KREDENSIAL (DISASTER RECOVERY) */}
+      {(adminTab === 'cloud' || adminTab === 'cloud-sop') && (
+        <div
+          className={`p-6 rounded-2xl border transition-all duration-200 space-y-5 animate-fadeIn ${
+            isLight
+              ? 'bg-white border-emerald-500/60 shadow-sm'
+              : 'bg-[#161b22] border-emerald-500/35 shadow-[0_0_20px_rgba(16,185,129,0.08)]'
+          }`}
+        >
+          {/* Header SOP & Disaster Recovery */}
+          <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b ${
+            isLight ? 'border-slate-200' : 'border-slate-800'
+          }`}>
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className={`font-semibold text-base sm:text-lg tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    SOP Cloud &amp; Disaster Recovery — Backup Kredensial Supabase
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    JACS ENTERPRISE STANDARD
+                  </span>
+                </div>
+                <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                  Panduan resmi operasional pemilik/admin toko untuk mengamankan kunci kredensial Supabase, prosedur kasir saat internet putus/menyala, serta alur update aplikasi &amp; pemeliharaan kapasitas cloud.
+                </p>
+              </div>
+            </div>
+
+            {/* Toolbar Cepat Backup & Restore Kredensial */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleExportCloudCredentialsBackup}
+                className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                  isLight
+                    ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-600 text-white shadow-sm'
+                    : 'bg-emerald-600/90 hover:bg-emerald-500 border-emerald-400/50 text-white shadow-emerald-950/50'
+                }`}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Config Backup (.json)</span>
+              </button>
+
+              <label
+                className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                  isLight
+                    ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-900'
+                    : 'bg-cyan-950/50 hover:bg-cyan-900/60 border-cyan-500/40 text-cyan-300'
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Import Config Backup (.json)</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportCloudCredentialsBackup}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={handleCopyActiveCloudCredentials}
+                className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                  copiedSnippetId === 'active-cloud-creds'
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                    : isLight
+                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
+                    : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                }`}
+              >
+                {copiedSnippetId === 'active-cloud-creds' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Tersalin!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Salin Kredensial Aktif</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* PANEL RINGKASAN MODE PENYIMPANAN & TOMBOL TEKNIS BACKUP / MIGRASI DATA LOKAL */}
+          <div
+            className={`p-4 sm:p-5 rounded-xl border space-y-3.5 ${
+              isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+            }`}
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`text-xs font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Mode Operasional Aktif &amp; Utilitas Backup / Migrasi Data Lokal
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase border ${
+                      storageOperationalMode === 'LOCAL_ONLY'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/35'
+                        : storageOperationalMode === 'HYBRID_MIGRATION'
+                        ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/35'
+                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/35'
+                    }`}
+                  >
+                    {storageOperationalMode === 'LOCAL_ONLY'
+                      ? 'LOCAL OFFLINE MODE (100% LOKAL)'
+                      : storageOperationalMode === 'HYBRID_MIGRATION'
+                      ? 'HYBRID BUFFER MODE (SIAP MIGRASI)'
+                      : 'ONLINE CLOUD MODE (SUPABASE + GAS)'}
+                  </span>
+                </div>
+                <p className={`text-[11px] mt-1 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                  Gunakan tombol di bawah untuk mencadangkan/memulihkan seluruh snapshot data toko (<code className="font-mono">.json</code>) secara offline di komputer/flashdisk, atau memigrasikan data lokal ke Supabase &amp; GAS dalam sekali klik.
+                </p>
+              </div>
+
+              {/* Quick Switcher Mode */}
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                {(
+                  [
+                    { id: 'LOCAL_ONLY', label: '1. Lokal Saja (100% Offline)' },
+                    { id: 'ONLINE_CLOUD', label: '2. Online Cloud (Supabase + GAS)' },
+                    { id: 'HYBRID_MIGRATION', label: '3. Hybrid (Offline → Online)' },
+                  ] as { id: StorageOperationalMode; label: string }[]
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setStorageOperationalMode(m.id)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                      storageOperationalMode === m.id
+                        ? m.id === 'LOCAL_ONLY'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                          : m.id === 'HYBRID_MIGRATION'
+                          ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                          : 'bg-emerald-500 text-slate-950 border-emerald-400'
+                        : isLight
+                        ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
+                        : 'bg-[#161b22] hover:bg-slate-800 border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3 Tombol Teknis Backup & Migrasi Lokal */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={handleDownloadLocalDataBackupJson}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                  isLight
+                    ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                    : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-500/40 text-amber-300'
+                }`}
+                title="Ekspor seluruh snapshot data toko dari localStorage ke file .json di komputer/flashdisk saat offline"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh Backup Data Lokal (.json)</span>
+              </button>
+
+              <label
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer active:scale-95 ${
+                  isLight
+                    ? 'bg-indigo-50 hover:bg-indigo-100 border-indigo-300 text-indigo-900'
+                    : 'bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-500/40 text-indigo-300'
+                }`}
+                title="Muat file snapshot lokal (.json) dari komputer/flashdisk kembali ke localStorage tanpa memerlukan internet"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Pulihkan Data Lokal (.json)</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleRestoreLocalDataBackupJson}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={handleMigrateOfflineToOnlineCloud}
+                disabled={isCloudTestingAndSyncing}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white border border-emerald-400/40 shadow-sm flex items-center gap-1.5 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                title="Beralih dari Mode Lokal/Hybrid ke Mode Online dengan mengirim seluruh data lokal ke Supabase & GAS dalam sekali klik"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>
+                  {isCloudTestingAndSyncing
+                    ? 'Mengirim Data Lokal ke Cloud...'
+                    : 'Migrasi Offline ke Online (Push ke Supabase & GAS)'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Filter / Selector Mode Tampilan Accordion SOP */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: 'all', label: 'Tampilkan Semua SOP (1–4)' },
+                { id: 'sop1', label: 'SOP 1: Backup Kunci & Vercel Env' },
+                { id: 'sop2', label: 'SOP 2: Kasir Offline vs Online' },
+                { id: 'sop3', label: 'SOP 3: Revisi App & Kapasitas Cloud' },
+                { id: 'sop4', label: 'SOP 4: Mode Lokal 100% Offline & Migrasi Cloud' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setExpandedCloudSopId(item.id as any)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                    expandedCloudSopId === item.id
+                      ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400 font-bold'
+                      : isLight
+                      ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
+                      : 'bg-[#0d1117] hover:bg-slate-800 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <span className={`text-[11px] font-mono ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              Identitas Developer: <strong className="text-emerald-400">Jacs Enterprise</strong> • App v2.5.0-ENTERPRISE
+            </span>
+          </div>
+
+          {/* KARTU SOP 1 — Menyimpan & Memulihkan Backup Kunci Supabase */}
+          {(expandedCloudSopId === 'all' || expandedCloudSopId === 'sop1') && (
+            <div
+              className={`p-4 sm:p-5 rounded-xl border space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    SOP 01
+                  </span>
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Menyimpan &amp; Memulihkan Backup Kunci Supabase (Disaster Recovery Perangkat Baru)
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Kredensial &amp; Vercel Env</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs leading-relaxed">
+                <div className={`p-3.5 rounded-xl border space-y-1.5 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}>
+                  <div className="font-bold text-emerald-500 dark:text-emerald-400 flex items-center gap-1.5">
+                    <span>1. Simpan File .JSON Cadangan</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Setelah mengisi <strong>Supabase Project URL</strong> dan <strong>Anon Key</strong> di SuperAdmin, klik tombol <strong>"Export Config Backup (.json)"</strong>. Simpan file JSON tersebut di Google Drive / Flashdisk pemilik toko sebagai kunci pemulihan darurat.
+                  </p>
+                </div>
+
+                <div className={`p-3.5 rounded-xl border space-y-1.5 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}>
+                  <div className="font-bold text-cyan-500 dark:text-cyan-400 flex items-center gap-1.5">
+                    <span>2. Pasang Permanen di Vercel Env</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Agar semua komputer/tablet kasir otomatis terhubung tanpa input manual, buka <strong>Vercel Dashboard → Project Settings → Environment Variables</strong>, lalu tambahkan:
+                  </p>
+                  <div className="p-2 rounded-lg bg-black/40 border border-slate-700 font-mono text-[10px] text-cyan-300 space-y-0.5">
+                    <div>VITE_SUPABASE_URL = https://...supabase.co</div>
+                    <div>VITE_SUPABASE_ANON_KEY = eyJhbGci...</div>
+                  </div>
+                </div>
+
+                <div className={`p-3.5 rounded-xl border space-y-1.5 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}>
+                  <div className="font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1.5">
+                    <span>3. Pulihkan Data ke Perangkat Baru</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Pada laptop/PC kasir baru: buka <strong>SuperAdmin → Integrasi Cloud</strong>, klik <strong>"Import Config Backup (.json)"</strong> untuk mengisi kunci otomatis, lalu tekan tombol <strong>"Tarik Data dari Cloud (Pull Sync)"</strong>. Seluruh produk, stok, transaksi, dan profil usaha langsung pulih 100%.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* KARTU SOP 2 — Operasional Kasir Saat Offline vs. Online */}
+          {(expandedCloudSopId === 'all' || expandedCloudSopId === 'sop2') && (
+            <div
+              className={`p-4 sm:p-5 rounded-xl border space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    SOP 02
+                  </span>
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Operasional Kasir Saat Offline vs. Online (Perlindungan Antrean Transaksi)
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono text-amber-400 flex items-center gap-1">
+                  <Wifi className="w-3.5 h-3.5" />
+                  <span>Aturan Anti-Hilang Data</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs leading-relaxed">
+                <div className={`p-3.5 rounded-xl border space-y-2 ${
+                  isLight ? 'bg-amber-50/60 border-amber-200' : 'bg-amber-950/15 border-amber-500/30'
+                }`}>
+                  <div className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                    <WifiOff className="w-4 h-4 shrink-0" />
+                    <span>A. Saat Internet Putus (Mode Offline Buffer)</span>
+                  </div>
+                  <ul className={`list-disc pl-5 space-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                    <li>
+                      <strong>Kasir Tetap Melayani Pembeli:</strong> Transaksi penjualan POS, hitung multi-satuan, potong stok lokal, dan cetak struk tetap berjalan normal 100% tanpa hambatan.
+                    </li>
+                    <li>
+                      <strong>Antrean Otomatis:</strong> Setiap nota baru otomatis ditandai <code>PENDING_SYNC</code> dan disimpan aman di penyimpanan lokal browser (<code>localStorage</code>).
+                    </li>
+                    <li>
+                      <strong>LARANGAN KERAS:</strong> Jangan menghapus <em>Site Data / Cache Browser</em> atau melakukan <em>Reset Data Uji Coba</em> selama masih ada antrean offline yang belum disinkronkan ke cloud.
+                    </li>
+                  </ul>
+                </div>
+
+                <div className={`p-3.5 rounded-xl border space-y-2 ${
+                  isLight ? 'bg-emerald-50/60 border-emerald-200' : 'bg-emerald-950/15 border-emerald-500/30'
+                }`}>
+                  <div className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                    <RefreshCw className="w-4 h-4 shrink-0" />
+                    <span>B. Saat Internet Kembali Menyala (Urutan Wajib)</span>
+                  </div>
+                  <ol className={`list-decimal pl-5 space-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                    <li>
+                      <strong>WAJIB Tekan "Sync Now" / "Uji Koneksi &amp; Sync Sekarang" (Push Sync) TERLEBIH DAHULU:</strong> Langkah ini mengirim seluruh transaksi offline terbaru dari kasir ke tabel <code>jacs_erp_snapshots</code> di Supabase.
+                    </li>
+                    <li>
+                      <strong>Jangan Tekan "Pull Sync" Sebelum Push Sync:</strong> Menarik data (Pull Sync) sebelum mengirim antrean offline dapat membuat stok lokal kasir tertimpa snapshot lama dari cloud.
+                    </li>
+                    <li>
+                      <strong>Verifikasi Badge Hijau:</strong> Pastikan indikator header berubah menjadi <strong className="text-emerald-400">ONLINE — SYNCED</strong> dan antrean offline bernilai <code>0</code>.
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* KARTU SOP 3 — Alur Revisi Aplikasi & Pemeliharaan Kapasitas Cloud */}
+          {(expandedCloudSopId === 'all' || expandedCloudSopId === 'sop3') && (
+            <div
+              className={`p-4 sm:p-5 rounded-xl border space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                    SOP 03
+                  </span>
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Alur Revisi Aplikasi (AI Studio → GitHub → Vercel) &amp; Pemeliharaan Kapasitas Cloud
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono text-cyan-400 flex items-center gap-1">
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>Lifecycle &amp; Kuota Supabase</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs leading-relaxed">
+                <div className={`p-3.5 rounded-xl border space-y-2 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}>
+                  <div className="font-bold text-cyan-500 dark:text-cyan-400 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 shrink-0" />
+                    <span>1. Alur Update Fitur Aman Tanpa Kehilangan Data</span>
+                  </div>
+                  <ul className={`list-disc pl-5 space-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                    <li>
+                      <strong>Pipeline Standar Jacs Enterprise:</strong> Revisi kode/fitur di <strong>Google AI Studio</strong> → Push/Commit ke repository <strong>GitHub</strong> → Deploy otomatis di <strong>Vercel</strong>.
+                    </li>
+                    <li>
+                      <strong>Database Terpisah dari Kode UI:</strong> Seluruh data transaksi &amp; stok tersimpan di tabel <code>jacs_erp_snapshots</code> pada server Supabase, sehingga update tampilan/fitur aplikasi tidak akan menghapus data toko dan tidak perlu mengganti API Key.
+                    </li>
+                    <li>
+                      <strong>Best Practice Sebelum Update Besar:</strong> Lakukan <strong>"Uji Koneksi &amp; Sync Sekarang"</strong> serta klik <strong>"Ekspor Backup JSON"</strong> sebagai cadangan lokal sebelum deploy versi baru.
+                    </li>
+                  </ul>
+                </div>
+
+                <div className={`p-3.5 rounded-xl border space-y-2 ${
+                  isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                }`}>
+                  <div className="font-bold text-purple-500 dark:text-purple-400 flex items-center gap-1.5">
+                    <Database className="w-4 h-4 shrink-0" />
+                    <span>2. Kuota Supabase Free Tier &amp; Aturan Auto-Pause</span>
+                  </div>
+                  <ul className={`list-disc pl-5 space-y-1 ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                    <li>
+                      <strong>Kapasitas Supabase Free:</strong> Mencakup <strong>500 MB Database Postgres</strong> dan <strong>5 GB Egress (Bandwidth)</strong> per bulan — sangat cukup untuk puluhan ribu transaksi ritel.
+                    </li>
+                    <li>
+                      <strong>Aturan Auto-Pause 7 Hari:</strong> Project Supabase Free akan otomatis <em>Paused</em> jika tidak ada aktivitas transaksi/sync sama sekali selama 7 hari berturut-turut. Jika toko libur panjang dan project ter-pause, cukup buka dashboard Supabase lalu klik <strong>"Restore Project"</strong>.
+                    </li>
+                    <li>
+                      <strong>Kapan Harus Arsip atau Upgrade Pro:</strong> Jika penggunaan database mendekati 80% (~400 MB) atau toko beroperasi multi-cabang padat tanpa jeda, lakukan ekspor arsip tahunan JSON atau upgrade ke <strong>Supabase Pro</strong> (tanpa auto-pause &amp; kapasitas 8 GB+).
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* KARTU SOP 4 — Panduan Teknis Mode Lokal Saja (100% Offline), Backup .JSON & Migrasi ke Online */}
+          {(expandedCloudSopId === 'all' || expandedCloudSopId === 'sop4') && (
+            <div
+              className={`p-4 sm:p-5 rounded-xl border space-y-3.5 ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    SOP 04
+                  </span>
+                  <h4 className={`text-sm font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                    Panduan Teknis Mode Lokal Saja (100% Offline), Backup File .JSON &amp; Migrasi ke Online Cloud
+                  </h4>
+                </div>
+                <span className="text-[11px] font-mono text-indigo-400 flex items-center gap-1">
+                  <HardDrive className="w-3.5 h-3.5" />
+                  <span>Fleksibilitas Offline → Online</span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs leading-relaxed">
+                <div
+                  className={`p-3.5 rounded-xl border space-y-1.5 ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                  }`}
+                >
+                  <div className="font-bold text-amber-500 dark:text-amber-400 flex items-center gap-1.5">
+                    <span>1. Operasional Mode Lokal Saja (100% Offline)</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Pilih <strong>Mode 1: Lokal Saja (100% Offline)</strong> jika toko belum menggunakan internet/cloud. Seluruh transaksi POS, katalog produk, stok, dan laporan keuangan disimpan penuh di <code className="font-mono">localStorage</code> browser dengan badge <strong className="text-amber-400">LOCAL OFFLINE MODE</strong> tanpa peringatan error koneksi.
+                  </p>
+                </div>
+
+                <div
+                  className={`p-3.5 rounded-xl border space-y-1.5 ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                  }`}
+                >
+                  <div className="font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1.5">
+                    <span>2. Backup &amp; Restore File .JSON di Komputer/Flashdisk</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Saat beroperasi offline, klik tombol <strong>"Unduh Backup Data Lokal (.json)"</strong> setiap tutup kasir (tutup shift) dan simpan file ke folder PC atau Flashdisk. Untuk memindahkan data ke PC lain tanpa internet, cukup klik <strong>"Pulihkan Data Lokal (.json)"</strong> dan pilih file tersebut.
+                  </p>
+                </div>
+
+                <div
+                  className={`p-3.5 rounded-xl border space-y-1.5 ${
+                    isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-slate-800'
+                  }`}
+                >
+                  <div className="font-bold text-emerald-500 dark:text-emerald-400 flex items-center gap-1.5">
+                    <span>3. Migrasi Aman dari Offline ke Online (Supabase + GAS)</span>
+                  </div>
+                  <p className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+                    Ketika toko siap beralih ke Cloud: isi <strong>Supabase URL &amp; Anon Key</strong> (serta opsional GAS Webhook), lalu klik tombol <strong>"Migrasi Offline ke Online (Push ke Supabase &amp; GAS)"</strong>. Sistem otomatis mengunggah seluruh data lokal ke tabel <code className="font-mono">jacs_erp_snapshots</code> tanpa menimpa data yang sudah dikerjakan selama offline.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

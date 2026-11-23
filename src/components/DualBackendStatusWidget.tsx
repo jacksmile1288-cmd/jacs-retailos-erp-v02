@@ -95,9 +95,16 @@ export const DualBackendStatusWidget: React.FC = () => {
   let dotColor = 'bg-emerald-400';
   let statusLabel = 'ONLINE — SYNCED';
 
-  const hasSyncFailure = Boolean((lastSyncResult && !lastSyncResult.success) || status.lastSyncFailed);
+  const isLocalOnlyMode = status.storageMode === 'LOCAL_ONLY';
+  const isHybridMode = status.storageMode === 'HYBRID_MIGRATION';
+  const hasSyncFailure =
+    !isLocalOnlyMode && Boolean((lastSyncResult && !lastSyncResult.success) || status.lastSyncFailed);
 
-  if (!status.isOnline) {
+  if (isLocalOnlyMode) {
+    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
+    dotColor = 'bg-amber-400';
+    statusLabel = 'LOCAL OFFLINE MODE';
+  } else if (!status.isOnline) {
     badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
     dotColor = 'bg-amber-400';
     statusLabel = `OFFLINE — QUEUED [${status.queuedCount}]`;
@@ -109,6 +116,10 @@ export const DualBackendStatusWidget: React.FC = () => {
     badgeColor = 'bg-rose-500/15 border-rose-500/40 text-rose-300';
     dotColor = 'bg-rose-400';
     statusLabel = 'SYNC FAILED';
+  } else if (isHybridMode && !status.lastSyncTime) {
+    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
+    dotColor = 'bg-amber-400';
+    statusLabel = `HYBRID BUFFER [${status.queuedCount}]`;
   } else if (status.queuedCount > 0) {
     badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
     dotColor = 'bg-amber-400';
@@ -127,7 +138,9 @@ export const DualBackendStatusWidget: React.FC = () => {
           type="button"
           onClick={handleOpenSettings}
           title={
-            hasSyncFailure
+            isLocalOnlyMode
+              ? 'Mode Lokal Saja (100% Offline — Tanpa Cloud). Klik untuk pengaturan mode penyimpanan.'
+              : hasSyncFailure
               ? `Klik untuk detail error: ${lastSyncResult?.message || status.lastSyncErrorMessage || 'Sync gagal'}`
               : 'Konfigurasi Dual-Backend Cloud Sync (Supabase & Google Apps Script)'
           }
@@ -137,16 +150,18 @@ export const DualBackendStatusWidget: React.FC = () => {
           <span>{statusLabel}</span>
         </button>
 
-        <button
-          type="button"
-          onClick={handleSyncNow}
-          disabled={!status.isOnline || status.isSyncing || isSyncingNow}
-          title="Kirim snapshot data riil ke cloud sekarang (Supabase & GAS)"
-          className="px-2.5 py-1 bg-slate-800 hover:bg-cyan-600 disabled:opacity-40 text-slate-200 hover:text-slate-950 text-[10px] font-bold rounded-lg border border-slate-700 whitespace-nowrap transition-all cursor-pointer shrink-0 flex items-center gap-1"
-        >
-          <RefreshCw className={`w-3 h-3 ${isSyncingNow || status.isSyncing ? 'animate-spin text-cyan-400' : ''}`} />
-          <span>{isSyncingNow || status.isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-        </button>
+        {!isLocalOnlyMode && (
+          <button
+            type="button"
+            onClick={handleSyncNow}
+            disabled={!status.isOnline || status.isSyncing || isSyncingNow}
+            title="Kirim snapshot data riil ke cloud sekarang (Supabase & GAS)"
+            className="px-2.5 py-1 bg-slate-800 hover:bg-cyan-600 disabled:opacity-40 text-slate-200 hover:text-slate-950 text-[10px] font-bold rounded-lg border border-slate-700 whitespace-nowrap transition-all cursor-pointer shrink-0 flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3 h-3 ${isSyncingNow || status.isSyncing ? 'animate-spin text-cyan-400' : ''}`} />
+            <span>{isSyncingNow || status.isSyncing ? 'Syncing...' : isHybridMode ? 'Migrasi Cloud' : 'Sync Now'}</span>
+          </button>
+        )}
       </div>
 
       {/* Modal Konfigurasi Dual-Backend & Backup */}
