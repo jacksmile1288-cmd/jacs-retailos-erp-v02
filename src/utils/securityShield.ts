@@ -344,7 +344,7 @@ export function sanitizeObjectDeep<T>(obj: T): {
     if (typeof node === 'string') {
       // Preserve valid base64 safe raster data URLs for PNG/JPEG/WebP logos
       if (
-        (keyName === 'logoUrl' || keyName === 'image' || keyName === 'imageUrl' || keyName === 'photoUrl') &&
+        (keyName === 'logoUrl' || keyName === 'image' || keyName === 'imageUrl' || keyName === 'photoUrl' || keyName === 'avatar' || keyName === 'avatarUrl') &&
         /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i.test(node.trim())
       ) {
         return node.trim();

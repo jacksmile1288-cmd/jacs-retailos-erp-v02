@@ -21,7 +21,14 @@ import {
   Store,
   Barcode,
   RefreshCw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Monitor,
+  HardDrive,
+  Server,
+  ShieldAlert,
+  Download,
+  Users,
+  Ban
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -633,6 +640,168 @@ JacS ERP Standard Operating Procedure V3.0 — Updated November 2026
                   <span className="font-medium">Google Apps Script Webhook</span> atau <span className="font-medium">Supabase Edge Function (clover-proxy)</span> sudah terpasang aktif sebagai jalur proxy.
                 </p>
               </div>
+            </div>
+          </div>
+        </AccordionItem>
+
+        {/* MODUL 5: TAHAP AWAL PERSIAPAN PC & INSTALASI WINDOWS (SINGLE PC) */}
+        <AccordionItem
+          id="modul-5"
+          moduleLabel="Modul 5"
+          title="Tahap Awal Persiapan PC & Instalasi Windows (Single PC)"
+          badge="Persiapan"
+          icon={Monitor}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-slate-50/90 border-slate-200/90' : 'bg-slate-800/30 border-slate-700/80'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Monitor className="w-4 h-4 text-cyan-500 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                  1. Spesifikasi &amp; Waktu Sistem (OS &amp; Clock Sync)
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                Gunakan <span className="font-medium">Windows 10 / Windows 11 (64-bit)</span> dengan browser Google Chrome atau Microsoft Edge versi terbaru. Pastikan pengaturan tanggal &amp; jam Windows sinkron otomatis (<span className="font-mono text-[11px]">Set time automatically = ON</span>) agar timestamp transaksi dan tanda tangan SHA-256 akurat.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-slate-50/90 border-slate-200/90' : 'bg-slate-800/30 border-slate-700/80'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                  2. Keamanan Akun Windows Kasir (Standard User)
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                Buat akun Windows terpisah bertipe <span className="font-medium">Standard User</span> untuk kasir (jangan login harian memakai akun Administrator Windows), aktifkan Windows Defender, dan batasi penggunaan flashdisk pribadi di PC kasir demi mencegah malware atau manipulasi sistem.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-slate-50/90 border-slate-200/90' : 'bg-slate-800/30 border-slate-700/80'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <Download className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                  3. Instalasi Aplikasi Desktop (PWA Standalone)
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                Klik tombol <span className="font-medium">&quot;Install Aplikasi ke Desktop PC&quot;</span> (atau ikon Install di bilah alamat Chrome/Edge) lalu sematkan ke Desktop/Taskbar agar aplikasi berjalan sebagai jendela mandiri tanpa bilah URL browser dan siap bekerja 100% offline.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-slate-50/90 border-slate-200/90' : 'bg-slate-800/30 border-slate-700/80'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                <HardDrive className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                  4. Setup Folder Backup Lokal (.json)
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                Buat folder khusus di PC (misal <code className="font-mono">D:\Backup_ERP_Toko\</code>) dan arahkan melalui tombol <span className="font-medium">&quot;Pilih Folder Backup PC&quot;</span> pada menu Data Master &amp; Migrasi agar file cadangan .json otomatis tersimpan rapi setiap kali sesi ditutup.
+              </p>
+            </div>
+          </div>
+        </AccordionItem>
+
+        {/* MODUL 6: MEKANISME DEPLOYMENT MULTI-PC (KANTOR & KASIR PARALEL) */}
+        <AccordionItem
+          id="modul-6"
+          moduleLabel="Modul 6"
+          title="Mekanisme Deployment Multi-PC (Kantor & Kasir Paralel)"
+          badge="Multi-PC"
+          icon={Server}
+        >
+          <div className="space-y-4 mt-4">
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-cyan-50/60 border-cyan-200/90' : 'bg-cyan-500/5 border-cyan-500/25'}`}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <Store className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-cyan-950' : 'text-cyan-300'}`}>
+                  1. PC-1 (Admin / Backoffice / Gudang) — Pusat Kendali Utama
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Login sebagai <span className="font-medium">SuperAdmin / Executive / Warehouse / Purchasing / Finance</span> untuk mengisi Legalitas Usaha, Katalog SKU, dan Direktori Karyawan (HR) pertama kali. Data otomatis tersinkron ke Cloud Supabase (<span className="font-mono text-[11px] font-medium text-emerald-600 dark:text-emerald-400">ONLINE — SYNCED</span>) sebagai pusat data utama toko.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-indigo-50/60 border-indigo-200/90' : 'bg-indigo-500/5 border-indigo-500/25'}`}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <Users className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-indigo-950' : 'text-indigo-300'}`}>
+                  2. PC-2 &amp; PC-3 (Komputer Kasir POS-01, POS-02, dst.) — Terminal Paralel
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Login memakai kredensial khusus masing-masing kasir (<span className="font-medium">1 Akun Kasir = 1 Loket Terikat</span>). Setiap PC kasir menarik katalog harga terbaru secara otomatis dan mengirim struk transaksi secara paralel tanpa bentrok nomor struk maupun saldo shift.
+              </p>
+            </div>
+
+            <div className={`p-4 rounded-xl border ${isLight ? 'bg-emerald-50/60 border-emerald-200/90' : 'bg-emerald-500/5 border-emerald-500/25'}`}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <Layers className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className={`text-[13px] font-medium tracking-wide ${isLight ? 'text-emerald-950' : 'text-emerald-300'}`}>
+                  3. Penambahan Loket Kasir Baru Tanpa Instal Ulang
+                </span>
+              </div>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                SuperAdmin cukup menaikkan <span className="font-medium">Kuota Loket Kasir</span> pada tab Legalitas Usaha dan mendaftarkan akun kasir baru di modul HR tanpa perlu melakukan instal ulang sistem atau migrasi ulang database.
+              </p>
+            </div>
+          </div>
+        </AccordionItem>
+
+        {/* MODUL 7: LARANGAN & PERINGATAN KERAS UNTUK USER / STAF TOKO */}
+        <AccordionItem
+          id="modul-7"
+          moduleLabel="Modul 7"
+          title="Larangan & Peringatan Keras untuk User / Staf Toko"
+          badge="Kepatuhan"
+          icon={ShieldAlert}
+        >
+          <div className="space-y-3 mt-4">
+            <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10">
+              <h5 className="text-[13px] font-medium tracking-wide text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-500 shrink-0" /> 1. DILARANG menggunakan mode Incognito / Guest Browser
+              </h5>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Mode penyamaran akan menghapus antrean transaksi offline dan pengikatan loket POS secara permanen segera setelah jendela browser ditutup, berisiko menghilangkan data penjualan kasir.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10">
+              <h5 className="text-[13px] font-medium tracking-wide text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-500 shrink-0" /> 2. DILARANG membersihkan Site Data / Cookies via CCleaner / Cleaner Apps
+              </h5>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Jangan pernah menjalankan pembersih file sampah pihak ketiga saat masih terdapat antrean transaksi offline (<span className="font-mono text-[11px] font-medium">QUEUED</span>) yang belum tersinkron ke Cloud.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10">
+              <h5 className="text-[13px] font-medium tracking-wide text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-500 shrink-0" /> 3. DILARANG berbagi PIN kasir lintas loket
+              </h5>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Akun Kasir 01 terikat ketat pada terminal POS-01 (<span className="font-medium">1 Akun = 1 Loket</span>). Penggunaan akun kasir di luar loket yang ditentukan akan ditolak oleh sistem keamanan terminal.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10">
+              <h5 className="text-[13px] font-medium tracking-wide text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-500 shrink-0" /> 4. DILARANG menutup aplikasi langsung dengan tombol silang [X] browser
+              </h5>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Staf wajib menekan tombol <span className="font-medium">&quot;Tutup Shift (Z-Report)&quot;</span> atau tombol <span className="font-medium">&quot;Keluar&quot;</span> agar sinkronisasi akhir dan Auto-Backup Lokal (.json) tereksekusi sempurna tanpa terpotong.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/10">
+              <h5 className="text-[13px] font-medium tracking-wide text-rose-700 dark:text-rose-300 mb-1 flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-500 shrink-0" /> 5. DILARANG mengubah isi file cadangan .json secara manual
+              </h5>
+              <p className={`text-xs font-normal tracking-wide leading-relaxed ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
+                Setiap file backup memiliki tanda tangan enkripsi SHA-256. Mengubah file `.json` secara manual akan merusak integritas data dan menyebabkan proses Restore ditolak oleh sistem pengaman.
+              </p>
             </div>
           </div>
         </AccordionItem>

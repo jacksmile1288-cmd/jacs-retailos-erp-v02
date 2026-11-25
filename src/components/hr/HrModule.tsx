@@ -44,8 +44,9 @@ type HrTab = 'directory' | 'attendance' | 'leave' | 'laundry_performance' | 'fas
 
 // Daftar Departemen Murni Operasional
 const DEPARTMENTS: HrDepartment[] = [
+  'Executive & Management',
+  'Operasional & Produksi',
   'POS & Kasir',
-  'Produksi & Operator Laundry',
   'Warehouse & Logistik',
   'Purchasing',
   'Finance & Accounting',
@@ -53,6 +54,22 @@ const DEPARTMENTS: HrDepartment[] = [
   'IT & Security',
   'IT & Super Admin',
 ];
+
+const DEPARTMENT_ROLES: Record<string, string[]> = {
+  'Executive & Management': ['General Manager (Manager Umum)', 'Owner / Direktur', 'Store Manager (Kepala Toko)', 'Supervisor (SPV)'],
+  'Operasional & Produksi': ['Kepala Operasional', 'Supervisor (SPV)', 'Staff Operasional / Produksi'],
+  'Purchasing': ['Kepala Divisi Purchasing', 'Supervisor (SPV)', 'Staff Purchasing'],
+  'POS & Kasir': ['Kepala Kasir', 'Supervisor Kasir (SPV)', 'Kasir 01', 'Kasir 02', 'Staff Kasir'],
+  'Warehouse & Logistik': ['Kepala Gudang', 'Supervisor (SPV)', 'Admin Gudang', 'Staff Logistik'],
+  'Finance & Accounting': ['Finance Manager', 'Supervisor (SPV)', 'Staff Accounting', 'Staff Kas & Bank'],
+  'Human Resources & Personalia': ['HR Manager', 'Supervisor (SPV)', 'Staff HR & Payroll'],
+  'IT & Security': ['IT Manager', 'Network Administrator', 'Security Officer'],
+  'IT & Super Admin': ['Super Admin Developer', 'Lead System Architect', 'DevOps Engineer'],
+};
+
+const getRolesForDepartment = (dept: string): string[] => {
+  return DEPARTMENT_ROLES[dept] || ['Kepala Divisi', 'Supervisor (SPV)', 'Staff'];
+};
 
 const CONTRACT_STATUSES: ContractStatus[] = [
   'Tetap',
@@ -69,8 +86,9 @@ const LEAVE_TYPES: LeaveType[] = [
 ];
 
 const DEPT_TRANSLATION: Record<string, { id: string; en: string }> = {
+  'Executive & Management': { id: 'Executive & Management', en: 'Executive & Management' },
+  'Operasional & Produksi': { id: 'Operasional & Produksi', en: 'Operations & Production' },
   'POS & Kasir': { id: 'POS & Kasir', en: 'POS & Cashier' },
-  'Produksi & Operator Laundry': { id: 'Produksi & Operator Laundry', en: 'Laundry Production & Operators' },
   'Warehouse & Logistik': { id: 'Warehouse & Logistik', en: 'Warehouse & Logistics' },
   'Purchasing': { id: 'Purchasing', en: 'Purchasing & Procurement' },
   'Finance & Accounting': { id: 'Finance & Accounting', en: 'Finance & Accounting' },
@@ -286,13 +304,114 @@ export const HrModule: React.FC = () => {
     });
   }, [attendanceLogs, searchAttendance, attendanceDeptFilter, attendanceStatusFilter]);
 
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const generateAutoEmployeeNip = (): string => {
+    const rawStoreName = (
+      businessProfile?.name ||
+      businessProfile?.businessName ||
+      businessProfile?.companyName ||
+      'TOKO UTAMA'
+    ).trim();
+
+    const words = rawStoreName
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+    let prefix = 'TKO';
+    if (words.length >= 2) {
+      prefix = words
+        .slice(0, 4)
+        .map((w) => w[0])
+        .join('');
+    } else if (words.length === 1 && words[0].length > 0) {
+      prefix = words[0].slice(0, 3);
+    }
+
+    const year = new Date().getFullYear();
+    const maxExistingSeq = employees.reduce((maxSeq, emp) => {
+      const match = String(emp.nip || '').match(/-EMP-\d{4}(\d+)$/i);
+      if (match) {
+        const parsed = parseInt(match[1], 10);
+        if (!Number.isNaN(parsed) && parsed > maxSeq) {
+          return parsed;
+        }
+      }
+      return maxSeq;
+    }, employees.length);
+
+    const nextSeq = String(maxExistingSeq + 1).padStart(2, '0');
+    return `${prefix}-EMP-${year}${nextSeq}`;
+  };
+
+  const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      if (showToast) {
+        showToast(isEn ? 'Please select a valid image file.' : 'Pilih file gambar yang valid (JPG/PNG/WebP).');
+      }
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_SIZE = 300;
+        let targetWidth = img.width;
+        let targetHeight = img.height;
+
+        if (targetWidth > targetHeight) {
+          if (targetWidth > MAX_SIZE) {
+            targetHeight = Math.round((targetHeight * MAX_SIZE) / targetWidth);
+            targetWidth = MAX_SIZE;
+          }
+        } else {
+          if (targetHeight > MAX_SIZE) {
+            targetWidth = Math.round((targetWidth * MAX_SIZE) / targetHeight);
+            targetHeight = MAX_SIZE;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, targetWidth);
+        canvas.height = Math.max(1, targetHeight);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          setEmpForm((prev) => ({ ...prev, avatar: compressedDataUrl }));
+        } else if (typeof reader.result === 'string') {
+          setEmpForm((prev) => ({ ...prev, avatar: reader.result as string }));
+        }
+      };
+      if (typeof reader.result === 'string') {
+        img.src = reader.result;
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveAvatar = () => {
+    setEmpForm((prev) => ({ ...prev, avatar: '' }));
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleOpenAddEmployee = () => {
     setEditingEmployee(null);
+    const initialDept = 'POS & Kasir';
+    const initialRoles = getRolesForDepartment(initialDept);
     setEmpForm({
-      nip: `JACS-EMP-${new Date().getFullYear()}${String(employees.length + 1).padStart(2, '0')}`,
+      nip: generateAutoEmployeeNip(),
       name: '',
-      department: 'POS & Kasir',
-      role: '',
+      department: initialDept as HrDepartment,
+      role: initialRoles[0] || 'Kasir 01',
       contractStatus: 'Kontrak (PKWT)',
       phone: '',
       email: '',
@@ -301,6 +420,9 @@ export const HrModule: React.FC = () => {
       leaveTotal: 12,
       avatar: '',
     });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     setIsEmployeeModalOpen(true);
   };
 
@@ -313,12 +435,15 @@ export const HrModule: React.FC = () => {
       role: emp.role,
       contractStatus: emp.contractStatus,
       phone: emp.phone,
-      email: emp.email,
+      email: emp.email || '',
       joinDate: emp.joinDate,
       shift: emp.shift,
       leaveTotal: emp.leaveQuota.total,
-      avatar: emp.avatar || '',
+      avatar: emp.avatarUrl || emp.avatar || '',
     });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     setIsEmployeeModalOpen(true);
   };
 
@@ -977,7 +1102,7 @@ export const HrModule: React.FC = () => {
                             </a>
                             <span className="text-[11px] font-mono font-normal text-slate-500 dark:text-gray-400 flex items-center gap-1.5">
                               <Mail className="w-3 h-3 text-slate-400 shrink-0" />
-                              <span>{emp.email}</span>
+                              <span>{emp.email && emp.email.trim() ? emp.email : '-'}</span>
                             </span>
                           </div>
                         </td>
@@ -1980,7 +2105,15 @@ export const HrModule: React.FC = () => {
                   </label>
                   <select
                     value={empForm.department}
-                    onChange={(e) => setEmpForm({ ...empForm, department: e.target.value as HrDepartment })}
+                    onChange={(e) => {
+                      const nextDept = e.target.value as HrDepartment;
+                      const availableRoles = getRolesForDepartment(nextDept);
+                      setEmpForm({
+                        ...empForm,
+                        department: nextDept,
+                        role: availableRoles.includes(empForm.role) ? empForm.role : availableRoles[0],
+                      });
+                    }}
                     className={`w-full text-sm font-normal p-2.5 rounded-xl border outline-none transition-all duration-200 ${
                       isLight ? 'bg-white border-cyan-500/60 focus:border-cyan-500' : 'bg-[#0d1117] border-cyan-500/35 focus:border-cyan-400'
                     }`}
@@ -1997,16 +2130,19 @@ export const HrModule: React.FC = () => {
                   <label className="block text-sm font-normal mb-1 text-slate-700 dark:text-gray-300">
                     Role / Jabatan
                   </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Contoh: Senior Cashier & POS Operator"
+                  <select
                     value={empForm.role}
                     onChange={(e) => setEmpForm({ ...empForm, role: e.target.value })}
                     className={`w-full text-sm font-normal p-2.5 rounded-xl border outline-none transition-all duration-200 ${
                       isLight ? 'bg-white border-cyan-500/60 focus:border-cyan-500' : 'bg-[#0d1117] border-cyan-500/35 focus:border-cyan-400'
                     }`}
-                  />
+                  >
+                    {getRolesForDepartment(empForm.department).map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -2046,12 +2182,11 @@ export const HrModule: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-normal mb-1 text-slate-700 dark:text-gray-300">
-                    Email Perusahaan
+                    Email Perusahaan <span className="text-xs text-slate-400">(Opsional)</span>
                   </label>
                   <input
                     type="email"
-                    required
-                    placeholder="nama@jacs-erp.com"
+                    placeholder="opsional@toko.id"
                     value={empForm.email}
                     onChange={(e) => setEmpForm({ ...empForm, email: e.target.value })}
                     className={`w-full text-sm font-normal p-2.5 rounded-xl border outline-none transition-all duration-200 ${
@@ -2093,18 +2228,69 @@ export const HrModule: React.FC = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-normal mb-1 text-slate-700 dark:text-gray-300">
-                    URL Foto Profil
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-normal mb-1.5 text-slate-700 dark:text-gray-300">
+                    Foto Profil Karyawan <span className="text-xs text-slate-400">(Opsional • Otomatis dikompres maks 300×300px)</span>
                   </label>
-                  <input
-                    type="url"
-                    value={empForm.avatar}
-                    onChange={(e) => setEmpForm({ ...empForm, avatar: e.target.value })}
-                    className={`w-full text-sm font-normal p-2.5 rounded-xl border outline-none transition-all duration-200 ${
-                      isLight ? 'bg-white border-cyan-500/60 focus:border-cyan-500' : 'bg-[#0d1117] border-cyan-500/35 focus:border-cyan-400'
+                  <div
+                    className={`p-3 rounded-xl border flex flex-wrap items-center gap-3.5 ${
+                      isLight
+                        ? 'bg-slate-50/80 border-cyan-500/50'
+                        : 'bg-[#0d1117] border-cyan-500/30'
                     }`}
-                  />
+                  >
+                    {empForm.avatar ? (
+                      <img
+                        src={empForm.avatar}
+                        alt="Pratinjau Foto Profil"
+                        className={`w-14 h-14 rounded-full object-cover border-2 shrink-0 ${
+                          isLight ? 'border-cyan-500' : 'border-cyan-400'
+                        }`}
+                      />
+                    ) : (
+                      <div
+                        className={`w-14 h-14 rounded-full flex items-center justify-center border shrink-0 ${
+                          isLight
+                            ? 'bg-cyan-50 border-cyan-500/40 text-cyan-700'
+                            : 'bg-slate-800 border-cyan-500/30 text-cyan-400'
+                        }`}
+                      >
+                        <Users className="w-6 h-6" />
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-[200px] space-y-1.5">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleAvatarFileUpload}
+                        className={`block w-full text-xs cursor-pointer file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:cursor-pointer ${
+                          isLight
+                            ? 'text-slate-600 file:bg-cyan-600 file:text-white hover:file:bg-cyan-700'
+                            : 'text-slate-300 file:bg-cyan-500 file:text-slate-950 hover:file:bg-cyan-400'
+                        }`}
+                      />
+                      <p className="text-[11px] text-slate-500 dark:text-gray-400">
+                        Format JPG, PNG, atau WebP. Dikompresi otomatis ke maks 300×300px agar ringan di state &amp; Supabase.
+                      </p>
+                    </div>
+
+                    {empForm.avatar && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveAvatar}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border flex items-center gap-1.5 cursor-pointer transition shrink-0 ${
+                          isLight
+                            ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300'
+                            : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/35'
+                        }`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus Foto</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 

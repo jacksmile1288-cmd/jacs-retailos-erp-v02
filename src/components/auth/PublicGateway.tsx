@@ -20,6 +20,7 @@ import {
   Sparkles,
   ChevronDown,
   MonitorPlay,
+  Download,
 } from 'lucide-react';
 import { User } from '../../types';
 import { signSessionPayload } from '../../utils/securityUtils';
@@ -106,6 +107,8 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     toggleTheme,
     openAiAssistant,
     businessProfile,
+    pwaInstallPrompt,
+    triggerPwaInstall,
   } = useApp();
 
   // State Interactive 3D Brand Cover (triggered by 30s idle timer)
@@ -752,6 +755,18 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         </div>
 
         <div className="flex items-center gap-2">
+          {pwaInstallPrompt && (
+            <button
+              type="button"
+              onClick={triggerPwaInstall}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm animate-pulse"
+              title="Install Aplikasi ke Desktop PC (PWA Standalone)"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Install Desktop</span>
+            </button>
+          )}
+
           <button
             type="button"
             id="btn-gateway-show-cover"

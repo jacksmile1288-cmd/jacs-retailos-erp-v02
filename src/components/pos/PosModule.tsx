@@ -201,6 +201,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     syncOfflineQueues,
     isSuperAdminAuthenticated,
     activeCashierQuota,
+    triggerSilentAutoBackupIfDue,
   } = useApp();
 
   const sessionOperator = currentUser || activeUser;
@@ -5116,7 +5117,10 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
               <button
                 type="button"
                 id="btn-pos-zreport-close-shift"
-                onClick={() => setIsQuickZReportOpen(true)}
+                onClick={() => {
+                  void triggerSilentAutoBackupIfDue('POS_ZREPORT_BUTTON');
+                  setIsQuickZReportOpen(true);
+                }}
                 className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] leading-4 font-medium flex items-center gap-1 cursor-pointer transition-all duration-200 active:scale-[0.99] shrink-0"
               >
                 <FileSpreadsheet className="w-3 h-3" />

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAudit } from '../audit';
-import { sanitizeTextValue } from '../utils/securityShield';
+import { createSignedBackupEnvelope, sanitizeTextValue } from '../utils/securityShield';
 import { getTranslatedText } from '../utils/translations';
 import {
   Product,
@@ -839,6 +839,23 @@ export interface AppContextType {
     module?: string;
     level?: 'INFO' | 'WARN' | 'ERROR';
   }) => void;
+
+  // Auto-Backup Lokal (.json) — SHA-256 Signed
+  autoBackupEnabled: boolean;
+  setAutoBackupEnabled: (enabled: boolean) => void;
+  autoBackupIntervalHours: 6 | 12 | 24;
+  setAutoBackupIntervalHours: (hours: 6 | 12 | 24) => void;
+  lastAutoBackupAt: string | null;
+  setLastAutoBackupAt: (iso: string | null) => void;
+  buildTimestampedBackupFilename: () => string;
+  triggerSilentAutoBackupIfDue: (triggerSource?: string) => Promise<boolean>;
+
+  activeEmployeeRecord: Employee | null;
+  pwaInstallPrompt: any | null;
+  triggerPwaInstall: () => Promise<boolean>;
+  backupDirectoryName: string | null;
+  selectBackupDirectoryFolder: () => Promise<boolean>;
+  saveBackupFileWithFolderOption: (fileName: string, jsonContent: string) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -1671,18 +1688,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          if (isWiped) {
-            return parsed.map((p, i) => normalizeProductPricing(p, i));
-          }
-          if (parsed.length > 0) {
-            return hydrateWithServiceSeeds(parsed.map((p, i) => normalizeProductPricing(p, i)));
-          }
+          return parsed.map((p, i) => normalizeProductPricing(p, i));
         }
       }
-      if (isWiped) return [];
-      return hydrateWithServiceSeeds(INITIAL_PRODUCTS);
+      return [];
     } catch {
-      return hydrateWithServiceSeeds(INITIAL_PRODUCTS);
+      return [];
     }
   });
 
@@ -1704,10 +1715,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }));
         }
       }
-      if (localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true') return [];
-      return INITIAL_SALES;
+      return [];
     } catch {
-      return INITIAL_SALES;
+      return [];
     }
   });
 
@@ -1718,10 +1728,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true') return [];
-      return INITIAL_FINANCE;
+      return [];
     } catch {
-      return INITIAL_FINANCE;
+      return [];
     }
   });
 
@@ -2020,9 +2029,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(MASTER_CATALOG_WIPED_KEY) === 'true') return [];
     } catch {}
-    return INITIAL_SUPPLIERS;
+    return [];
   });
   const [isLedgerReset, setIsLedgerReset] = useState<boolean>(() => {
     try {
@@ -2038,9 +2046,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(MASTER_CATALOG_WIPED_KEY) === 'true') return [];
     } catch {}
-    return INITIAL_CUSTOMERS;
+    return [];
   });
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(() => {
     try {
@@ -2049,9 +2056,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true') return [];
     } catch {}
-    return INITIAL_PURCHASING;
+    return [];
   });
   const [purchaseRequests, setPurchaseRequests] = useState<PurchaseRequest[]>(() => {
     try {
@@ -2060,9 +2066,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true') return [];
     } catch {}
-    return INITIAL_PURCHASE_REQUESTS;
+    return [];
   });
   const [stockMutations, setStockMutations] = useState<StockMutation[]>(() => {
     try {
@@ -2071,9 +2076,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
       }
-      if (localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true') return [];
     } catch {}
-    return INITIAL_STOCK_MUTATIONS;
+    return [];
   });
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(() => {
     try {
@@ -3107,6 +3111,218 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [showToast]
   );
+
+  // --- AUTO-BACKUP LOKAL (.JSON) DENGAN TANDA TANGAN SHA-256 ---
+  const AUTO_BACKUP_ENABLED_KEY = 'jacs_auto_backup_enabled_v1';
+  const AUTO_BACKUP_INTERVAL_KEY = 'jacs_auto_backup_interval_hours_v1';
+  const AUTO_BACKUP_LAST_AT_KEY = 'jacs_auto_backup_last_at_v1';
+
+  const [autoBackupEnabled, setAutoBackupEnabledState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(AUTO_BACKUP_ENABLED_KEY);
+      if (saved === 'false') return false;
+      if (saved === 'true') return true;
+    } catch {}
+    return true; // Default: ON
+  });
+
+  const [autoBackupIntervalHours, setAutoBackupIntervalHoursState] = useState<6 | 12 | 24>(() => {
+    try {
+      const saved = Number(localStorage.getItem(AUTO_BACKUP_INTERVAL_KEY));
+      if (saved === 6 || saved === 12 || saved === 24) return saved;
+    } catch {}
+    return 24; // Default: Setiap 24 Jam
+  });
+
+  const [lastAutoBackupAt, setLastAutoBackupAtState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(AUTO_BACKUP_LAST_AT_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setAutoBackupEnabled = useCallback((enabled: boolean) => {
+    setAutoBackupEnabledState(enabled);
+    try {
+      localStorage.setItem(AUTO_BACKUP_ENABLED_KEY, enabled ? 'true' : 'false');
+    } catch {}
+  }, []);
+
+  const setAutoBackupIntervalHours = useCallback((hours: 6 | 12 | 24) => {
+    setAutoBackupIntervalHoursState(hours);
+    try {
+      localStorage.setItem(AUTO_BACKUP_INTERVAL_KEY, String(hours));
+    } catch {}
+  }, []);
+
+  const setLastAutoBackupAt = useCallback((iso: string | null) => {
+    setLastAutoBackupAtState(iso);
+    try {
+      if (iso) {
+        localStorage.setItem(AUTO_BACKUP_LAST_AT_KEY, iso);
+      } else {
+        localStorage.removeItem(AUTO_BACKUP_LAST_AT_KEY);
+      }
+    } catch {}
+  }, []);
+
+  const buildTimestampedBackupFilename = useCallback((): string => {
+    const profile = businessProfileRef.current || businessProfile;
+    const rawStoreName = (
+      profile?.name ||
+      profile?.businessName ||
+      (profile as any)?.companyName ||
+      'TOKO UTAMA'
+    ).trim();
+
+    const words = rawStoreName
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+    let storeCode = 'TOKO';
+    if (words.length >= 2) {
+      storeCode = words
+        .slice(0, 4)
+        .map((w) => w[0])
+        .join('');
+    } else if (words.length === 1 && words[0].length > 0) {
+      storeCode = words[0].slice(0, 6);
+    }
+
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    return `jacs-backup-${storeCode}-${yyyy}-${mm}-${dd}-${hh}${min}.json`;
+  }, [businessProfile]);
+
+  // --- PWA INSTALL PROMPT ---
+  const [pwaInstallPrompt, setPwaInstallPrompt] = useState<any | null>(null);
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setPwaInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const triggerPwaInstall = useCallback(async (): Promise<boolean> => {
+    if (!pwaInstallPrompt) {
+      showToast('Aplikasi sudah terpasang atau pemasangan PWA belum tersedia di browser ini.', 'info');
+      return false;
+    }
+    try {
+      pwaInstallPrompt.prompt();
+      const choice = await pwaInstallPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setPwaInstallPrompt(null);
+        showToast('Berhasil menginstal aplikasi ke Desktop PC!', 'success');
+        return true;
+      }
+    } catch {}
+    return false;
+  }, [pwaInstallPrompt, showToast]);
+
+  // --- PILIH FOLDER BACKUP PC (FILE SYSTEM ACCESS API) ---
+  const [backupDirectoryName, setBackupDirectoryName] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('jacs_backup_dir_name_v1') || null;
+    } catch {
+      return null;
+    }
+  });
+  const backupDirectoryHandleRef = useRef<any | null>(null);
+
+  const selectBackupDirectoryFolder = useCallback(async (): Promise<boolean> => {
+    if (typeof window === 'undefined' || !(window as any).showDirectoryPicker) {
+      showToast('Browser Anda tidak mendukung File System Access API (showDirectoryPicker). File backup akan diunduh melalui folder Downloads.', 'warning');
+      return false;
+    }
+    try {
+      const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+      if (handle) {
+        backupDirectoryHandleRef.current = handle;
+        setBackupDirectoryName(handle.name);
+        try {
+          localStorage.setItem('jacs_backup_dir_name_v1', handle.name);
+        } catch {}
+        showToast(`Folder backup PC berhasil dipilih: "${handle.name}"`, 'success');
+        return true;
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        showToast('Gagal memilih folder backup PC.', 'error');
+      }
+    }
+    return false;
+  }, [showToast]);
+
+  const saveBackupFileWithFolderOption = useCallback(async (fileName: string, jsonContent: string): Promise<boolean> => {
+    try {
+      const dirHandle = backupDirectoryHandleRef.current;
+      if (dirHandle && typeof dirHandle.getFileHandle === 'function') {
+        if (typeof dirHandle.requestPermission === 'function') {
+          const perm = await dirHandle.requestPermission({ mode: 'readwrite' });
+          if (perm !== 'granted') {
+            throw new Error('Permission denied');
+          }
+        }
+        const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(jsonContent);
+        await writable.close();
+        return true;
+      }
+    } catch {}
+
+    // Fallback standard download
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  }, []);
+
+  // --- ACTIVE EMPLOYEE RECORD MATCHING ---
+  const activeEmployeeRecord = useMemo(() => {
+    if (!currentUser) return null;
+    const uid = String(currentUser.id || currentUser.user_id || '').toLowerCase();
+    const uname = String(currentUser.name || '').toLowerCase();
+    const matchedById = (employees || []).find((e) => {
+      const eId = String(e.id || '').toLowerCase();
+      const eNip = String(e.nip || '').toLowerCase();
+      const eName = String(e.name || '').toLowerCase();
+      return eId === uid || eNip === uid || eName === uname;
+    });
+    if (matchedById) return matchedById;
+
+    const curDiv = String(currentUser.division || currentUser.role || activeNav || '').toLowerCase();
+    return (employees || []).find((e) => {
+      const eDept = String(e.department || '').toLowerCase();
+      const eDiv = String(e.division || '').toLowerCase();
+      if (curDiv.includes('exec') && eDept.includes('executive')) return true;
+      if (curDiv.includes('fin') && eDept.includes('finance')) return true;
+      if (curDiv.includes('purch') && eDept.includes('purchasing')) return true;
+      if (curDiv.includes('ware') && eDept.includes('warehouse')) return true;
+      if ((curDiv.includes('hr') || curDiv.includes('personalia')) && (eDept.includes('human') || eDept.includes('sdm'))) return true;
+      if ((curDiv.includes('pos') || curDiv.includes('cashier')) && eDept.includes('pos')) return true;
+      return false;
+    }) || employees?.[0] || null;
+  }, [currentUser, employees, activeNav]);
 
   const triggerIdleLockNow = useCallback(
     (reason?: string) => {
@@ -7699,6 +7915,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         tx_uuid: shiftRecord.id
       });
 
+      // Eksekusi senyap Auto-Backup Lokal (.json) saat Tutup Shift (Z-Report) jika interval terpenuhi
+      try {
+        autoBackupRef.current?.('CLOSE_SHIFT_ZREPORT');
+      } catch {}
+
       return Object.assign(shiftRecord, { success: true, shift: shiftRecord });
     },
     [cashierShifts, currentUser, activeTerminalId, activeTerminal, boundStation, appendAudit]
@@ -9974,8 +10195,137 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [verifySuperAdminAuthorityCode, addAuditLog, showToast]
   );
+  const autoBackupRef = useRef<((triggerSource?: string) => Promise<boolean>) | null>(null);
+
+  const triggerSilentAutoBackupIfDue = useCallback(
+    async (triggerSource: string = 'SESSION_CLOSE'): Promise<boolean> => {
+      try {
+        const isEnabled =
+          localStorage.getItem(AUTO_BACKUP_ENABLED_KEY) !== null
+            ? localStorage.getItem(AUTO_BACKUP_ENABLED_KEY) !== 'false'
+            : autoBackupEnabled;
+        if (!isEnabled) return false;
+
+        const storedHours = Number(localStorage.getItem(AUTO_BACKUP_INTERVAL_KEY));
+        const activeHours: 6 | 12 | 24 =
+          storedHours === 6 || storedHours === 12 || storedHours === 24
+            ? storedHours
+            : autoBackupIntervalHours;
+        const intervalMs = activeHours * 60 * 60 * 1000;
+
+        const storedLastIso = localStorage.getItem(AUTO_BACKUP_LAST_AT_KEY) || lastAutoBackupAt;
+        const lastMs = storedLastIso ? new Date(storedLastIso).getTime() : 0;
+        const nowMs = Date.now();
+
+        if (lastMs && !Number.isNaN(lastMs) && nowMs - lastMs < intervalMs) {
+          return false;
+        }
+
+        // Kunci stempel waktu terlebih dahulu agar tidak terpicu ganda
+        const nowIso = new Date(nowMs).toISOString();
+        setLastAutoBackupAt(nowIso);
+
+        const exporterName = currentUser?.name || 'SuperAdmin Auto-Backup';
+        const fileName = buildTimestampedBackupFilename();
+        const rawSnapshotPayload = {
+          metadata: {
+            app: 'JacS RetailOS ERP',
+            version: 'v2.5',
+            exportedAt: nowIso,
+            exportedBy: exporterName,
+            triggerSource,
+            autoBackupIntervalHours: activeHours,
+          },
+          products,
+          transactions: domainSales,
+          sales: domainSales,
+          accounts: domainFinanceEntries,
+          financeEntries: domainFinanceEntries,
+          journalEntries: domainJournalEntries,
+          branches,
+          employees,
+          suppliers: domainSuppliers,
+          customers,
+          terminals,
+          users,
+          cashierShifts,
+          purchaseOrders,
+          auditLogs,
+          businessProfile,
+          systemSettings: {
+            businessProfile,
+            sheetConfig,
+            isProductionMode,
+            isGlobalMaintenance,
+            theme,
+            language,
+            dualBackendConfig: dualBackendSync.getConfig(),
+          },
+        };
+
+        const signedPayload = await createSignedBackupEnvelope(rawSnapshotPayload, exporterName);
+        const checksumShort = signedPayload.securityEnvelope?.checksum?.slice(0, 16) || 'SHA256';
+        const jsonStr = JSON.stringify(signedPayload, null, 2);
+        
+        await saveBackupFileWithFolderOption(fileName, jsonStr);
+
+        recordSecurityShieldEvent({
+          type: 'DATA_EXPORT',
+          details: `Auto-Backup Lokal Senyap (${fileName}) [${triggerSource}] • SHA-256 [${checksumShort}...]`,
+          module: 'AUTO_BACKUP_GUARD',
+          level: 'INFO',
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [
+      autoBackupEnabled,
+      autoBackupIntervalHours,
+      lastAutoBackupAt,
+      setLastAutoBackupAt,
+      currentUser?.name,
+      buildTimestampedBackupFilename,
+      products,
+      domainSales,
+      domainFinanceEntries,
+      domainJournalEntries,
+      branches,
+      employees,
+      domainSuppliers,
+      customers,
+      terminals,
+      users,
+      cashierShifts,
+      purchaseOrders,
+      auditLogs,
+      businessProfile,
+      sheetConfig,
+      isProductionMode,
+      isGlobalMaintenance,
+      theme,
+      language,
+      recordSecurityShieldEvent,
+    ]
+  );
+
+  useEffect(() => {
+    autoBackupRef.current = triggerSilentAutoBackupIfDue;
+  }, [triggerSilentAutoBackupIfDue]);
+
   const logout = useCallback(() => {
     try {
+      const isSuperAdminLoggingOut = Boolean(
+        isSuperAdminAuthenticated ||
+          String(currentUser?.role || '').toUpperCase().includes('SUPER') ||
+          String(currentUser?.division || '').toUpperCase().includes('SUPER') ||
+          String(currentUser?.user_id || currentUser?.id || '').toUpperCase().includes('SUPER') ||
+          String(currentUser?.id || '').toUpperCase() === 'USR-001'
+      );
+      if (isSuperAdminLoggingOut) {
+        void autoBackupRef.current?.('SUPERADMIN_LOGOUT');
+      }
       localStorage.removeItem('jacs_active_user');
       sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
@@ -9983,9 +10333,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsSuperAdminAuthenticated(false);
     setCurrentUser(null);
     setActiveNav('home');
-  }, []);
+  }, [isSuperAdminAuthenticated, currentUser]);
+
   const exitSuperAdminSession = useCallback(() => {
     try {
+      void autoBackupRef.current?.('SUPERADMIN_EXIT_CONSOLE');
       sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
     setIsAiAssistantOpen(false);
@@ -10551,6 +10903,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     []
   );
+
+  useEffect(() => {
+    const autoPullCloud = async () => {
+      try {
+        if (isSupabaseConfigured || dualBackendSync.getConfig().supabaseUrl) {
+          await pullCloudSyncDataHandler();
+        }
+      } catch {}
+    };
+    autoPullCloud();
+  }, [pullCloudSyncDataHandler]);
 
   const syncOfflineTransactions = useCallback(async () => {
     try {
@@ -11554,6 +11917,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     unlockIdleScreen,
     securityShieldStats,
     recordSecurityShieldEvent,
+
+    autoBackupEnabled,
+    setAutoBackupEnabled,
+    autoBackupIntervalHours,
+    setAutoBackupIntervalHours,
+    lastAutoBackupAt,
+    setLastAutoBackupAt,
+    buildTimestampedBackupFilename,
+    triggerSilentAutoBackupIfDue,
+
+    activeEmployeeRecord,
+    pwaInstallPrompt,
+    triggerPwaInstall,
+    backupDirectoryName,
+    selectBackupDirectoryFolder,
+    saveBackupFileWithFolderOption,
 
     buildingDeliveryOrders,
     laundryOrders,

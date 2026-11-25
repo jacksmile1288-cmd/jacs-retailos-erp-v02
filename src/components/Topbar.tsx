@@ -38,6 +38,8 @@ export const Topbar: React.FC<TopbarProps> = ({
     activeTerminal,
     logout,
     openAiAssistant,
+    activeEmployeeRecord,
+    employees,
   } = useApp();
 
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -114,6 +116,46 @@ export const Topbar: React.FC<TopbarProps> = ({
       ? 'HR Staff (HR)'
       : `${user?.name || contextualProfile?.position || 'Staff'} (${divisionShortName})`;
 
+  const divisionEmployee = React.useMemo(() => {
+    if (isSuperAdminSession || !employees || !Array.isArray(employees)) return null;
+
+    const activeEmps = employees.filter(e => {
+      const st = String(e?.status || 'Active').toLowerCase();
+      return st === 'active' || st === 'aktif';
+    });
+    const pool = activeEmps.length > 0 ? activeEmps : employees;
+
+    const nav = String(activeNav || '').toLowerCase();
+    const found = pool.find(e => {
+      const dept = String(e?.department || e?.division || '').toLowerCase();
+      if (nav.includes('executive')) {
+        return dept.includes('executive') || dept.includes('management');
+      }
+      if (nav.includes('finance')) {
+        return dept.includes('finance') || dept.includes('accounting');
+      }
+      if (nav.includes('purchasing')) {
+        return dept.includes('purchasing');
+      }
+      if (nav.includes('warehouse')) {
+        return dept.includes('warehouse') || dept.includes('logistik');
+      }
+      if (nav.includes('hr')) {
+        return dept.includes('sdm') || dept.includes('hr') || dept.includes('personalia') || dept.includes('human resources');
+      }
+      if (nav.includes('pos')) {
+        return dept.includes('pos') || dept.includes('kasir');
+      }
+      return false;
+    });
+
+    return found || pool[0] || null;
+  }, [activeNav, employees, isSuperAdminSession]);
+
+  const empEmp = divisionEmployee as any;
+  const empFullName = empEmp?.name || empEmp?.fullName || user?.name || 'Staff';
+  const divisionBadgeText = `${empFullName} (${divisionShortName})`;
+
   const handleLogout = () => {
     logout();
     if (onLockPublicGateway) {
@@ -131,7 +173,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         }`}
       >
         {/* Kiri: Identitas Toko / Usaha Aktif + Label Jabatan Divisi + Tombol Beranda Terpadu */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={onOpenMobileMenu}
@@ -149,10 +191,10 @@ export const Topbar: React.FC<TopbarProps> = ({
             onClick={() => {
               if (isSuperAdminSession) setActiveNav('home');
             }}
-            className={`flex items-center gap-3 shrink-0 bg-transparent border-0 shadow-none p-0 ${
+            className={`flex items-center gap-3 min-w-0 bg-transparent border-0 shadow-none p-0 ${
               isSuperAdminSession ? 'cursor-pointer' : 'cursor-default'
             } group`}
-            title={`${activeStoreName} • ${divisionProfileLabel}`}
+            title={`${activeStoreName} • ${isSuperAdminSession ? divisionProfileLabel : divisionBadgeText}`}
           >
             <div
               className={`w-8 h-8 flex items-center justify-center font-mono font-normal text-xs transition-transform group-hover:scale-105 shrink-0 ${
@@ -171,19 +213,31 @@ export const Topbar: React.FC<TopbarProps> = ({
               />
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="font-['Plus_Jakarta_Sans'] font-semibold text-sm md:text-[15px] tracking-wider text-slate-900 dark:text-white max-w-[180px] sm:max-w-[240px] truncate">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="font-['Plus_Jakarta_Sans'] font-semibold text-sm md:text-[15px] tracking-wider text-slate-900 dark:text-white max-w-[200px] xl:max-w-[260px] truncate block">
                 {activeStoreName}
               </span>
               <span
-                className={`text-[11px] px-2.5 py-1 rounded-lg font-bold tracking-wide border whitespace-nowrap shrink-0 ${
+                className={`text-[11px] px-2.5 py-1 rounded-lg font-bold tracking-wide border whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
                   isLight
                     ? 'bg-slate-100 border-slate-200 text-slate-800'
                     : 'bg-slate-900 border-slate-800 text-slate-100'
                 }`}
-                title={`Profil Jabatan Aktif: ${divisionProfileLabel}`}
+                title={`Profil Jabatan Aktif: ${isSuperAdminSession ? divisionProfileLabel : divisionBadgeText}`}
               >
-                {divisionProfileLabel}
+                {!isSuperAdminSession && (empEmp?.avatar || empEmp?.avatarUrl || empEmp?.photo) ? (
+                  <img
+                    src={empEmp?.avatar || empEmp?.avatarUrl || empEmp?.photo || ''}
+                    alt={empFullName}
+                    className="w-5 h-5 rounded-full object-cover shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : !isSuperAdminSession ? (
+                  <div className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center font-mono font-bold text-[10px] shrink-0">
+                    {empFullName ? String(empFullName).slice(0, 1).toUpperCase() : 'U'}
+                  </div>
+                ) : null}
+                <span>{isSuperAdminSession ? divisionProfileLabel : divisionBadgeText}</span>
               </span>
             </div>
           </div>
@@ -213,8 +267,8 @@ export const Topbar: React.FC<TopbarProps> = ({
           )}
         </div>
 
-        {/* Kanan: Tanya AI, Bahasa, Tema, Profil & Logout */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Kanan: Tanya AI, Profil & Grup Aksi Ujung Kanan (ID, Tema, Keluar) */}
+        <div className="flex items-center gap-2.5 shrink-0 ml-auto">
           {/* Tombol Tanya AI (Khusus Executive Manager & SuperAdmin) */}
           {isAiFeatureAuthorized && (
             <button
@@ -239,35 +293,6 @@ export const Topbar: React.FC<TopbarProps> = ({
 
           <button
             type="button"
-            id="btn-topbar-language-toggle"
-            onClick={toggleLanguage}
-            className={`h-8 px-2.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold font-mono uppercase transition cursor-pointer shrink-0 ${
-              isLight
-                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-            }`}
-            title={isEn ? 'Ganti ke Bahasa Indonesia (ID)' : 'Switch to English (EN)'}
-          >
-            <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-            <span>{(language || 'id').toUpperCase()}</span>
-          </button>
-
-          <button
-            type="button"
-            id="btn-topbar-theme-toggle"
-            onClick={toggleTheme}
-            className={`h-8 w-8 rounded-xl border flex items-center justify-center transition cursor-pointer shrink-0 ${
-              isLight
-                ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-amber-600'
-                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-cyan-400'
-            }`}
-            title={isLight ? (isEn ? 'Enable Dark Mode' : 'Aktifkan Mode Gelap') : (isEn ? 'Enable Light Mode' : 'Aktifkan Mode Terang')}
-          >
-            {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-          </button>
-
-          <button
-            type="button"
             onClick={() => setIsProfileModalOpen(true)}
             className={`flex items-center gap-2 pl-2 pr-3 py-1 rounded-xl border transition cursor-pointer shrink-0 ${
               isLight
@@ -275,33 +300,78 @@ export const Topbar: React.FC<TopbarProps> = ({
                 : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-200'
             }`}
           >
-            <div className="w-6 h-6 rounded-lg bg-cyan-600 text-white flex items-center justify-center font-mono font-bold text-xs shrink-0">
-              {user?.name ? user.name.slice(0, 1).toUpperCase() : 'U'}
-            </div>
+            {isSuperAdminSession ? (
+              <div className="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center font-mono font-bold text-xs shrink-0">
+                <Shield className="w-3.5 h-3.5" />
+              </div>
+            ) : activeEmployeeRecord?.avatarUrl || activeEmployeeRecord?.avatar ? (
+              <img
+                src={activeEmployeeRecord?.avatarUrl || activeEmployeeRecord?.avatar || ''}
+                alt={activeEmployeeRecord?.name || user?.name || 'User'}
+                className="w-6 h-6 rounded-full object-cover border border-cyan-500/40 shrink-0"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-6 h-6 rounded-full bg-cyan-600 text-white flex items-center justify-center font-mono font-bold text-xs shrink-0">
+                {user?.name ? String(user.name).slice(0, 1).toUpperCase() : 'U'}
+              </div>
+            )}
             <div className="flex flex-col text-left leading-tight hidden md:flex font-mono">
               <span className="text-xs font-bold max-w-[140px] truncate">
-                {divisionProfileLabel}
+                {isSuperAdminSession ? 'SuperAdmin (Jacs Enterprise)' : (activeEmployeeRecord?.name || user?.name || divisionProfileLabel)}
               </span>
               <span className="text-[10px] text-cyan-500 font-medium">
-                {user?.name || contextualProfile?.position || 'User'}
+                {isSuperAdminSession ? 'System Access' : (activeEmployeeRecord?.role || user?.role || contextualProfile?.position || 'User')}
               </span>
             </div>
           </button>
 
-          <button
-            type="button"
-            id="btn-topbar-global-logout"
-            onClick={handleLogout}
-            className={`h-8 px-3 rounded-xl border flex items-center gap-1.5 text-xs font-mono font-bold transition cursor-pointer shrink-0 ${
-              isLight
-                ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
-                : 'bg-rose-950/40 hover:bg-rose-900/60 border-rose-800/80 text-rose-300'
-            }`}
-            title={isEn ? 'Logout / Switch Division' : 'Keluar / Ganti Divisi'}
-          >
-            <LogOut className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden sm:inline">{isEn ? 'Logout' : 'Keluar'}</span>
-          </button>
+          {/* Grup Aksi Ujung Kanan (ID, Tombol Tema, dan Tombol Keluar Kompak) - Terkunci shrink-0 */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              id="btn-topbar-language-toggle"
+              onClick={toggleLanguage}
+              className={`h-8 px-2.5 rounded-xl border flex items-center gap-1.5 text-xs font-bold font-mono uppercase transition cursor-pointer shrink-0 ${
+                isLight
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+              }`}
+              title={isEn ? 'Ganti ke Bahasa Indonesia (ID)' : 'Switch to English (EN)'}
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+              <span>{(language || 'id').toUpperCase()}</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-topbar-theme-toggle"
+              onClick={toggleTheme}
+              className={`h-8 w-8 rounded-xl border flex items-center justify-center transition cursor-pointer shrink-0 ${
+                isLight
+                  ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-amber-600'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-cyan-400'
+              }`}
+              title={isLight ? (isEn ? 'Enable Dark Mode' : 'Aktifkan Mode Gelap') : (isEn ? 'Enable Light Mode' : 'Aktifkan Mode Terang')}
+            >
+              {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+            </button>
+
+            <button
+              type="button"
+              id="btn-topbar-global-logout"
+              onClick={handleLogout}
+              className={`h-8 w-8 rounded-xl border flex items-center justify-center transition cursor-pointer shrink-0 ${
+                isLight
+                  ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                  : 'bg-rose-950/40 hover:bg-rose-900/60 border-rose-800/80 text-rose-300'
+              }`}
+              title={isEn ? 'Logout / Switch Division' : 'Keluar / Ganti Divisi'}
+              aria-label="Keluar"
+            >
+              <LogOut className="w-4 h-4 shrink-0" />
+            </button>
+          </div>
         </div>
       </header>
 

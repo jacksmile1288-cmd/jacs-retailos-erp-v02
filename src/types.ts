@@ -1379,13 +1379,13 @@ export type ActiveNavModule =
   | 'security';
 
 export type HrDepartment =
+  | 'Executive & Management'
+  | 'Operasional & Produksi'
   | 'POS & Kasir'
-  | 'Produksi & Operator Laundry'
   | 'Warehouse & Logistik'
   | 'Purchasing'
   | 'Pengadaan & Purchasing'
   | 'Finance & Accounting'
-  | 'Executive & Management'
   | 'Human Resources & Personalia'
   | 'Master Data & Katalog'
   | 'IT & Security'
