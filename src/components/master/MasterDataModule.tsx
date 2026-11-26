@@ -7,7 +7,9 @@ import { ServiceStylistMasterTab } from './ServiceStylistMasterTab';
 import { BuildingMaterialsMasterModule } from './BuildingMaterialsMasterModule';
 import { QuickBarcodeModal } from './QuickBarcodeModal';
 import { BarcodeLabelStudioModal } from './BarcodeLabelStudioModal';
-import { SmartMigrationPanel } from './SmartMigrationPanel';
+import { SmartMigrationPanel, EvaluatedMigrationRow } from './SmartMigrationPanel';
+import { upsertProductToSupabase } from '../../services/supabaseSyncService';
+import { ShieldAlert, CheckCircle2, AlertTriangle, Trash2 } from 'lucide-react';
 import { FNB_PRODUCTS } from '../../data/fnbData';
 import {
   BARBERSHOP_SERVICE_SEEDS,
@@ -56,6 +58,7 @@ type MasterDataTab =
   | 'catalog'
   | 'categories'
   | 'migration'
+  | 'quarantine'
   | 'fnb_catalog'
   | 'fb_bom'
   | 'fnb_toppings'
@@ -163,7 +166,7 @@ export const MasterDataModule: React.FC = () => {
     const base: MasterDataTab[] = [];
     const addSectorTabs = (sec: 'FNB' | 'FASHION' | 'BUILDING' | 'SERVICE' | 'RETAIL') => {
       if (sec === 'RETAIL') {
-        ['catalog', 'migration', 'categories'].forEach((t) => {
+        ['catalog', 'migration', 'quarantine', 'categories'].forEach((t) => {
           if (!base.includes(t as MasterDataTab)) base.push(t as MasterDataTab);
         });
       } else if (sec === 'FNB') {
@@ -227,6 +230,118 @@ export const MasterDataModule: React.FC = () => {
   const [fashionFilter, setFashionFilter] = useState<'ALL' | 'CLEARANCE' | 'BUNDLE' | 'LOW_STOCK'>('ALL');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
+
+  // Karantina Data State & Handler
+  const [quarantineRows, setQuarantineRows] = useState<EvaluatedMigrationRow[]>(() => {
+    try {
+      const raw = localStorage.getItem('jacs_retailos_quarantine_rows_v1');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      try {
+        const raw = localStorage.getItem('jacs_retailos_quarantine_rows_v1');
+        setQuarantineRows(raw ? JSON.parse(raw) : []);
+      } catch {}
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('jacs_quarantine_updated', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('jacs_quarantine_updated', handleStorageChange);
+    };
+  }, []);
+
+  const updateQuarantineRow = (rowNumber: number, field: string, value: any) => {
+    const updated = quarantineRows.map((r) => {
+      if (r.rowNumber === rowNumber) {
+        const next = { ...r, [field]: value };
+        const isBCode = Boolean(String(next.barcode || '').trim());
+        const isNName = Boolean(String(next.name || '').trim());
+        const isHppValid = Number(next.costPrice) > 0;
+        const isRetValid = Number(next.retailPrice) > 0;
+        const nowValid = isBCode && isNName && isHppValid && isRetValid;
+        return {
+          ...next,
+          isValid: nowValid,
+          errorReason: nowValid ? null : (next.errorReason || 'Data belum lengkap / valid'),
+        };
+      }
+      return r;
+    });
+    setQuarantineRows(updated);
+    try {
+      localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(updated));
+    } catch {}
+  };
+
+  const handleSaveAndMoveQuarantine = async () => {
+    const validRows = quarantineRows.filter((r) => r.isValid);
+    if (validRows.length === 0) {
+      showToast?.('Tidak ada baris karantina yang berstatus VALID untuk dipindahkan ke Master Data.', 'warning');
+      return;
+    }
+
+    const payloads: (Omit<Product, 'id'> & { id?: string })[] = validRows.map((row, idx) => ({
+      id: `SKU-Q-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+      barcode: row.barcode,
+      name: row.name,
+      brand: row.brand || 'GENERAL',
+      category: row.categoryName || 'General',
+      categoryCode: row.categoryCode || 1,
+      costPrice: row.costPrice,
+      cost_price: row.costPrice,
+      sellingPrice: row.retailPrice,
+      sell_price: row.retailPrice,
+      price_retail: row.retailPrice,
+      retailPrice: row.retailPrice,
+      price: row.retailPrice,
+      memberPrice: row.memberPrice || row.retailPrice,
+      price_member: row.memberPrice || row.retailPrice,
+      wholesalePrice: row.wholesalePrice || row.retailPrice,
+      price_wholesale: row.wholesalePrice || row.retailPrice,
+      price_distributor: row.wholesalePrice || row.retailPrice,
+      stock: row.stock || 0,
+      initialStock: row.stock || 0,
+      minStock: 10,
+      min_stock: 10,
+      unit: row.unit || 'Pcs',
+      status: (row.stock || 0) > 0 ? 'Active' : 'Out of Stock',
+      taxable: true,
+    }));
+
+    addProductsBulk(
+      payloads,
+      `Berhasil memindahkan ${validRows.length} SKU dari Karantina ke Katalog Master Data!`
+    );
+
+    try {
+      for (const p of payloads) {
+        await upsertProductToSupabase(p as Product);
+      }
+    } catch (e) {
+      console.error('Supabase sync error for quarantined items:', e);
+    }
+
+    addAuditLog?.(
+      'QUARANTINE_COMMIT_MASTER',
+      'MASTER_DATA',
+      `Memindahkan ${validRows.length} baris dari Karantina ke Master Data Katalog.`
+    );
+
+    const remaining = quarantineRows.filter((r) => !r.isValid);
+    setQuarantineRows(remaining);
+    try {
+      localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(remaining));
+      window.dispatchEvent(new Event('jacs_quarantine_updated'));
+    } catch {}
+
+    showToast?.(`Berhasil memindahkan ${validRows.length} SKU ke Katalog Master Data & sinkronisasi cloud.`, 'success');
+  };
 
   // Quick-add state khusus F&B Menu & Specialty Service / Laundry / Fashion
   const [isSpecialtyAddOpen, setIsSpecialtyAddOpen] = useState(false);
@@ -906,6 +1021,21 @@ export const MasterDataModule: React.FC = () => {
               AI Smart Migration
             </button>
           )}
+          {visibleTabs.includes('quarantine') && (
+            <button
+              onClick={() => setActiveTab('quarantine')}
+              className={`px-3 py-1.5 text-xs font-medium tracking-wide rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'quarantine'
+                  ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25'
+                  : isLight
+                  ? 'bg-slate-100 text-slate-700 hover:bg-rose-50 border border-slate-300'
+                  : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+              Karantina Data ({quarantineRows.length})
+            </button>
+          )}
           {visibleTabs.includes('categories') && (
             <button
               onClick={() => setActiveTab('categories')}
@@ -1372,6 +1502,205 @@ export const MasterDataModule: React.FC = () => {
           isLight={isLight}
           onGoToCatalog={() => setActiveTab('catalog')}
         />
+      )}
+
+      {/* TAB QUARANTINE DATA (N) */}
+      {activeTab === 'quarantine' && (
+        <div className={`border rounded-xl p-5 space-y-4 transition-all ${
+          isLight
+            ? 'bg-slate-50/80 border-rose-300 shadow-[0_0_16px_rgba(244,63,94,0.12)]'
+            : 'bg-slate-900/90 border-rose-500/30 shadow-[0_0_16px_rgba(244,63,94,0.08)]'
+        }`}>
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <div>
+              <h3 className={`text-base font-bold flex items-center gap-2 ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                <ShieldAlert className="w-5 h-5 text-rose-500" />
+                <span>Karantina Data &amp; Perbaikan Mandiri Baris Gagal Migrasi</span>
+              </h3>
+              <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
+                Menampung seluruh baris data yang gagal validasi saat migrasi. Lakukan edit inline langsung pada kolom yang belum lengkap atau salah, lalu klik "Save &amp; Pindahkan ke Master Data".
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  try {
+                    localStorage.removeItem('jacs_retailos_quarantine_rows_v1');
+                    setQuarantineRows([]);
+                    showToast?.('Semua baris karantina berhasil dibersihkan.', 'info');
+                  } catch {}
+                }}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                  isLight ? 'border-rose-300 text-rose-600 hover:bg-rose-50' : 'border-rose-500/40 text-rose-400 hover:bg-rose-950/40'
+                }`}
+              >
+                Kosongkan Karantina
+              </button>
+              <button
+                onClick={handleSaveAndMoveQuarantine}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs tracking-wide rounded-lg shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Save &amp; Pindahkan ke Master Data ({quarantineRows.filter(r => r.isValid).length} Valid)
+              </button>
+            </div>
+          </div>
+
+          {quarantineRows.length === 0 ? (
+            <div className={`p-12 text-center rounded-xl border border-dashed ${isLight ? 'border-slate-300 bg-white' : 'border-slate-800 bg-slate-950/50'}`}>
+              <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3 opacity-80" />
+              <h4 className={`text-sm font-semibold ${isLight ? 'text-slate-800' : 'text-slate-200'}`}>
+                Tidak ada data dalam Karantina
+              </h4>
+              <p className={`text-xs mt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                Semua baris migrasi Anda telah berhasil lolos dan masuk ke Katalog SKU utama.
+              </p>
+            </div>
+          ) : (
+            <div className={`rounded-xl border overflow-x-auto max-h-[600px] overflow-y-auto ${isLight ? 'border-slate-200 bg-white' : 'border-slate-800 bg-slate-950'}`}>
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className={`sticky top-0 z-10 font-semibold uppercase tracking-wider ${isLight ? 'bg-slate-100 text-slate-700 border-b border-slate-200' : 'bg-slate-900 text-slate-300 border-b border-slate-800'}`}>
+                  <tr>
+                    <th className="py-3 px-3">No. Baris</th>
+                    <th className="py-3 px-3">Status Validasi</th>
+                    <th className="py-3 px-3">Barcode / ID *</th>
+                    <th className="py-3 px-3">No Kat *</th>
+                    <th className="py-3 px-3">Nama Produk *</th>
+                    <th className="py-3 px-3">Brand</th>
+                    <th className="py-3 px-3 text-right">HPP (Rp) *</th>
+                    <th className="py-3 px-3 text-right">Retail (Rp) *</th>
+                    <th className="py-3 px-3 text-right">Stok</th>
+                    <th className="py-3 px-3">Satuan</th>
+                    <th className="py-3 px-3">Alasan Gagal / Catatan</th>
+                    <th className="py-3 px-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isLight ? 'divide-slate-200' : 'divide-slate-800/70'}`}>
+                  {quarantineRows.map((row) => (
+                    <tr key={row.rowNumber} className={isLight ? 'hover:bg-slate-50/80' : 'hover:bg-slate-900/40'}>
+                      <td className="py-2.5 px-3 font-mono font-medium text-slate-500 whitespace-nowrap">
+                        #{row.rowNumber}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        {row.isValid ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3 h-3" /> Valid
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30">
+                            <AlertTriangle className="w-3 h-3" /> Perlu Revisi
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={row.barcode || ''}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'barcode', e.target.value)}
+                          className={`w-32 px-2 py-1 text-xs rounded border font-mono ${
+                            !row.barcode ? 'border-rose-500 bg-rose-500/10 text-rose-200' : isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                          placeholder="Barcode wajib"
+                        />
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="number"
+                          value={row.categoryCode || 1}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'categoryCode', Number(e.target.value))}
+                          className={`w-16 px-2 py-1 text-xs rounded border font-mono text-center ${
+                            isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 min-w-[200px]">
+                        <input
+                          type="text"
+                          value={row.name || ''}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'name', e.target.value)}
+                          className={`w-full px-2 py-1 text-xs rounded border font-medium ${
+                            !row.name ? 'border-rose-500 bg-rose-500/10 text-rose-200' : isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                          placeholder="Nama produk wajib"
+                        />
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={row.brand || ''}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'brand', e.target.value)}
+                          className={`w-28 px-2 py-1 text-xs rounded border ${
+                            isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <input
+                          type="number"
+                          value={row.costPrice || 0}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'costPrice', Number(e.target.value))}
+                          className={`w-24 px-2 py-1 text-xs rounded border font-mono text-right ${
+                            row.costPrice <= 0 ? 'border-rose-500 bg-rose-500/10 text-rose-200' : isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <input
+                          type="number"
+                          value={row.retailPrice || 0}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'retailPrice', Number(e.target.value))}
+                          className={`w-24 px-2 py-1 text-xs rounded border font-mono text-right ${
+                            row.retailPrice <= 0 ? 'border-rose-500 bg-rose-500/10 text-rose-200' : isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <input
+                          type="number"
+                          value={row.stock || 0}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'stock', Number(e.target.value))}
+                          className={`w-16 px-2 py-1 text-xs rounded border font-mono text-center ${
+                            isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <input
+                          type="text"
+                          value={row.unit || 'Pcs'}
+                          onChange={(e) => updateQuarantineRow(row.rowNumber, 'unit', e.target.value)}
+                          className={`w-16 px-2 py-1 text-xs rounded border ${
+                            isLight ? 'border-slate-300 bg-white text-slate-900' : 'border-slate-700 bg-slate-900 text-white'
+                          }`}
+                        />
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-[11px] text-rose-400 max-w-xs truncate" title={row.errorReason || 'Error validasi'}>
+                        {row.errorReason || 'Perlu verifikasi data'}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <button
+                          onClick={() => {
+                            const updated = quarantineRows.filter((r) => r.rowNumber !== row.rowNumber);
+                            setQuarantineRows(updated);
+                            try {
+                              localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(updated));
+                              window.dispatchEvent(new Event('jacs_quarantine_updated'));
+                            } catch {}
+                            showToast?.(`Baris #${row.rowNumber} dihapus dari karantina.`, 'info');
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors cursor-pointer"
+                          title="Hapus dari karantina"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {/* TAB 3: REFERENSI KAMUS KATEGORI RESMI */}

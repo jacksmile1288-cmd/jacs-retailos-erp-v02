@@ -536,29 +536,34 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         categorySource = catRes.matchedBy;
       }
 
+      const isAlreadyCommitted =
+        Boolean(migrationReport?.successRows?.some((s) => s.barcode === barcode || s.rowNumber === rowNumber));
+
       // Row-by-row validation rules
       const reasons: string[] = [];
-      if (!formattedName || formattedName.length < 2) {
-        reasons.push('Nama produk (Long Desc) kosong');
-      }
-      if (!rawCost || costPrice <= 0) {
-        reasons.push('HPP / Harga Modal kosong atau <= Rp 0');
-      } else if (!retailAutoCalculated && retailPrice < costPrice) {
-        reasons.push(
-          `Harga jual retail (Rp ${retailPrice.toLocaleString('id-ID')}) di bawah HPP (Rp ${costPrice.toLocaleString('id-ID')})`
-        );
-      }
-      if (stock < 0) {
-        reasons.push(`Stok awal negatif (${stock})`);
-      }
-      if (rawBarcode && catalogBarcodes.has(barcode)) {
-        reasons.push(`Duplikasi barcode (${barcode}) dengan katalog aktif`);
-      } else if (rawBarcode && batchSeenBarcodes.has(barcode)) {
-        reasons.push(`Duplikasi barcode (${barcode}) di dalam file impor`);
+      if (!isAlreadyCommitted) {
+        if (!formattedName || formattedName.length < 2) {
+          reasons.push('Nama produk (Long Desc) kosong');
+        }
+        if (!rawCost || costPrice <= 0) {
+          reasons.push('HPP / Harga Modal kosong atau <= Rp 0');
+        } else if (!retailAutoCalculated && retailPrice < costPrice) {
+          reasons.push(
+            `Harga jual retail (Rp ${retailPrice.toLocaleString('id-ID')}) di bawah HPP (Rp ${costPrice.toLocaleString('id-ID')})`
+          );
+        }
+        if (stock < 0) {
+          reasons.push(`Stok awal negatif (${stock})`);
+        }
+        if (rawBarcode && catalogBarcodes.has(barcode)) {
+          reasons.push(`Duplikasi barcode (${barcode}) dengan katalog aktif`);
+        } else if (rawBarcode && batchSeenBarcodes.has(barcode)) {
+          reasons.push(`Duplikasi barcode (${barcode}) di dalam file impor`);
+        }
       }
 
-      const isValid = reasons.length === 0;
-      if (isValid && rawBarcode) {
+      const isValid = isAlreadyCommitted || reasons.length === 0;
+      if (isValid && rawBarcode && !isAlreadyCommitted) {
         batchSeenBarcodes.add(barcode);
       }
 
@@ -582,7 +587,7 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         errorReason: isValid ? null : reasons.join('; '),
       };
     });
-  }, [parsedSource.rows, targetToSourceHeader, firstRowIsHeader, products, categoryOverrides, sortedCategories]);
+  }, [parsedSource.rows, targetToSourceHeader, firstRowIsHeader, products, categoryOverrides, sortedCategories, migrationReport]);
 
   // Upload File (.CSV / .XLSX / .XLS / .TSV / .TXT)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -733,6 +738,23 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
     );
     const totalUnitHppSum = successRows.reduce((sum, r) => sum + r.costPrice, 0);
 
+    if (failedRows.length > 0) {
+      try {
+        const stored = localStorage.getItem('jacs_retailos_quarantine_rows_v1');
+        const existing: EvaluatedMigrationRow[] = stored ? JSON.parse(stored) : [];
+        const combined = [
+          ...failedRows,
+          ...existing.filter(
+            (eq) => !failedRows.some((fr) => fr.barcode === eq.barcode && fr.rowNumber === eq.rowNumber)
+          ),
+        ];
+        localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(combined));
+        window.dispatchEvent(new Event('jacs_quarantine_updated'));
+      } catch (e) {
+        console.error('Failed to save quarantine rows to localStorage:', e);
+      }
+    }
+
     setMigrationReport({
       executedAt: new Date().toISOString(),
       fileName: sourceFileName,
@@ -789,6 +811,50 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
     ]);
     downloadCsvFile('Hasil_Migrasi_RetailOS.csv', headers, rows);
   };
+
+  const unmappedRequiredFields = useMemo(() => {
+    const missing: { key: RetailOsTargetField; label: string; keywords: string[] }[] = [];
+    const costHeader = targetToSourceHeader['costPrice'];
+    if (!costHeader || costHeader === 'ignore') {
+      missing.push({ key: 'costPrice', label: 'HPP / Harga Modal', keywords: ['hpp', 'modal', 'beli', 'cost', 'price', 'harga'] });
+    }
+    const nameHeader = targetToSourceHeader['name'];
+    if (!nameHeader || nameHeader === 'ignore') {
+      missing.push({ key: 'name', label: 'NAMA_PRODUK (Long Desc)', keywords: ['nama', 'item', 'produk', 'barang', 'desc'] });
+    }
+    return missing;
+  }, [targetToSourceHeader]);
+
+  const quarantineIssueGroups = useMemo(() => {
+    const invalidRows = evaluatedRows.filter(
+      (r) => !r.isValid && !migrationReport?.successRows?.some((s) => s.rowNumber === r.rowNumber)
+    );
+    if (invalidRows.length === 0) return [];
+
+    const map = new Map<string, number[]>();
+    invalidRows.forEach((r) => {
+      const reason = r.errorReason || 'Validasi gagal';
+      const groupKey = reason.includes('duplikasi')
+        ? 'Duplikasi Barcode'
+        : reason.includes('HPP')
+        ? 'HPP Kosong atau <= Rp 0'
+        : reason.includes('Nama')
+        ? 'Nama Produk Kosong'
+        : 'Validasi Data';
+      const list = map.get(groupKey) || [];
+      list.push(r.rowNumber);
+      map.set(groupKey, list);
+    });
+
+    return Array.from(map.entries()).map(([issue, rowNums]) => ({
+      issue,
+      rowNums,
+      rangeText:
+        rowNums.length === 1
+          ? `Baris #${rowNums[0]}`
+          : `Baris #${rowNums[0]} s/d #${rowNums[rowNums.length - 1]} (${rowNums.length} baris)`,
+    }));
+  }, [evaluatedRows, migrationReport]);
 
   const validPreviewCount = evaluatedRows.filter((r) => r.isValid).length;
   const invalidPreviewCount = evaluatedRows.length - validPreviewCount;
@@ -1000,18 +1066,20 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
                               const nextField = e.target.value as RetailOsTargetField;
                               setColumnOverrides((prev) => ({ ...prev, [header]: nextField }));
                             }}
-                            className={`w-full px-2.5 py-1.5 rounded-lg border text-xs font-medium outline-none cursor-pointer ${
-                              isMapped
-                                ? isLight
-                                  ? 'bg-cyan-50 border-cyan-400 text-cyan-900'
-                                  : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
-                                : isLight
-                                ? 'bg-slate-50 border-slate-300 text-slate-600'
-                                : 'bg-slate-900 border-slate-700 text-slate-400'
+                            className={`w-full px-2.5 py-1.5 rounded-lg border text-xs outline-none cursor-pointer bg-[#0f172a] ${
+                              isMapped ? 'text-white font-semibold border-cyan-500/50' : 'text-slate-200 font-medium border-slate-700'
                             }`}
                           >
                             {RETAIL_OS_SCHEMA_FIELDS.map((f) => (
-                              <option key={f.key} value={f.key}>
+                              <option
+                                key={f.key}
+                                value={f.key}
+                                className={`bg-[#0f172a] ${
+                                  f.key === 'ignore'
+                                    ? 'text-slate-200 font-medium'
+                                    : 'text-white font-semibold'
+                                }`}
+                              >
                                 {f.label}
                               </option>
                             ))}
@@ -1248,6 +1316,80 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         </div>
       )}
 
+      {/* KOTAK ANALISIS DATA YANG PERLU DIREVISI */}
+      {(unmappedRequiredFields.length > 0 || quarantineIssueGroups.length > 0) && (
+        <div
+          className={`rounded-2xl border p-4 space-y-3 ${
+            isLight
+              ? 'bg-amber-50/90 border-amber-300 text-amber-900 shadow-sm'
+              : 'bg-amber-950/25 border-amber-500/40 text-amber-200'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>Analisis Data yang Perlu Direvisi ({unmappedRequiredFields.length + quarantineIssueGroups.length} Temuan Masalah)</span>
+            </h4>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {unmappedRequiredFields.map((miss) => (
+              <div
+                key={miss.key}
+                className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${
+                  isLight ? 'bg-white/90 border-amber-200' : 'bg-slate-900/90 border-amber-500/30'
+                }`}
+              >
+                <div>
+                  <span className="font-semibold text-rose-500 block">
+                    Kolom Wajib Belum Dipetakan: {miss.label}
+                  </span>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">
+                    Silakan petakan kolom sumber yang sesuai pada Bagian 2 di atas.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const foundHeader = parsedSource.headers.find((h) =>
+                      miss.keywords.some((kw) => h.toLowerCase().includes(kw))
+                    );
+                    if (foundHeader) {
+                      setColumnOverrides((prev) => ({ ...prev, [foundHeader]: miss.key }));
+                      showToast?.(`Kolom "${foundHeader}" otomatis dipetakan ke ${miss.label}`, 'success');
+                    } else {
+                      showToast?.(
+                        `Tidak ditemukan header dengan kata kunci yang cocok untuk ${miss.label}. Pilih secara manual di Bagian 2.`,
+                        'warning'
+                      );
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-[11px] shrink-0 cursor-pointer shadow-sm transition"
+                >
+                  Auto-Petakan ke {miss.label}
+                </button>
+              </div>
+            ))}
+            {quarantineIssueGroups.map((group, idx) => (
+              <div
+                key={idx}
+                className={`p-3 rounded-xl border ${
+                  isLight ? 'bg-white/90 border-amber-200' : 'bg-slate-900/90 border-amber-500/30'
+                }`}
+              >
+                <span className="font-semibold text-rose-500 block">
+                  {group.issue} ({group.rangeText})
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  {group.issue.includes('Duplikasi')
+                    ? 'Barcode sudah terdaftar di katalog aktif atau duplikasi dalam file.'
+                    : 'Periksa kembali nilai data pada kolom terkait.'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 3. PRATINJAU KONVERSI KE FORMAT BAKU JACS RETAILOS ERP SEBELUM EKSEKUSI */}
       <div
         className={`rounded-2xl border p-5 space-y-3 transition-all duration-200 ${
@@ -1313,7 +1455,16 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
                   >
                     <td className="py-2 px-3 font-mono font-normal text-[11px] text-slate-400">#{row.rowNumber}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
-                      {row.isValid ? (
+                      {migrationReport?.successRows?.some((s) => s.barcode === row.barcode || s.rowNumber === row.rowNumber) ? (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
+                          isLight
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
+                            : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        }`}>
+                          <CheckCircle2 className="w-3 h-3" />
+                          TERSIMPAN DI KATALOG
+                        </span>
+                      ) : row.isValid ? (
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
                           isLight
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
@@ -1359,14 +1510,14 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
                             [idx]: Number(e.target.value),
                           }))
                         }
-                        className={`w-20 truncate px-2 py-1 rounded-md border font-mono text-[10px] font-medium outline-none cursor-pointer ${
-                          isLight
-                            ? 'bg-amber-50 border-amber-300 text-amber-800'
-                            : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                        }`}
+                        className="w-24 truncate px-2.5 py-1.5 rounded-md border font-mono text-xs font-semibold outline-none cursor-pointer bg-[#0f172a] text-white border-amber-500/50"
                       >
                         {sortedCategories.map((c) => (
-                          <option key={c.code} value={c.code} className={isLight ? 'bg-white text-slate-900' : 'bg-slate-900 text-slate-100'}>
+                          <option
+                            key={c.code}
+                            value={c.code}
+                            className="bg-[#0f172a] text-white font-semibold"
+                          >
                             {c.code} — {c.name}
                           </option>
                         ))}
