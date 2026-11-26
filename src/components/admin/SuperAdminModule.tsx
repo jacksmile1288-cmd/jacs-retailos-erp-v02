@@ -420,9 +420,11 @@ export const SuperAdminModule: React.FC = () => {
     unbindPosStation,
     executeSystemResetByLevel,
     restoreDemoSimulationData,
+    clearDemoDataToZero,
     verifyManagementAuthPin,
     isLedgerReset,
     isMasterCatalogWiped,
+    isIntegratedDemoMode,
     fnbToppings,
     serviceStylists,
     idleAutoLockMinutes,
@@ -477,8 +479,9 @@ export const SuperAdminModule: React.FC = () => {
   const [resetLevelConfirmPhrase, setResetLevelConfirmPhrase] = useState('');
   const [resetLevelError, setResetLevelError] = useState<string | null>(null);
   const [showRestoreDemoModal, setShowRestoreDemoModal] = useState(false);
+  const [showClearDemoModal, setShowClearDemoModal] = useState(false);
   const [lastResetResult, setLastResetResult] = useState<{
-    level: 1 | 2 | 3 | 4 | 'RESTORE_DEMO';
+    level: 1 | 2 | 3 | 4 | 'RESTORE_DEMO' | 'CLEAR_DEMO';
     title: string;
     message: string;
     timestamp: string;
@@ -494,6 +497,28 @@ export const SuperAdminModule: React.FC = () => {
         timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       });
       setShowRestoreDemoModal(false);
+    }
+  };
+
+  const handleConfirmClearDemoData = () => {
+    const res = clearDemoDataToZero();
+    if (res.success) {
+      setLastResetResult({
+        level: 'CLEAR_DEMO',
+        title: res.title,
+        message: res.message,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      });
+      setShowClearDemoModal(false);
+    }
+  };
+
+  const handleOneClickClearDemo = () => {
+    const hasExistingData = (sales || []).length > 0 || (products || []).length > 0 || (journalEntries || []).length > 0;
+    if (isIntegratedDemoMode || !hasExistingData) {
+      handleConfirmClearDemoData();
+    } else {
+      setShowClearDemoModal(true);
     }
   };
 
@@ -9194,8 +9219,22 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
               </div>
 
-              {/* Ringkasan Status Data Saat Ini & Tombol Restore Demo Data */}
+              {/* Ringkasan Status Data Saat Ini & Lencana Mode Operasional */}
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <div
+                  className={`px-3 py-1.5 rounded-xl border text-[11px] font-black tracking-wide flex items-center gap-2 ${
+                    isIntegratedDemoMode
+                      ? 'bg-indigo-500/15 border-indigo-400/50 text-indigo-300'
+                      : 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isIntegratedDemoMode ? 'bg-indigo-400 animate-pulse' : 'bg-emerald-400'
+                    }`}
+                  />
+                  {isIntegratedDemoMode ? 'MODE DEMO TERINTEGRASI AKTIF' : 'MODE PRODUKSI BERSIH'}
+                </div>
                 <div className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold ${
                   isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
                 }`}>
@@ -9216,14 +9255,6 @@ export const SuperAdminModule: React.FC = () => {
                 }`}>
                   Kontak & Staf: <span className="font-black text-purple-400">{(suppliers || []).length + (customers || []).length + (employees || []).length + (serviceStylists || []).length}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRestoreDemoModal(true)}
-                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 font-black text-[11px] flex items-center gap-1.5 transition shadow-sm"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Muat Ulang Data Simulasi Demo
-                </button>
               </div>
             </div>
 
@@ -9440,38 +9471,91 @@ export const SuperAdminModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Footer Bar: Pemulihan Data Simulasi Demo Instan */}
-            <div className={`mt-5 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
-              isLight
-                ? 'bg-indigo-50/60 border-indigo-200 text-slate-800'
-                : 'bg-[#0d1117]/90 border-indigo-500/30 text-gray-200'
+            {/* Panel Kontrol Paket Demo Terintegrasi End-to-End (6 Pilar ERP) */}
+            <div className={`mt-5 p-5 rounded-2xl border space-y-4 ${
+              isIntegratedDemoMode
+                ? isLight
+                  ? 'bg-indigo-50/70 border-indigo-300 text-slate-800'
+                  : 'bg-[#0d1117]/95 border-indigo-500/45 text-gray-200'
+                : isLight
+                  ? 'bg-slate-50/90 border-slate-200 text-slate-800'
+                  : 'bg-[#0d1117]/90 border-emerald-500/30 text-gray-200'
             }`}>
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/35 flex items-center justify-center shrink-0">
-                  <RotateCcw className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div>
-                  <div className="text-xs font-black flex flex-wrap items-center gap-2">
-                    <span>Ingin Kembali ke Mode Presentasi / Simulasi Demo?</span>
-                    {(isMasterCatalogWiped || isLedgerReset) && (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                        Status Saat Ini: Data Pernah Direset
-                      </span>
-                    )}
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                    isIntegratedDemoMode
+                      ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-400'
+                      : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                  }`}>
+                    <Zap className="w-5 h-5" />
                   </div>
-                  <p className={`text-[11px] mt-0.5 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
-                    Pulihkan Katalog Produk & Layanan lintas sektor, Supplier, Pelanggan, Karyawan/Stylist, Stok Awal, dan Saldo Awal COA secara instan tanpa hapus Local Storage manual.
-                  </p>
+                  <div>
+                    <div className="text-sm font-black flex flex-wrap items-center gap-2">
+                      <span>Paket Demo Terintegrasi End-to-End (Seluruh 6 Pilar ERP)</span>
+                      <span
+                        className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border ${
+                          isIntegratedDemoMode
+                            ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40'
+                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                        }`}
+                      >
+                        {isIntegratedDemoMode ? 'MODE DEMO TERINTEGRASI AKTIF' : 'MODE PRODUKSI BERSIH'}
+                      </span>
+                    </div>
+                    <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                      Uji alur bisnis lengkap lintas modul dalam 1 klik — mulai dari 18 SKU (termasuk 2 menu rakitan BOM + multi-tier Retail +20% / Member +15% / Grosir +10%), 4 Supplier, 5 Member/VIP, 6 Karyawan + Presensi, 3 PO (2 Received &amp; 1 Pending Executive Approval), 12 Transaksi POS + 2 Shift Kasir, Kartu Stok sinkron, hingga Jurnal Double-Entry Balance (Debet = Kredit). Penghapusan data demo akan mengembalikan angka ke 0 sambil <strong className={isLight ? 'text-slate-900' : 'text-white'}>mempertahankan Profil Usaha, Logo, Loket POS, API Config, dan Kredensial/PIN</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2 Tombol 1-Klik Berdampingan */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleConfirmRestoreDemoData}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition shadow-md whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-4 h-4 shrink-0" />
+                    Muat Paket Demo Terintegrasi (Semua Modul)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOneClickClearDemo}
+                    className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition border whitespace-nowrap ${
+                      isLight
+                        ? 'bg-rose-50 hover:bg-rose-100 border-rose-300 text-rose-700'
+                        : 'bg-rose-500/15 hover:bg-rose-500/25 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4 shrink-0" />
+                    Hapus Data Demo (Reset ke 0 Siap Pakai)
+                  </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowRestoreDemoModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shrink-0 transition shadow-md"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Muat Ulang Data Simulasi Demo (Restore Demo Data)
-              </button>
+
+              {/* Ringkasan Komponen 6 Pilar Terhubung */}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5 pt-2 border-t border-gray-800/40">
+                {[
+                  { label: 'Master & BOM', value: '18 SKU (2 BOM)', sub: '+20% / +15% / +10%' },
+                  { label: 'Kontak & HR', value: '4 Sup · 5 VIP · 6 Staf', sub: 'Presensi & Shift Aktif' },
+                  { label: 'Purchasing', value: '3 PO (2 Received)', sub: '1 Pending Approval' },
+                  { label: 'Warehouse', value: 'Kartu Stok Sinkron', sub: '2 GRN + Mutasi IN/OUT' },
+                  { label: 'Kasir POS', value: '12 Transaksi POS', sub: '1 Shift Open · 1 Z-Report' },
+                  { label: 'Finance GL', value: '17 Jurnal Balance', sub: 'Laba Rugi · Neraca · AR/AP' },
+                ].map((card) => (
+                  <div
+                    key={card.label}
+                    className={`px-3 py-2 rounded-xl border ${
+                      isLight ? 'bg-white/90 border-slate-200' : 'bg-[#161b22]/80 border-gray-800'
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{card.label}</div>
+                    <div className={`text-[11px] font-black mt-0.5 ${isLight ? 'text-slate-900' : 'text-white'}`}>{card.value}</div>
+                    <div className="text-[10px] text-cyan-400 font-semibold">{card.sub}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Bar Encrypted Backup & SHA-256 Integrity Checksum di Tab Data Master & Migrasi */}
@@ -9670,7 +9754,7 @@ export const SuperAdminModule: React.FC = () => {
         isEn={false}
       />
 
-      {/* Modal Konfirmasi Cepat — Muat Ulang Data Simulasi Demo (Restore Demo Data) */}
+      {/* Modal Konfirmasi Cepat — Muat Paket Demo Terintegrasi End-to-End */}
       {showRestoreDemoModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
           <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
@@ -9685,10 +9769,10 @@ export const SuperAdminModule: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400">
-                    Restore Demo Data
+                    Paket Demo Terintegrasi
                   </span>
                   <h4 className="text-base font-black mt-0.5">
-                    Muat Ulang Data Simulasi Demo?
+                    Muat Paket Demo End-to-End?
                   </h4>
                 </div>
               </div>
@@ -9704,12 +9788,12 @@ export const SuperAdminModule: React.FC = () => {
             <div className={`rounded-2xl p-4 border text-xs space-y-2 ${
               isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
             }`}>
-              <div className="font-black text-indigo-400">Dataset Simulasi Standar yang Akan Dipulihkan:</div>
+              <div className="font-black text-indigo-400">Isi Paket Demo Terintegrasi (6 Pilar ERP):</div>
               <ul className="list-disc list-inside space-y-1 text-[11px]">
-                <li>Katalog Produk & Paket Layanan lintas sektor (Ritel, F&B, Fashion, Material Bangunan, Barbershop & Laundry) beserta Stok Awal</li>
-                <li>Daftar Supplier, Pelanggan, Karyawan, dan Stylist/Kapster</li>
-                <li>Transaksi sampel POS, Purchase Order (PO), Mutasi Stok, dan Saldo Awal Chart of Accounts (COA)</li>
-                <li>Menghapus flag penghapusan permanen di Local Storage secara otomatis</li>
+                <li>18 SKU produk (termasuk 2 menu rakitan BOM) dengan harga Retail +20%, Member +15%, Grosir +10%</li>
+                <li>4 Supplier aktif, 5 Member/VIP, 6 Karyawan aktif beserta presensi hari ini &amp; jadwal shift</li>
+                <li>3 Purchase Order (2 RECEIVED + 1 PENDING_APPROVAL langsung masuk Executive Approval Queue)</li>
+                <li>12 Transaksi POS (Tunai, QRIS, Transfer, Debit, Member), 1 Shift Aktif + 1 Z-Report, Kartu Stok sinkron, dan Jurnal Double-Entry Balance</li>
               </ul>
             </div>
 
@@ -9731,7 +9815,76 @@ export const SuperAdminModule: React.FC = () => {
                 className="px-5 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 shadow-lg shadow-indigo-500/20 transition"
               >
                 <RotateCcw className="w-4 h-4" />
-                Ya, Muat Ulang Data Demo Sekarang
+                Ya, Muat Paket Demo Sekarang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Aman — Hapus Data Demo (Reset ke 0 Siap Pakai) */}
+      {showClearDemoModal && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className={`w-full max-w-md border rounded-3xl p-6 space-y-5 transition-all duration-200 ${
+            isLight
+              ? 'bg-white border-rose-400 shadow-[0_0_28px_rgba(244,63,94,0.18)] text-slate-900'
+              : 'bg-[#161b22] border-rose-500/50 shadow-[0_0_28px_rgba(244,63,94,0.2)] text-white'
+          }`}>
+            <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-slate-200' : 'border-gray-800'}`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center border bg-rose-500/15 border-rose-500/40 text-rose-400">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-400">
+                    Mode Produksi Bersih
+                  </span>
+                  <h4 className="text-base font-black mt-0.5">
+                    Hapus Data &amp; Reset ke 0 Siap Pakai?
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowClearDemoModal(false)}
+                className="text-xs font-bold text-gray-400 hover:text-white px-2 py-1 rounded-lg"
+              >
+                Tutup
+              </button>
+            </div>
+
+            <div className={`rounded-2xl p-4 border text-xs space-y-2 ${
+              isLight ? 'bg-slate-50 border-slate-200 text-slate-700' : 'bg-[#0d1117] border-gray-800 text-gray-300'
+            }`}>
+              <div className="font-black text-rose-400">Yang Akan Dihapus ke 0:</div>
+              <p className="text-[11px]">
+                Seluruh transaksi POS, shift kasir, PO/GRN, kartu stok, jurnal, AR/AP, katalog produk, supplier, member, dan data karyawan/presensi.
+              </p>
+              <div className="font-black text-emerald-400 pt-1">Tetap Dipertahankan Utuh:</div>
+              <p className="text-[11px]">
+                Profil Usaha ({businessProfile?.name || 'Toko'}), Logo, Konfigurasi Loket/Terminal POS, Pengaturan Cloud/API, serta Kredensial &amp; PIN Login.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowClearDemoModal(false)}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border ${
+                  isLight
+                    ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearDemoData}
+                className="px-5 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 transition"
+              >
+                <Trash2 className="w-4 h-4" />
+                Ya, Reset ke 0 Siap Pakai
               </button>
             </div>
           </div>

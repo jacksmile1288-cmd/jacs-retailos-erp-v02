@@ -141,6 +141,7 @@ import {
   resolveGrnBulkCubicConversion,
   LEDGER_RESET_ACTIVE_ENTITY_KEY,
 } from '../utils/buildingDomainIsolation';
+import { buildIntegratedDemoPackage } from '../data/integratedDemoPackage';
 import {
   dualBackendSync,
   generateTxUuid,
@@ -760,6 +761,7 @@ export interface AppContextType {
   resetLedgerToActiveEntity: () => { success: boolean; message: string };
   isLedgerReset: boolean;
   isMasterCatalogWiped: boolean;
+  isIntegratedDemoMode: boolean;
   executeSystemResetByLevel: (level: 1 | 2 | 3 | 4) => {
     success: boolean;
     level: 1 | 2 | 3 | 4;
@@ -768,6 +770,12 @@ export interface AppContextType {
     timestamp: string;
   };
   restoreDemoSimulationData: () => {
+    success: boolean;
+    title: string;
+    message: string;
+    timestamp: string;
+  };
+  clearDemoDataToZero: () => {
     success: boolean;
     title: string;
     message: string;
@@ -873,6 +881,7 @@ const MANAGEMENT_AUTH_PIN_KEY = `${STORAGE_PREFIX}management_auth_pin_v1`;
 const REMOTE_MAINTENANCE_LOCK_KEY = `${STORAGE_PREFIX}remote_maintenance_lock`;
 const SYSTEM_ERROR_LOGS_KEY = `${STORAGE_PREFIX}system_error_logs`;
 const MASTER_CATALOG_WIPED_KEY = `${STORAGE_PREFIX}master_catalog_wiped_v1`;
+const INTEGRATED_DEMO_MODE_KEY = `${STORAGE_PREFIX}integrated_demo_mode_v1`;
 const IDLE_AUTOLOCK_MINUTES_KEY = `${STORAGE_PREFIX}idle_autolock_minutes_v1`;
 const SECURITY_SHIELD_STATS_KEY = `${STORAGE_PREFIX}security_shield_stats_v1`;
 const ALL_DIVISION_IDS = ['executive', 'finance', 'purchasing', 'pos', 'warehouse', 'hr'] as const;
@@ -1675,6 +1684,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const isMasterCatalogWipedRef = useRef<boolean>(isMasterCatalogWiped);
   isMasterCatalogWipedRef.current = isMasterCatalogWiped;
+
+  const [isIntegratedDemoMode, setIsIntegratedDemoMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(INTEGRATED_DEMO_MODE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const [products, setProducts] = useState<Product[]>(() => {
     const hydrateWithServiceSeeds = (baseList: Product[]): Product[] => {
@@ -3598,6 +3615,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setBuildingDeliveryOrders([]);
         setBuildingAuthRequests([]);
         setIsLedgerReset(true);
+        setIsIntegratedDemoMode(false);
+        try { localStorage.removeItem(INTEGRATED_DEMO_MODE_KEY); } catch {}
 
         const zeroStockProducts = (productsRef.current || []).map((p) => ({
           ...p,
@@ -3672,6 +3691,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Level 2: Hapus Master Katalog & Kontak Dummy (0 Item)
         isMasterCatalogWipedRef.current = true;
         setIsMasterCatalogWiped(true);
+        setIsIntegratedDemoMode(false);
+        try { localStorage.removeItem(INTEGRATED_DEMO_MODE_KEY); } catch {}
         productsRef.current = [];
         setProducts([]);
         fnbToppingsRef.current = [];
@@ -3720,6 +3741,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setInvoicesDue([]);
         setSupplierRebateClaims([]);
         setIsLedgerReset(true);
+        setIsIntegratedDemoMode(false);
+        try { localStorage.removeItem(INTEGRATED_DEMO_MODE_KEY); } catch {}
 
         try {
           localStorage.setItem(LEDGER_RESET_ACTIVE_ENTITY_KEY, 'true');
@@ -3753,6 +3776,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMasterCatalogWipedRef.current = true;
       setIsMasterCatalogWiped(true);
       setIsLedgerReset(true);
+      setIsIntegratedDemoMode(false);
+      try { localStorage.removeItem(INTEGRATED_DEMO_MODE_KEY); } catch {}
       setIsFirstRunSetup(true);
 
       setSales([]);
@@ -3899,8 +3924,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     message: string;
     timestamp: string;
   } => {
-    const nowIso = new Date().toISOString();
-    const nowDate = nowIso.slice(0, 10);
+    const now = new Date();
+    const nowIso = now.toISOString();
 
     // Jika profil sebelumnya terkena Factory Reset Level 4, pulihkan profil default aktif
     let activeProfile = businessProfileRef.current;
@@ -3922,210 +3947,228 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const activeSec = resolveCanonicalSector(activeProfile);
     const activeBiz = activeProfile?.name || DEFAULT_BUSINESS_PROFILE.name;
 
-    // 1. Hapus seluruh flag penghapusan permanen
+    // 1. Hapus seluruh flag wipe/reset dan aktifkan flag Mode Demo Terintegrasi
     isMasterCatalogWipedRef.current = false;
     setIsMasterCatalogWiped(false);
     setIsLedgerReset(false);
+    setIsIntegratedDemoMode(true);
 
-    // 2. Bangun katalog produk & layanan lintas sektor lengkap dengan stok awal
-    const combinedRawSeeds: Product[] = [
-      ...INITIAL_PRODUCTS,
-      ...ALL_SERVICE_SECTOR_SEEDS,
-      ...FNB_RESTAURANT_PRODUCTS,
-      ...RAW_INGREDIENTS_AS_PRODUCTS,
-      ...FASHION_APPAREL_PRODUCTS,
-      ...BUILDING_HARDWARE_PRODUCTS,
-      ...LAUNDRY_SERVICE_PRODUCTS,
-    ];
-    const seenProductIds = new Set<string>();
-    const restoredProducts: Product[] = [];
-    combinedRawSeeds.forEach((seed, idx) => {
-      const pid = String(seed.id || '').trim();
-      if (!pid || seenProductIds.has(pid.toUpperCase())) return;
-      seenProductIds.add(pid.toUpperCase());
-      const normalized = normalizeProductPricing(seed, idx);
-      restoredProducts.push({
-        ...normalized,
-        status: 'Active',
-      });
+    // 2. Bangun Paket Demo Terintegrasi End-to-End untuk seluruh 6 pilar ERP
+    const pkg = buildIntegratedDemoPackage({
+      activeSector: activeSec,
+      businessName: activeBiz,
+      now,
     });
 
-    productsRef.current = restoredProducts;
-    setProducts(restoredProducts);
+    const normalizedDemoProducts = pkg.products.map((p, idx) => normalizeProductPricing(p, idx));
 
-    // 3. Pulihkan Topping F&B, Stylist, Supplier, Pelanggan, Karyawan, Absensi & Cuti
+    // 3. Terapkan seluruh dataset terintegrasi ke React state & refs
+    productsRef.current = normalizedDemoProducts;
+    setProducts(normalizedDemoProducts);
     fnbToppingsRef.current = DEFAULT_FNB_TOPPING_MASTERS;
     setFnbToppings(DEFAULT_FNB_TOPPING_MASTERS);
     serviceStylistsRef.current = DEFAULT_SERVICE_STYLISTS;
     setServiceStylists(DEFAULT_SERVICE_STYLISTS);
+    setSuppliers(pkg.suppliers);
+    setCustomers(pkg.customers);
+    setEmployees(pkg.employees);
+    setAttendance(pkg.attendance);
+    setLeaves(pkg.leaves);
+    setBrands(pkg.brands);
+    setCategoriesMaster(pkg.categories);
 
-    const seenSupplierIds = new Set<string>();
-    const restoredSuppliers: SupplierMaster[] = [];
-    [...INITIAL_SUPPLIERS, ...BUILDING_BULK_SUPPLIERS, ...FNB_CULINARY_SUPPLIERS].forEach((sup) => {
-      if (!sup?.id || seenSupplierIds.has(sup.id)) return;
-      seenSupplierIds.add(sup.id);
-      restoredSuppliers.push(sup);
-    });
-    setSuppliers(restoredSuppliers);
-    setCustomers(INITIAL_CUSTOMERS);
-    setEmployees(INITIAL_EMPLOYEES);
-    setAttendance(INITIAL_ATTENDANCE);
-    setLeaves(INITIAL_LEAVE_REQUESTS);
-    setBrands(INITIAL_BRANDS);
-    setCategoriesMaster(INITIAL_CATEGORIES);
+    // Purchasing -> Warehouse -> Executive Approval Queue
+    setPurchaseOrders(pkg.purchaseOrders);
+    setPurchaseRequests(pkg.purchaseRequests);
+    setGoodsReceipts(pkg.goodsReceipts);
+    setStockMutations(pkg.stockMutations);
 
-    // 4. Pulihkan PO, PR, GRN, Mutasi Stok, dan Tagihan Jatuh Tempo
-    const seenPoNos = new Set<string>();
-    const restoredPOs: PurchaseOrder[] = [];
-    [
-      ...INITIAL_PURCHASING,
-      ...BUILDING_BULK_PURCHASE_ORDERS,
-      ...FNB_CULINARY_PURCHASE_ORDERS,
-      ...FASHION_APPAREL_PURCHASE_ORDERS,
-    ].forEach((po) => {
-      if (!po?.po_number || seenPoNos.has(po.po_number)) return;
-      seenPoNos.add(po.po_number);
-      restoredPOs.push(po);
-    });
-    setPurchaseOrders(restoredPOs);
+    // POS Sales -> Shifts -> Finance GL & AR/AP
+    setSales(pkg.sales);
+    setCashierShifts(pkg.cashierShifts);
+    setFinanceEntries(pkg.financeEntries);
+    setJournalEntries(pkg.journalEntries);
+    setInvoicesDue(pkg.invoicesDue);
 
-    const seenPrNos = new Set<string>();
-    const restoredPRs: PurchaseRequest[] = [];
-    [...INITIAL_PURCHASE_REQUESTS, ...BUILDING_BULK_PURCHASE_REQUESTS, ...FNB_CULINARY_PURCHASE_REQUESTS].forEach(
-      (pr) => {
-        if (!pr?.pr_number || seenPrNos.has(pr.pr_number)) return;
-        seenPrNos.add(pr.pr_number);
-        restoredPRs.push(pr);
-      }
-    );
-    setPurchaseRequests(restoredPRs);
+    // Bersihkan residual transaksi retur/void/antrean lama agar data demo bersih 100%
+    setSalesReturns([]);
+    setPurchaseReturns([]);
+    setVoidLogs([]);
+    setBadStocks([]);
+    setBulkShrinkageLogs([]);
+    setSupplierRebateClaims([]);
+    setLaundryOrders([]);
+    setBuildingDeliveryOrders([]);
+    setBuildingAuthRequests([]);
 
-    const seenGrnIds = new Set<string>();
-    const restoredGRNs: GoodsReceipt[] = [];
-    [...INITIAL_GOODS_RECEIPTS, ...BUILDING_BULK_GOODS_RECEIPTS, ...FNB_CULINARY_GOODS_RECEIPTS].forEach((grn) => {
-      if (!grn?.id || seenGrnIds.has(grn.id)) return;
-      seenGrnIds.add(grn.id);
-      restoredGRNs.push(grn);
-    });
-    setGoodsReceipts(restoredGRNs);
+    dualBackendSync.clearQueue();
+    clearSupabaseOfflineQueue();
+    clearGasOfflineQueue();
+    setGasOfflineQueueCount(0);
+    setSupabaseOfflineQueueCount(0);
 
-    const seenMutIds = new Set<string>();
-    const restoredMutations: StockMutation[] = [];
-    [...INITIAL_STOCK_MUTATIONS, ...BUILDING_BULK_STOCK_MUTATIONS, ...FNB_CULINARY_STOCK_MUTATIONS].forEach((mut) => {
-      if (!mut?.id || seenMutIds.has(mut.id)) return;
-      seenMutIds.add(mut.id);
-      restoredMutations.push(mut);
-    });
-    setStockMutations(restoredMutations);
-    setInvoicesDue(INITIAL_INVOICES_DUE);
-
-    // 5. Pulihkan Transaksi Penjualan, Mutasi Kas & Jurnal Buku Besar (di-tag ke sektor & entitas aktif)
-    const restoredSales: Sale[] = INITIAL_SALES.map((s) => ({
-      ...s,
-      businessSector: activeSec,
-      businessName: activeBiz,
-      isDemoSeed: false,
-    }));
-    setSales(restoredSales);
-
-    const restoredFinance: FinanceEntry[] = INITIAL_FINANCE.map((f) => ({
-      ...f,
-      businessSector: activeSec,
-      businessName: activeBiz,
-      isDemoSeed: false,
-    }));
-    setFinanceEntries(restoredFinance);
-
-    const restoredJournals: JournalEntry[] = [
-      {
-        id: 'JV-SIM-OPENING-CAP',
-        date: nowDate,
-        reference: 'CAP-2026-01',
-        description: `Setoran Modal Awal & Saldo Kas Operasional (${activeBiz})`,
-        type: 'GENERAL',
-        amount: 451000000,
-        businessSector: activeSec,
-        businessName: activeBiz,
-        isDemoSeed: false,
-        lines: [
-          { accountCode: '1-10002', accountName: 'Bank Operasional Utama', debit: 451000000, credit: 0 },
-          { accountCode: '3-10001', accountName: 'Modal Disetor Pemilik', debit: 0, credit: 451000000 },
-        ],
-      },
-      {
-        id: 'JV-SIM-REV-001',
-        date: nowDate,
-        reference: 'INV-2026-0001',
-        description: `Pendapatan Penjualan Simulasi #INV-2026-0001 (${activeBiz})`,
-        type: 'POS_SALE',
-        amount: 7812000,
-        businessSector: activeSec,
-        businessName: activeBiz,
-        isDemoSeed: false,
-        lines: [
-          { accountCode: '1-10003', accountName: 'Bank QRIS & E-Wallet', debit: 7812000, credit: 0 },
-          { accountCode: '4-10101', accountName: 'Pendapatan Penjualan', debit: 0, credit: 7812000 },
-          { accountCode: '5-10101', accountName: 'Harga Pokok Penjualan (HPP)', debit: 6510000, credit: 0 },
-          { accountCode: '1-10201', accountName: 'Persediaan Barang Dagang', debit: 0, credit: 6510000 },
-        ],
-      },
-      {
-        id: 'JV-SIM-REV-002',
-        date: nowDate,
-        reference: 'INV-2026-0002',
-        description: `Pendapatan Penjualan Simulasi #INV-2026-0002 (${activeBiz})`,
-        type: 'POS_SALE',
-        amount: 4088000,
-        businessSector: activeSec,
-        businessName: activeBiz,
-        isDemoSeed: false,
-        lines: [
-          { accountCode: '1-10001', accountName: 'Kas Kasir (Laci POS)', debit: 4088000, credit: 0 },
-          { accountCode: '4-10101', accountName: 'Pendapatan Penjualan', debit: 0, credit: 4088000 },
-          { accountCode: '5-10101', accountName: 'Harga Pokok Penjualan (HPP)', debit: 3393000, credit: 0 },
-          { accountCode: '1-10201', accountName: 'Persediaan Barang Dagang', debit: 0, credit: 3393000 },
-        ],
-      },
-    ];
-    setJournalEntries(restoredJournals);
-    setCashierShifts([]);
-
+    // 4. Simpan persisten ke localStorage
     try {
       localStorage.removeItem(MASTER_CATALOG_WIPED_KEY);
       localStorage.removeItem(LEDGER_RESET_ACTIVE_ENTITY_KEY);
+      localStorage.setItem(INTEGRATED_DEMO_MODE_KEY, 'true');
       localStorage.removeItem('jacs_pos_receipt_seq_v1');
-      localStorage.setItem(`${STORAGE_PREFIX}products`, JSON.stringify(restoredProducts));
+      localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
+      localStorage.removeItem('jacs_pos_station_carts_v1');
+      localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+      localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem('jacs_supabase_failed_queue_v1');
+      localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem('jacs_gas_failed_queue_v1');
+
+      localStorage.setItem(`${STORAGE_PREFIX}products`, JSON.stringify(normalizedDemoProducts));
       localStorage.setItem(`${STORAGE_PREFIX}fnb_toppings`, JSON.stringify(DEFAULT_FNB_TOPPING_MASTERS));
       localStorage.setItem(`${STORAGE_PREFIX}service_stylists`, JSON.stringify(DEFAULT_SERVICE_STYLISTS));
-      localStorage.setItem(`${STORAGE_PREFIX}suppliers`, JSON.stringify(restoredSuppliers));
-      localStorage.setItem(`${STORAGE_PREFIX}customers`, JSON.stringify(INITIAL_CUSTOMERS));
-      localStorage.setItem(`${STORAGE_PREFIX}employees`, JSON.stringify(INITIAL_EMPLOYEES));
-      localStorage.setItem(`${STORAGE_PREFIX}attendance`, JSON.stringify(INITIAL_ATTENDANCE));
-      localStorage.setItem(`${STORAGE_PREFIX}leaves`, JSON.stringify(INITIAL_LEAVE_REQUESTS));
-      localStorage.setItem(`${STORAGE_PREFIX}purchasing`, JSON.stringify(restoredPOs));
-      localStorage.setItem(`${STORAGE_PREFIX}purchase_requests`, JSON.stringify(restoredPRs));
-      localStorage.setItem(`${STORAGE_PREFIX}goods_receipts`, JSON.stringify(restoredGRNs));
-      localStorage.setItem(`${STORAGE_PREFIX}stock_mutations`, JSON.stringify(restoredMutations));
-      localStorage.setItem(`${STORAGE_PREFIX}invoices_due`, JSON.stringify(INITIAL_INVOICES_DUE));
-      localStorage.setItem(`${STORAGE_PREFIX}sales`, JSON.stringify(restoredSales));
-      localStorage.setItem(`${STORAGE_PREFIX}finance`, JSON.stringify(restoredFinance));
-      localStorage.setItem(`${STORAGE_PREFIX}journals`, JSON.stringify(restoredJournals));
-      localStorage.removeItem(`${STORAGE_PREFIX}shifts`);
+      localStorage.setItem(`${STORAGE_PREFIX}suppliers`, JSON.stringify(pkg.suppliers));
+      localStorage.setItem(`${STORAGE_PREFIX}customers`, JSON.stringify(pkg.customers));
+      localStorage.setItem(`${STORAGE_PREFIX}employees`, JSON.stringify(pkg.employees));
+      localStorage.setItem(`${STORAGE_PREFIX}attendance`, JSON.stringify(pkg.attendance));
+      localStorage.setItem(`${STORAGE_PREFIX}leaves`, JSON.stringify(pkg.leaves));
+      localStorage.setItem(`${STORAGE_PREFIX}purchasing`, JSON.stringify(pkg.purchaseOrders));
+      localStorage.setItem(`${STORAGE_PREFIX}purchase_requests`, JSON.stringify(pkg.purchaseRequests));
+      localStorage.setItem(`${STORAGE_PREFIX}goods_receipts`, JSON.stringify(pkg.goodsReceipts));
+      localStorage.setItem(`${STORAGE_PREFIX}stock_mutations`, JSON.stringify(pkg.stockMutations));
+      localStorage.setItem(`${STORAGE_PREFIX}invoices_due`, JSON.stringify(pkg.invoicesDue));
+      localStorage.setItem(`${STORAGE_PREFIX}sales`, JSON.stringify(pkg.sales));
+      localStorage.setItem(`${STORAGE_PREFIX}shifts`, JSON.stringify(pkg.cashierShifts));
+      localStorage.setItem(`${STORAGE_PREFIX}finance`, JSON.stringify(pkg.financeEntries));
+      localStorage.setItem(`${STORAGE_PREFIX}journals`, JSON.stringify(pkg.journalEntries));
     } catch {}
 
     const auditEntry: AuditLog = {
-      id: `AUD-${Date.now()}-RESTORE-DEMO`,
+      id: `AUD-${Date.now()}-INTEGRATED-DEMO`,
       timestamp: nowIso,
       user: currentUser?.name || 'Super Admin',
-      action: 'RESTORE_DEMO_SIMULATION_DATA',
+      action: 'LOAD_INTEGRATED_DEMO_PACKAGE',
       module: 'SUPER_ADMIN',
       level: 'INFO',
-      details: `Data Simulasi Demo berhasil dimuat ulang untuk "${activeBiz}" (${activeSec}): ${restoredProducts.length} SKU produk/layanan lintas sektor, ${restoredSuppliers.length} supplier, ${INITIAL_CUSTOMERS.length} pelanggan, ${INITIAL_EMPLOYEES.length + DEFAULT_SERVICE_STYLISTS.length} staf/stylist, stok awal, dan saldo awal COA dipulihkan.`,
+      details: `Paket Demo Terintegrasi End-to-End dimuat untuk "${activeBiz}": ${pkg.summary.productCount} SKU (${pkg.summary.bomProductCount} BOM), ${pkg.summary.supplierCount} Supplier, ${pkg.summary.customerCount} Member/VIP, ${pkg.summary.employeeCount} Karyawan + Presensi, ${pkg.summary.poCount} PO (${pkg.summary.pendingApprovalPoCount} Pending Executive Approval), ${pkg.summary.saleCount} Transaksi POS, 2 Shift Kasir, ${pkg.summary.mutationCount} Mutasi Kartu Stok, dan ${pkg.summary.journalCount} Jurnal Double-Entry Balance.`,
     };
     setAuditLogs((prev) => [auditEntry, ...prev].slice(0, 300));
 
-    const title = 'Data Simulasi Demo Berhasil Dimuat Ulang';
-    const message = `Katalog ${restoredProducts.length} SKU produk/layanan, ${restoredSuppliers.length} supplier, ${INITIAL_CUSTOMERS.length} pelanggan, ${INITIAL_EMPLOYEES.length + DEFAULT_SERVICE_STYLISTS.length} staf/stylist, stok awal, serta saldo awal COA telah dipulihkan secara real-time.`;
+    const title = 'Paket Demo Terintegrasi End-to-End Aktif';
+    const message = `${pkg.summary.productCount} SKU (${pkg.summary.bomProductCount} BOM), ${pkg.summary.supplierCount} supplier, ${pkg.summary.customerCount} member VIP, ${pkg.summary.employeeCount} karyawan + presensi, ${pkg.summary.poCount} PO (1 antrean Executive Approval), ${pkg.summary.saleCount} transaksi POS, 2 shift kasir, dan ${pkg.summary.journalCount} jurnal akuntansi balance siap diuji lintas 6 pilar.`;
+    showToast(message, 'success');
+    return { success: true, title, message, timestamp: nowIso };
+  }, [currentUser, showToast]);
+
+  const clearDemoDataToZero = useCallback((): {
+    success: boolean;
+    title: string;
+    message: string;
+    timestamp: string;
+  } => {
+    const nowIso = new Date().toISOString();
+    const activeBiz = businessProfileRef.current?.name || 'Entitas Aktif';
+
+    // Matikan mode demo, aktifkan mode produksi bersih (0 transaksi, 0 jurnal, 0 master demo)
+    // Profil Usaha, Logo, Loket/Terminal POS, API Config, dan Kredensial/PIN DIPERTAHANKAN UTUH.
+    isMasterCatalogWipedRef.current = true;
+    setIsMasterCatalogWiped(true);
+    setIsLedgerReset(true);
+    setIsIntegratedDemoMode(false);
+
+    // Kosongkan seluruh data transaksi & akuntansi
+    setSales([]);
+    setCashierShifts([]);
+    setFinanceEntries([]);
+    setJournalEntries([]);
+    setPurchaseOrders([]);
+    setPurchaseRequests([]);
+    setGoodsReceipts([]);
+    setSalesReturns([]);
+    setPurchaseReturns([]);
+    setVoidLogs([]);
+    setStockMutations([]);
+    setBadStocks([]);
+    setBulkShrinkageLogs([]);
+    setInvoicesDue([]);
+    setSupplierRebateClaims([]);
+    setLaundryOrders([]);
+    setBuildingDeliveryOrders([]);
+    setBuildingAuthRequests([]);
+
+    // Kosongkan seluruh data master & HR demo ke 0
+    productsRef.current = [];
+    setProducts([]);
+    fnbToppingsRef.current = [];
+    setFnbToppings([]);
+    serviceStylistsRef.current = [];
+    setServiceStylists([]);
+    setSuppliers([]);
+    setCustomers([]);
+    setEmployees([]);
+    setAttendance([]);
+    setLeaves([]);
+
+    // Kosongkan seluruh antrean sinkronisasi offline lokal
+    dualBackendSync.clearQueue();
+    clearSupabaseOfflineQueue();
+    clearGasOfflineQueue();
+    setGasOfflineQueueCount(0);
+    setSupabaseOfflineQueueCount(0);
+
+    try {
+      localStorage.removeItem(INTEGRATED_DEMO_MODE_KEY);
+      localStorage.setItem(MASTER_CATALOG_WIPED_KEY, 'true');
+      localStorage.setItem(LEDGER_RESET_ACTIVE_ENTITY_KEY, 'true');
+      localStorage.setItem(`${STORAGE_PREFIX}products`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}fnb_toppings`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}service_stylists`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}suppliers`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}customers`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}employees`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}attendance`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}leaves`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}sales`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}shifts`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}finance`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}journals`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}purchasing`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}purchase_requests`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}goods_receipts`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}stock_mutations`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}bulk_shrinkage`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}invoices_due`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}vendor_invoices`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}ap_invoices`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}supplier_payables`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}supplier_rebates`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}laundry_orders`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}building_do`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}building_delivery_orders`, '[]');
+      localStorage.setItem(`${STORAGE_PREFIX}building_auth`, '[]');
+      localStorage.removeItem('jacs_pos_receipt_seq_v1');
+      localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
+      localStorage.removeItem('jacs_pos_station_carts_v1');
+      localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+      localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem('jacs_supabase_failed_queue_v1');
+      localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem('jacs_gas_failed_queue_v1');
+      localStorage.setItem(`${STORAGE_PREFIX}doc_seq_counter`, JSON.stringify({ pos: 1, po: 1, pr: 1, grn: 1, jv: 1, do: 1 }));
+    } catch {}
+
+    const auditEntry: AuditLog = {
+      id: `AUD-${Date.now()}-CLEAR-DEMO`,
+      timestamp: nowIso,
+      user: currentUser?.name || 'Super Admin',
+      action: 'CLEAR_DEMO_DATA_TO_ZERO',
+      module: 'SUPER_ADMIN',
+      level: 'WARN',
+      details: `Seluruh data demo (transaksi POS, jurnal, shift, PO, kartu stok, AR/AP, katalog produk, supplier, member, karyawan & presensi) untuk "${activeBiz}" dibersihkan ke 0 (MODE PRODUKSI BERSIH). Profil usaha, logo, loket POS, konfigurasi API, dan kredensial/PIN tetap utuh.`,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev].slice(0, 300));
+
+    const title = 'Mode Produksi Bersih Aktif (Reset ke 0 Selesai)';
+    const message = `Seluruh data simulasi demo telah dihapus bersih ke 0. Profil "${activeBiz}", logo, loket POS, konfigurasi cloud, serta kredensial & PIN login tetap aman dan siap operasional.`;
     showToast(message, 'success');
     return { success: true, title, message, timestamp: nowIso };
   }, [currentUser, showToast]);
@@ -12121,8 +12164,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     resetLedgerToActiveEntity,
     isLedgerReset,
     isMasterCatalogWiped,
+    isIntegratedDemoMode,
     executeSystemResetByLevel,
     restoreDemoSimulationData,
+    clearDemoDataToZero,
     remoteMaintenanceLock,
     setRemoteMaintenanceLock,
     remoteCommandLogs,
