@@ -813,8 +813,8 @@ export interface AppContextType {
   executeCloverLiveSync: (overrideCfg?: Partial<CloverConfig>) => Promise<CloverSyncResult & { cleanedDummy: boolean }>;
 
   // Enterprise Security Shield & Integrity Guard
-  idleAutoLockMinutes: 0 | 5 | 15 | 30;
-  setIdleAutoLockMinutes: (minutes: 0 | 5 | 15 | 30) => void;
+  idleAutoLockMinutes: 0 | 5 | 15 | 30 | 60;
+  setIdleAutoLockMinutes: (minutes: 0 | 5 | 15 | 30 | 60) => void;
   isIdleLocked: boolean;
   idleLockedAt: string | null;
   idleLockReason: string;
@@ -2985,20 +2985,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // =========================================================================
   // ENTERPRISE SECURITY SHIELD & TERMINAL IDLE AUTO-LOCK
   // =========================================================================
-  const [idleAutoLockMinutes, setIdleAutoLockMinutesState] = useState<0 | 5 | 15 | 30>(() => {
+  const [idleAutoLockMinutes, setIdleAutoLockMinutesState] = useState<0 | 5 | 15 | 30 | 60>(() => {
     try {
       const saved = localStorage.getItem(IDLE_AUTOLOCK_MINUTES_KEY);
       if (saved !== null) {
         const num = Number(saved);
-        if (num === 0 || num === 5 || num === 15 || num === 30) return num;
+        if (num === 0 || num === 5 || num === 15 || num === 30 || num === 60) return num;
       }
     } catch {}
     return 15;
   });
 
+  // Status kunci layar (isIdleLocked) SELALU dimulai dalam keadaan FALSE (terbuka) setiap kali aplikasi dibuka atau di-refresh
   const [isIdleLocked, setIsIdleLocked] = useState<boolean>(false);
   const [idleLockedAt, setIdleLockedAt] = useState<string | null>(null);
   const [idleLockReason, setIdleLockReason] = useState<string>('Inaktivitas Terminal');
+
+  useEffect(() => {
+    // Pastikan tidak ada state terkunci yang terbawa dari sesi/penyimpanan sebelumnya saat halaman dimuat/di-refresh
+    setIsIdleLocked(false);
+    setIdleLockedAt(null);
+    try {
+      const staleLockKeys = [
+        'jacs_idle_locked',
+        'jacs_terminal_idle_locked',
+        `${STORAGE_PREFIX}idle_locked`,
+        `${STORAGE_PREFIX}is_idle_locked`,
+        `${STORAGE_PREFIX}idle_last_activity`,
+      ];
+      staleLockKeys.forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+    } catch {}
+
+    const handlePageShow = () => {
+      setIsIdleLocked(false);
+      setIdleLockedAt(null);
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, []);
 
   const [securityShieldStats, setSecurityShieldStats] = useState<{
     xssBlockedCount: number;
@@ -3103,8 +3132,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const setIdleAutoLockMinutes = useCallback(
-    (minutes: 0 | 5 | 15 | 30) => {
+    (minutes: 0 | 5 | 15 | 30 | 60) => {
       setIdleAutoLockMinutesState(minutes);
+      if (minutes === 0) {
+        setIsIdleLocked(false);
+        setIdleLockedAt(null);
+      }
       try {
         localStorage.setItem(IDLE_AUTOLOCK_MINUTES_KEY, String(minutes));
       } catch {}
@@ -3351,7 +3384,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeNav, idleAutoLockMinutes, recordSecurityShieldEvent]
   );
 
+  const triggerIdleLockNowRef = useRef(triggerIdleLockNow);
+  useEffect(() => {
+    triggerIdleLockNowRef.current = triggerIdleLockNow;
+  }, [triggerIdleLockNow]);
+
+  // Reset status kunci jika sesi logout / belum login
+  useEffect(() => {
+    if (!currentUser) {
+      setIsIdleLocked(false);
+      setIdleLockedAt(null);
+    }
+  }, [currentUser]);
+
   // Global inactivity tracker for Terminal Idle Auto-Lock
+  // Timer selalu direset segar (default 15 menit / sesuai konfigurasi) setiap kali halaman dimuat atau aktivitas terdeteksi
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!currentUser || idleAutoLockMinutes <= 0 || isIdleLocked) return;
@@ -3362,19 +3409,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const resetTimer = () => {
       if (timerId) clearTimeout(timerId);
       timerId = setTimeout(() => {
-        triggerIdleLockNow(`Tidak ada aktivitas mouse/keyboard selama ${idleAutoLockMinutes} menit`);
+        triggerIdleLockNowRef.current(
+          `Tidak ada aktivitas mouse/keyboard selama ${idleAutoLockMinutes} menit`
+        );
       }, timeoutMs);
     };
 
-    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    const activityEvents = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      'touchstart',
+      'pointerdown',
+      'scroll',
+      'click',
+      'pageshow',
+    ];
     activityEvents.forEach((ev) => window.addEventListener(ev, resetTimer, { passive: true }));
+    // Mulai timer idle baru dari 0 saat halaman/sesi dimuat
     resetTimer();
 
     return () => {
       if (timerId) clearTimeout(timerId);
       activityEvents.forEach((ev) => window.removeEventListener(ev, resetTimer));
     };
-  }, [currentUser, idleAutoLockMinutes, isIdleLocked, triggerIdleLockNow]);
+  }, [currentUser, idleAutoLockMinutes, isIdleLocked]);
 
   const cleanSlateTransactions = useCallback(() => {
     setSales([]);

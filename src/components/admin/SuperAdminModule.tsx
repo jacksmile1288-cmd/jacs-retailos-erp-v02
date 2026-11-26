@@ -7883,7 +7883,7 @@ export const SuperAdminModule: React.FC = () => {
                   Auto-Lock Layar Kasir/Admin
                 </div>
                 <div className="mt-2 grid grid-cols-4 gap-1">
-                  {([0, 5, 15, 30] as const).map((mins) => (
+                  {([0, 15, 30, 60] as const).map((mins) => (
                     <button
                       key={mins}
                       type="button"
@@ -8054,6 +8054,79 @@ export const SuperAdminModule: React.FC = () => {
               >
                 <span>{isProductionMode ? '🟢 Mode Produksi AKTIF' : '⚪ Mode Produksi NONAKTIF'}</span>
               </button>
+            </div>
+          </div>
+
+          {/* Terminal Idle Auto-Lock Duration Settings Card */}
+          <div className={`p-6 rounded-2xl border transition-all duration-200 ${
+            idleAutoLockMinutes > 0
+              ? isLight
+                ? 'bg-white border-amber-400/70 shadow-[0_0_16px_rgba(245,158,11,0.14)]'
+                : 'bg-[#161b22] border-amber-500/35 shadow-[0_0_16px_rgba(245,158,11,0.08)]'
+              : isLight
+              ? 'bg-white border-slate-300 shadow-sm'
+              : 'bg-[#161b22] border-gray-800'
+          }`}>
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <h3 className="font-medium text-base tracking-wide flex flex-wrap items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Pengaturan Durasi Terminal Idle Auto-Lock</span>
+                  <span className={`text-[10px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${
+                    idleAutoLockMinutes > 0
+                      ? isLight
+                        ? 'bg-amber-50 text-amber-700 border-amber-400/70'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : isLight
+                      ? 'bg-slate-100 text-slate-600 border-slate-300'
+                      : 'bg-slate-800 text-gray-400 border-gray-700'
+                  }`}>
+                    {idleAutoLockMinutes > 0 ? `AKTIF • ${idleAutoLockMinutes} MENIT` : 'NONAKTIF'}
+                  </span>
+                </h3>
+                <p className={`text-xs font-normal mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                  Kunci layar kasir/admin otomatis bila tidak ada aktivitas. Saat aplikasi dibuka atau halaman di-refresh, layar selalu dimulai dalam keadaan terbuka dan timer idle direset ulang.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {([
+                  { value: 0 as const, label: 'Nonaktif' },
+                  { value: 15 as const, label: '15 Menit' },
+                  { value: 30 as const, label: '30 Menit' },
+                  { value: 60 as const, label: '60 Menit' },
+                ]).map((opt) => {
+                  const isSelected = idleAutoLockMinutes === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setIdleAutoLockMinutes(opt.value);
+                        recordAudit({
+                          traceId: `IDLE-AUTOLOCK-CFG-${Date.now()}`,
+                          userId: effectiveUser?.id || 'super-admin',
+                          userName: effectiveUser?.name || 'Super Admin',
+                          userRole: 'Super Admin',
+                          module: 'SUPER_ADMIN',
+                          action: 'CONFIG_CHANGE',
+                          severity: 'SECURITY',
+                          payloadAfter: { idleAutoLockMinutes: opt.value },
+                        });
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer active:scale-95 ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                          : isLight
+                          ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-amber-50 hover:border-amber-400'
+                          : 'bg-[#0d1117] text-gray-300 border-gray-700 hover:border-amber-500/50 hover:text-amber-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
