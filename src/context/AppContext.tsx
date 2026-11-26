@@ -3143,8 +3143,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {}
       showToast(
         minutes === 0
-          ? 'Auto-Lock Layar Kasir/Admin dinonaktifkan.'
-          : `Auto-Lock Layar Kasir/Admin diatur ke ${minutes} menit tanpa aktivitas.`,
+          ? 'Auto-Lock Terminal Kasir POS dinonaktifkan.'
+          : `Auto-Lock Terminal Kasir POS (Khusus Layar Kasir) diatur ke ${minutes} menit tanpa aktivitas.`,
         'info'
       );
     },
@@ -3363,25 +3363,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }) || employees?.[0] || null;
   }, [currentUser, employees, activeNav]);
 
+  const effectiveIdleNav = activeNav === 'home' ? resolveDefaultNavForUser(currentUser) : activeNav;
+  const isPosModuleActive = Boolean(
+    currentUser && String(effectiveIdleNav || '').toLowerCase() === 'pos'
+  );
+
+  const isPosModuleActiveRef = useRef(isPosModuleActive);
+  useEffect(() => {
+    isPosModuleActiveRef.current = isPosModuleActive;
+  }, [isPosModuleActive]);
+
   const triggerIdleLockNow = useCallback(
     (reason?: string) => {
+      // Terminal Idle Auto-Lock HANYA berlaku eksklusif di modul Kasir POS
+      if (!isPosModuleActiveRef.current) return;
       const nowIso = new Date().toISOString();
       const label =
         reason ||
         (idleAutoLockMinutes > 0
-          ? `Otomatis terkunci setelah ${idleAutoLockMinutes} menit tanpa aktivitas`
-          : 'Kunci Layar Manual oleh Operator/Admin');
+          ? `Otomatis terkunci setelah ${idleAutoLockMinutes} menit tanpa aktivitas di Kasir POS`
+          : 'Kunci Layar Manual Terminal Kasir POS');
       setIsIdleLocked(true);
       setIdleLockedAt(nowIso);
       setIdleLockReason(label);
       recordSecurityShieldEvent({
         type: 'IDLE_LOCK',
-        details: `Terminal Auto-Lock aktif (${label}) pada modul ${(activeNav || 'HOME').toUpperCase()}.`,
+        details: `Terminal Auto-Lock aktif (${label}) pada modul POS.`,
         module: 'TERMINAL_GUARD',
         level: 'WARN',
       });
     },
-    [activeNav, idleAutoLockMinutes, recordSecurityShieldEvent]
+    [idleAutoLockMinutes, recordSecurityShieldEvent]
   );
 
   const triggerIdleLockNowRef = useRef(triggerIdleLockNow);
@@ -3389,19 +3401,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     triggerIdleLockNowRef.current = triggerIdleLockNow;
   }, [triggerIdleLockNow]);
 
-  // Reset status kunci jika sesi logout / belum login
+  // Reset status kunci jika sesi logout, belum login, atau berpindah keluar dari modul Kasir POS
+  // (Executive, Finance, Purchasing, Warehouse, HR, Master Data, maupun SuperAdmin)
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || !isPosModuleActive) {
       setIsIdleLocked(false);
       setIdleLockedAt(null);
     }
-  }, [currentUser]);
+  }, [currentUser, isPosModuleActive]);
 
-  // Global inactivity tracker for Terminal Idle Auto-Lock
-  // Timer selalu direset segar (default 15 menit / sesuai konfigurasi) setiap kali halaman dimuat atau aktivitas terdeteksi
+  // Inactivity tracker untuk Terminal Idle Auto-Lock — KHUSUS MODUL KASIR POS
+  // Timer mati total pada 5 pilar manajemen, Master Data, dan SuperAdmin, serta langsung direset saat keluar dari POS
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!currentUser || idleAutoLockMinutes <= 0 || isIdleLocked) return;
+    if (!currentUser || !isPosModuleActive || idleAutoLockMinutes <= 0 || isIdleLocked) return;
 
     const timeoutMs = idleAutoLockMinutes * 60 * 1000;
     let timerId: ReturnType<typeof setTimeout> | null = null;
@@ -3409,8 +3422,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const resetTimer = () => {
       if (timerId) clearTimeout(timerId);
       timerId = setTimeout(() => {
+        if (!isPosModuleActiveRef.current) return;
         triggerIdleLockNowRef.current(
-          `Tidak ada aktivitas mouse/keyboard selama ${idleAutoLockMinutes} menit`
+          `Tidak ada aktivitas mouse/keyboard di Kasir POS selama ${idleAutoLockMinutes} menit`
         );
       }, timeoutMs);
     };
@@ -3426,14 +3440,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'pageshow',
     ];
     activityEvents.forEach((ev) => window.addEventListener(ev, resetTimer, { passive: true }));
-    // Mulai timer idle baru dari 0 saat halaman/sesi dimuat
+    // Mulai timer idle baru dari 0 saat layar Kasir POS aktif
     resetTimer();
 
     return () => {
       if (timerId) clearTimeout(timerId);
       activityEvents.forEach((ev) => window.removeEventListener(ev, resetTimer));
     };
-  }, [currentUser, idleAutoLockMinutes, isIdleLocked]);
+  }, [currentUser, isPosModuleActive, idleAutoLockMinutes, isIdleLocked]);
 
   const cleanSlateTransactions = useCallback(() => {
     setSales([]);

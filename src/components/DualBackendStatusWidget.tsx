@@ -5,8 +5,9 @@ import { CloudSyncResult, testCloudConnections } from '../services/cloudSyncServ
 import { Cloud, CheckCircle2, AlertTriangle, RefreshCw, X, Download, Server } from 'lucide-react';
 
 export const DualBackendStatusWidget: React.FC = () => {
-  const { products, transactions, executeCloudSync, language } = useApp();
+  const { products, transactions, executeCloudSync, language, theme } = useApp();
   const isEn = language === 'en';
+  const isLight = theme === 'light';
   const [status, setStatus] = useState<SyncStatusSnapshot>(() => dualBackendSync.getSnapshot());
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncingNow, setIsSyncingNow] = useState(false);
@@ -90,76 +91,107 @@ export const DualBackendStatusWidget: React.FC = () => {
     });
   };
 
-  // Penentuan Tampilan Badge Status Global
-  let badgeColor = 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300';
-  let dotColor = 'bg-emerald-400';
-  let statusLabel = 'ONLINE — SYNCED';
-
+  // Penentuan Tampilan Badge Status Cloud Ringkas
   const isLocalOnlyMode = status.storageMode === 'LOCAL_ONLY';
   const isHybridMode = status.storageMode === 'HYBRID_MIGRATION';
+  const isBusySyncing = status.isSyncing || isSyncingNow;
   const hasSyncFailure =
     !isLocalOnlyMode && Boolean((lastSyncResult && !lastSyncResult.success) || status.lastSyncFailed);
 
+  let containerTone = isLight
+    ? 'bg-emerald-50/90 border-emerald-200/90 text-emerald-800'
+    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
+  let dotColor = 'bg-emerald-500';
+  let statusLabel = 'SYNCED';
+  let fullStatusTitle = isEn
+    ? 'Cloud Online — Synced. Click to configure Supabase & GAS.'
+    : 'Cloud Online — Tersinkronisasi. Klik untuk pengaturan Supabase & GAS.';
+
   if (isLocalOnlyMode) {
-    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
-    dotColor = 'bg-amber-400';
-    statusLabel = 'LOCAL OFFLINE MODE';
+    containerTone = isLight
+      ? 'bg-amber-50 border-amber-200 text-amber-800'
+      : 'bg-amber-500/10 border-amber-500/35 text-amber-300';
+    dotColor = 'bg-amber-500';
+    statusLabel = 'LOCAL';
+    fullStatusTitle = 'Mode Lokal Saja (100% Offline — Tanpa Cloud). Klik untuk pengaturan mode penyimpanan.';
   } else if (!status.isOnline) {
-    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
-    dotColor = 'bg-amber-400';
-    statusLabel = `OFFLINE — QUEUED [${status.queuedCount}]`;
-  } else if (status.isSyncing || isSyncingNow) {
-    badgeColor = 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300';
+    containerTone = isLight
+      ? 'bg-amber-50 border-amber-200 text-amber-800'
+      : 'bg-amber-500/10 border-amber-500/35 text-amber-300';
+    dotColor = 'bg-amber-500';
+    statusLabel = status.queuedCount > 0 ? `OFFLINE (${status.queuedCount})` : 'OFFLINE';
+    fullStatusTitle = `Offline — ${status.queuedCount} antrean menunggu koneksi internet.`;
+  } else if (isBusySyncing) {
+    containerTone = isLight
+      ? 'bg-cyan-50 border-cyan-200 text-cyan-800'
+      : 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300';
     dotColor = 'bg-cyan-400 animate-ping';
-    statusLabel = 'SYNCING...';
+    statusLabel = 'SYNCING';
+    fullStatusTitle = 'Sedang menyinkronkan data ke cloud (Supabase & GAS)...';
   } else if (hasSyncFailure) {
-    badgeColor = 'bg-rose-500/15 border-rose-500/40 text-rose-300';
-    dotColor = 'bg-rose-400';
-    statusLabel = 'SYNC FAILED';
+    containerTone = isLight
+      ? 'bg-rose-50 border-rose-200 text-rose-800'
+      : 'bg-rose-500/15 border-rose-500/35 text-rose-300';
+    dotColor = 'bg-rose-500';
+    statusLabel = 'SYNC ERR';
+    fullStatusTitle = `Sinkronisasi gagal: ${lastSyncResult?.message || status.lastSyncErrorMessage || 'Periksa konfigurasi cloud'}`;
   } else if (isHybridMode && !status.lastSyncTime) {
-    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
-    dotColor = 'bg-amber-400';
-    statusLabel = `HYBRID BUFFER [${status.queuedCount}]`;
+    containerTone = isLight
+      ? 'bg-amber-50 border-amber-200 text-amber-800'
+      : 'bg-amber-500/10 border-amber-500/35 text-amber-300';
+    dotColor = 'bg-amber-500';
+    statusLabel = status.queuedCount > 0 ? `HYBRID (${status.queuedCount})` : 'HYBRID';
+    fullStatusTitle = `Mode Hybrid — ${status.queuedCount} item siap dimigrasi ke cloud.`;
   } else if (status.queuedCount > 0) {
-    badgeColor = 'bg-amber-500/15 border-amber-500/40 text-amber-300';
-    dotColor = 'bg-amber-400';
-    statusLabel = `ONLINE — QUEUED [${status.queuedCount}]`;
-  } else {
-    badgeColor = 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300';
-    dotColor = 'bg-emerald-400';
-    statusLabel = 'ONLINE — SYNCED';
+    containerTone = isLight
+      ? 'bg-amber-50 border-amber-200 text-amber-800'
+      : 'bg-amber-500/10 border-amber-500/35 text-amber-300';
+    dotColor = 'bg-amber-500';
+    statusLabel = `QUEUED (${status.queuedCount})`;
+    fullStatusTitle = `Online — ${status.queuedCount} item menunggu sinkronisasi cloud.`;
   }
 
   return (
     <>
-      {/* Status Badge & Tombol Sync Now di Header */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      {/* Lencana Status Cloud Ringkas + Tombol Ikon Refresh Kecil */}
+      <div
+        className={`h-[34px] inline-flex items-center rounded-full border p-0.5 gap-0.5 shrink-0 transition-colors ${containerTone}`}
+      >
         <button
           type="button"
           onClick={handleOpenSettings}
-          title={
-            isLocalOnlyMode
-              ? 'Mode Lokal Saja (100% Offline — Tanpa Cloud). Klik untuk pengaturan mode penyimpanan.'
-              : hasSyncFailure
-              ? `Klik untuk detail error: ${lastSyncResult?.message || status.lastSyncErrorMessage || 'Sync gagal'}`
-              : 'Konfigurasi Dual-Backend Cloud Sync (Supabase & Google Apps Script)'
-          }
-          className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold whitespace-nowrap transition-all hover:opacity-90 cursor-pointer shrink-0 ${badgeColor}`}
+          title={fullStatusTitle}
+          aria-label={fullStatusTitle}
+          className="h-[28px] px-2 sm:px-2.5 rounded-full flex items-center gap-1.5 text-[10.5px] font-mono font-bold tracking-wide whitespace-nowrap transition-opacity hover:opacity-85 cursor-pointer"
         >
           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-          <span>{statusLabel}</span>
+          <span className="hidden sm:inline tabular-nums">{statusLabel}</span>
         </button>
 
         {!isLocalOnlyMode && (
           <button
             type="button"
             onClick={handleSyncNow}
-            disabled={!status.isOnline || status.isSyncing || isSyncingNow}
-            title="Kirim snapshot data riil ke cloud sekarang (Supabase & GAS)"
-            className="px-2.5 py-1 bg-slate-800 hover:bg-cyan-600 disabled:opacity-40 text-slate-200 hover:text-slate-950 text-[10px] font-bold rounded-lg border border-slate-700 whitespace-nowrap transition-all cursor-pointer shrink-0 flex items-center gap-1"
+            disabled={!status.isOnline || isBusySyncing}
+            title={
+              isBusySyncing
+                ? isEn
+                  ? 'Syncing with cloud...'
+                  : 'Sedang menyinkronkan ke cloud...'
+                : isHybridMode
+                ? 'Migrasi Cloud Sekarang (Supabase & GAS)'
+                : isEn
+                ? 'Sync Now (Supabase & GAS)'
+                : 'Sync Sekarang (Supabase & GAS)'
+            }
+            aria-label={isEn ? 'Sync Now' : 'Sync Sekarang'}
+            className={`w-[28px] h-[28px] rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 shrink-0 ${
+              isLight
+                ? 'hover:bg-black/10 text-current'
+                : 'hover:bg-white/15 text-current'
+            }`}
           >
-            <RefreshCw className={`w-3 h-3 ${isSyncingNow || status.isSyncing ? 'animate-spin text-cyan-400' : ''}`} />
-            <span>{isSyncingNow || status.isSyncing ? 'Syncing...' : isHybridMode ? 'Migrasi Cloud' : 'Sync Now'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isBusySyncing ? 'animate-spin' : ''}`} />
           </button>
         )}
       </div>

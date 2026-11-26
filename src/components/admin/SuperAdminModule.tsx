@@ -7880,7 +7880,7 @@ export const SuperAdminModule: React.FC = () => {
                   </span>
                 </div>
                 <div className={`text-sm font-black ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                  Auto-Lock Layar Kasir/Admin
+                  Auto-Lock Terminal Kasir POS (Khusus Layar Kasir)
                 </div>
                 <div className="mt-2 grid grid-cols-4 gap-1">
                   {([0, 15, 30, 60] as const).map((mins) => (
@@ -8071,7 +8071,7 @@ export const SuperAdminModule: React.FC = () => {
               <div>
                 <h3 className="font-medium text-base tracking-wide flex flex-wrap items-center gap-2">
                   <Lock className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Pengaturan Durasi Terminal Idle Auto-Lock</span>
+                  <span>Auto-Lock Terminal Kasir POS (Khusus Layar Kasir)</span>
                   <span className={`text-[10px] font-mono font-bold uppercase tracking-widest px-2 py-0.5 rounded border ${
                     idleAutoLockMinutes > 0
                       ? isLight
@@ -8085,7 +8085,7 @@ export const SuperAdminModule: React.FC = () => {
                   </span>
                 </h3>
                 <p className={`text-xs font-normal mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
-                  Kunci layar kasir/admin otomatis bila tidak ada aktivitas. Saat aplikasi dibuka atau halaman di-refresh, layar selalu dimulai dalam keadaan terbuka dan timer idle direset ulang.
+                  Mengamankan loket kasir POS secara otomatis saat ditinggal tanpa aktivitas, tanpa mengganggu 5 pilar manajemen lainnya (Executive, Finance, Purchasing, Warehouse, HR), Master Data, maupun Konsol SuperAdmin.
                 </p>
               </div>
 

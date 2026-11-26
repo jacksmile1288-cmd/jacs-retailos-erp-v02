@@ -22,14 +22,12 @@ import {
   Users,
   Database,
   ShieldCheck,
-  Monitor,
   Coffee,
   Clock,
   Eye,
   EyeOff,
   KeyRound,
   Sparkles,
-  Globe,
 } from 'lucide-react';
 import { AuditProvider } from './AuditProvider';
 import { AppProvider, useApp } from './context/AppContext';
@@ -44,7 +42,6 @@ import SystemHealthNotificationBanner from './components/common/SystemHealthNoti
 import { ActiveNavModule, User } from './types';
 import {
   generatePosStations,
-  getOperationalTopologyOption,
   normalizeStationCode,
 } from './utils/terminalConfigUtils';
 
@@ -244,8 +241,6 @@ const MainLayout: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isCashierStatusMenuOpen, isWorkspaceMenuOpen]);
 
-  const topologyMeta = getOperationalTopologyOption('NON_BLOCKING_ERP');
-
   const allowedModules = useMemo(
     () => getAllowedModulesForUser(currentUser, isSuperAdminAuthenticated),
     [currentUser, isSuperAdminAuthenticated]
@@ -323,8 +318,6 @@ const MainLayout: React.FC = () => {
     [stationStatusList]
   );
   const totalStationCount = stationStatusList.length;
-  const activeDeviceStatus =
-    stationStatusList.find((s) => s.stationCode === activeDeviceStationCode)?.status || 'BELUM_BUKA';
 
   // Jika belum login, tampilkan PublicGateway (Tanpa Tanya AI di layar gerbang login publik)
   if (!currentUser) {
@@ -431,126 +424,76 @@ const MainLayout: React.FC = () => {
       <ToastOverlay />
       {isAiFeatureAuthorized && <JacsAiAssistantDrawer />}
 
-      {/* Slim Top Status Bar — Tata Letak Presisi Anti-Tumpuk */}
+      {/* Top Header 3-Zona: Identitas (Kiri) · Navigasi & Status Inti (Tengah) · Utilitas & Profil (Kanan) */}
       <header
         id="app-topbar"
-        className={`sticky top-0 z-40 shrink-0 min-h-12 px-3 sm:px-4 py-1.5 border-b backdrop-blur-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 ${
+        className={`sticky top-0 z-40 shrink-0 h-[58px] w-full max-w-full px-3 sm:px-4 lg:px-5 border-b backdrop-blur-md flex flex-nowrap items-center justify-between gap-2 sm:gap-3 lg:gap-4 ${
           isLight
-            ? 'bg-[#F6F8FB]/95 border-slate-300/80 text-slate-900'
-            : 'bg-slate-950/95 border-slate-800 text-slate-100'
+            ? 'bg-white/95 border-slate-200/90 text-slate-900 shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+            : 'bg-slate-950/95 border-slate-800/90 text-slate-100'
         }`}
       >
-        {/* KIRI: Identitas Brand + Profil Jabatan Divisi Aktif + Live Counter Online */}
-        <div className="flex items-center gap-3 min-w-0 shrink-0">
-          <div className="flex items-center gap-2 shrink-0">
+        {/* ZONA KIRI: Identitas (Logo + Nama Toko + Sub-label Jacs Enterprise) */}
+        {(() => {
+          const storeName = businessProfile?.name || businessProfile?.businessName || 'TOKO UTAMA';
+          const stationNumber = activeDeviceStationCode.replace(/^POS-/i, '').padStart(2, '0');
+          const subIdentityLabel = isSuperAdminSession
+            ? 'Jacs Enterprise'
+            : currentModule === 'pos'
+            ? `Kasir ${stationNumber} · Jacs Enterprise`
+            : `${activePillarMeta?.shortLabel || currentUser.division || 'ERP'} · Jacs Enterprise`;
+
+          return (
             <div
-              className={`w-7 h-7 flex items-center justify-center overflow-hidden shrink-0 ${
-                isLight
-                  ? 'bg-transparent border-0 shadow-none rounded-none'
-                  : 'rounded-lg bg-slate-900 border border-cyan-500/40 shadow-sm shadow-cyan-500/20'
-              }`}
+              id="navbar-brand-identity"
+              className="flex items-center gap-2.5 min-w-0 flex-1 max-w-[165px] sm:max-w-[205px] lg:max-w-[235px] xl:max-w-[265px]"
+              title={`${storeName} — ${subIdentityLabel}${currentUser?.name ? ` (${currentUser.name})` : ''}`}
             >
-              <img
-                src={businessProfile?.logoUrl || '/logo-jacs-enterprise.png'}
-                alt={`${businessProfile?.name || businessProfile?.businessName || 'JacS Enterprise'} Logo`}
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  if (!img.dataset.fallbackApplied && !img.src.endsWith('/logo-jacs-enterprise.png')) {
-                    img.dataset.fallbackApplied = 'true';
-                    img.src = '/logo-jacs-enterprise.png';
-                    return;
-                  }
-                  img.style.display = 'none';
-                  const parent = img.parentElement;
-                  if (parent && !parent.querySelector('.fallback-text')) {
-                    const span = document.createElement('span');
-                    span.className = 'font-semibold text-xs text-cyan-700 dark:text-cyan-400 fallback-text';
-                    span.innerText = 'JE';
-                    parent.appendChild(span);
-                  }
-                }}
-              />
-            </div>
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="font-['Plus_Jakarta_Sans'] font-semibold text-xs sm:text-sm tracking-wider max-w-[200px] xl:max-w-[260px] truncate block text-slate-900 dark:text-white"
-                title={businessProfile?.name || businessProfile?.businessName || 'TOKO UTAMA'}
-              >
-                {businessProfile?.name || businessProfile?.businessName || 'TOKO UTAMA'}
-              </span>
-              <span className="text-slate-500 hidden 2xl:inline shrink-0">—</span>
-              <span
-                className={`hidden 2xl:inline-block px-1.5 py-0.5 font-mono text-[10px] font-medium rounded whitespace-nowrap shrink-0 ${
-                  isLight
-                    ? 'bg-cyan-50 text-cyan-700 border border-cyan-200'
-                    : 'bg-slate-800 text-cyan-400'
-                }`}
-              >
-                RetailOS ERP V2
-              </span>
-            </div>
-          </div>
-
-          {/* Label Profil Jabatan di Sebelah Nama Toko Sesuai Divisi Aktif */}
-          {(() => {
-            const stationNumber = activeDeviceStationCode.replace(/^POS-/i, '').padStart(2, '0');
-            const isPosActiveModule = currentModule === 'pos';
-            const divisionProfileLabel = isPosActiveModule
-              ? `Kasir ${stationNumber} (POS)`
-              : currentModule === 'admin'
-              ? 'SuperAdmin (Jacs Enterprise)'
-              : currentModule === 'executive'
-              ? 'Executive Manager (Executive)'
-              : currentModule === 'finance'
-              ? 'Finance Staff (Finance)'
-              : currentModule === 'purchasing'
-              ? 'Purchasing Staff (Purchasing)'
-              : currentModule === 'warehouse'
-              ? 'Warehouse Staff (Warehouse)'
-              : currentModule === 'hr'
-              ? 'HR Staff (HR)'
-              : isSuperAdminSession
-              ? 'SuperAdmin (Jacs Enterprise)'
-              : `${currentUser.name || contextualProfile.position || 'Staff'} (${activePillarMeta?.shortLabel || currentUser.division || 'ERP'})`;
-
-            return (
               <div
-                id="navbar-cashier-identity"
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold whitespace-nowrap shrink-0 ${
+                className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border ${
                   isLight
-                    ? 'bg-slate-100 border-slate-200 text-slate-800'
-                    : 'bg-slate-900 border-slate-800 text-slate-100'
+                    ? 'bg-slate-50 border-slate-200/90'
+                    : 'bg-slate-900 border-cyan-500/35 shadow-sm shadow-cyan-500/10'
                 }`}
-                title={
-                  isPosActiveModule
-                    ? `Loket aktif: ${activeDeviceStationCode} · ${divisionProfileLabel}`
-                    : `Profil Sesi Aktif: ${divisionProfileLabel} · Operator: ${currentUser.name || '-'}`
-                }
               >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    isPosActiveModule
-                      ? activeDeviceStatus === 'ONLINE'
-                        ? 'bg-emerald-500 animate-pulse'
-                        : activeDeviceStatus === 'ISTIRAHAT'
-                        ? 'bg-amber-400'
-                        : 'bg-slate-400'
-                      : 'bg-cyan-500 animate-pulse'
-                  }`}
+                <img
+                  src={businessProfile?.logoUrl || '/logo-jacs-enterprise.png'}
+                  alt={`${storeName} Logo`}
+                  className="w-full h-full object-contain p-0.5"
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.dataset.fallbackApplied && !img.src.endsWith('/logo-jacs-enterprise.png')) {
+                      img.dataset.fallbackApplied = 'true';
+                      img.src = '/logo-jacs-enterprise.png';
+                      return;
+                    }
+                    img.style.display = 'none';
+                    const parent = img.parentElement;
+                    if (parent && !parent.querySelector('.fallback-text')) {
+                      const span = document.createElement('span');
+                      span.className = 'font-bold text-xs text-cyan-600 dark:text-cyan-400 fallback-text';
+                      span.innerText = 'JE';
+                      parent.appendChild(span);
+                    }
+                  }}
                 />
-                <Monitor className="w-3.5 h-3.5 text-cyan-500 shrink-0 hidden sm:inline" />
-                <span>{divisionProfileLabel}</span>
-                {isPosActiveModule && activeDeviceStatus === 'ISTIRAHAT' && (
-                  <span className="px-1 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-300 font-mono text-[9px] uppercase shrink-0">
-                    Istirahat
-                  </span>
-                )}
               </div>
-            );
-          })()}
 
-          {/* Live Counter Status Kasir Online + Popover Rincian Tiap Loket (Hanya untuk Executive & SuperAdmin) */}
+              <div className="min-w-0 flex flex-col justify-center leading-tight">
+                <span className="font-['Plus_Jakarta_Sans'] font-bold text-[13px] sm:text-sm tracking-tight truncate text-slate-900 dark:text-white">
+                  {storeName}
+                </span>
+                <span className="text-[10.5px] font-medium tracking-wide truncate text-slate-500 dark:text-slate-400">
+                  {subIdentityLabel}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ZONA TENGAH: Navigasi & Status Inti (Dropdown Kasir · Pill Kasir POS & SuperAdmin · Cloud Sync) */}
+        <div className="flex items-center justify-center gap-1.5 sm:gap-2 shrink-0">
+          {/* 1. Dropdown Ringkas Status Kasir (1/2 Online) — Executive & SuperAdmin */}
           {(currentModule === 'executive' || isSuperAdminSession) && (
             <div className="relative shrink-0" ref={cashierStatusMenuRef}>
               <button
@@ -560,34 +503,40 @@ const MainLayout: React.FC = () => {
                   setIsWorkspaceMenuOpen(false);
                   setIsCashierStatusMenuOpen((prev) => !prev);
                 }}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition ${
+                className={`h-[34px] px-2 sm:px-2.5 rounded-full border text-[11px] font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
                   onlineCashierCount > 0
                     ? isLight
-                      ? 'bg-emerald-50 hover:bg-emerald-100 border-emerald-300 text-emerald-800'
-                      : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                      ? 'bg-emerald-50 hover:bg-emerald-100/90 border-emerald-200/90 text-emerald-800'
+                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/35 text-emerald-300'
                     : isLight
-                    ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-800'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-500/40 text-amber-300'
+                    ? 'bg-amber-50 hover:bg-amber-100/90 border-amber-200/90 text-amber-800'
+                    : 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/35 text-amber-300'
                 }`}
-                title="Klik untuk melihat rincian status tiap loket kasir (Online / Istirahat / Belum Buka Shift)"
+                title={`${onlineCashierCount}/${totalStationCount} Kasir Online — Klik untuk rincian status loket`}
+                aria-label={`${onlineCashierCount} dari ${totalStationCount} Kasir Online`}
               >
                 <span
                   className={`w-2 h-2 rounded-full shrink-0 ${
                     onlineCashierCount > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                   }`}
                 />
-                <span className="font-mono">
-                  {onlineCashierCount} / {totalStationCount} Kasir Online
+                <span className="font-mono tabular-nums font-bold">
+                  {onlineCashierCount}/{totalStationCount}
                 </span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${isCashierStatusMenuOpen ? 'rotate-180' : ''}`} />
+                <span className="hidden lg:inline font-medium">Online</span>
+                <ChevronDown
+                  className={`w-3 h-3 shrink-0 opacity-75 transition-transform ${
+                    isCashierStatusMenuOpen ? 'rotate-180' : ''
+                  }`}
+                />
               </button>
 
               {isCashierStatusMenuOpen && (
                 <div
                   id="navbar-cashier-status-popover"
-                  className={`absolute left-0 mt-2 w-80 max-w-[92vw] rounded-xl border shadow-2xl p-3 z-50 space-y-2.5 ${
+                  className={`absolute left-1/2 -translate-x-1/2 sm:left-0 sm:translate-x-0 mt-2 w-80 max-w-[90vw] rounded-xl border shadow-2xl p-3 z-50 space-y-2.5 ${
                     isLight
-                      ? 'bg-white border-slate-300 text-slate-900'
+                      ? 'bg-white border-slate-200 text-slate-900'
                       : 'bg-slate-900 border-slate-700 text-slate-100'
                   }`}
                 >
@@ -658,49 +607,33 @@ const MainLayout: React.FC = () => {
             </div>
           )}
 
-          {/* Badge Arsitektur Non-Blocking ERP */}
-          <span
-            className={`hidden 2xl:inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono text-[10px] font-semibold whitespace-nowrap shrink-0 ${
-              isLight
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-            }`}
-            title={topologyMeta.description}
-          >
-            {topologyMeta.shortLabel}
-          </span>
-        </div>
-
-        {/* KANAN: Workspace Switcher (Eksklusif SuperAdmin) + Status Widget + Tanya AI (Khusus Executive & SuperAdmin) + Bahasa, Tema, & Logout */}
-        <div className="flex items-center gap-3 shrink-0 ml-auto">
+          {/* 2. Navigasi Utama Segmented Pill: Kasir POS & SuperAdmin (Eksklusif SuperAdmin) */}
           {isHybridWorkspaceSwitcherVisible && (
-            <div className="relative flex items-center gap-2 shrink-0" id="workspace-switcher-bar" ref={workspaceMenuRef}>
-              <span
-                className={`hidden xl:inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                  isLight
-                    ? 'bg-transparent border-0 shadow-none px-1 py-0 text-amber-800'
-                    : 'px-2 py-1 rounded-lg border bg-amber-500/15 border-amber-500/40 text-amber-300'
-                }`}
-                title="Jalur Bypass 6 Manajemen aktif eksklusif untuk Mode Maintenance & Audit Developer Jacs Enterprise"
-              >
-                <ShieldCheck className="w-3 h-3 text-amber-600 dark:text-amber-500 shrink-0" />
-                <span>Bypass SuperAdmin • Jacs Enterprise</span>
-              </span>
-
+            <div
+              id="workspace-switcher-bar"
+              ref={workspaceMenuRef}
+              className={`relative h-[34px] p-0.5 rounded-full border flex items-center gap-0.5 shrink-0 ${
+                isLight
+                  ? 'bg-slate-100 border-slate-200/90'
+                  : 'bg-slate-900/90 border-slate-800'
+              }`}
+            >
               <button
                 type="button"
                 id="btn-workspace-switcher-pos"
                 onClick={() => handleWorkspaceSwitch('pos')}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
+                title="Kasir POS"
+                aria-label="Kasir POS"
+                className={`h-[28px] px-2 sm:px-2.5 md:px-3 rounded-full text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shrink-0 ${
                   currentModule === 'pos'
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                    ? 'bg-cyan-500 text-slate-950 shadow-sm'
                     : isLight
-                    ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
-                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+                    ? 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                 }`}
               >
                 <Store className="w-3.5 h-3.5 shrink-0" />
-                <span>Kasir POS</span>
+                <span className="hidden md:inline">Kasir POS</span>
               </button>
 
               <div className="relative shrink-0">
@@ -711,30 +644,46 @@ const MainLayout: React.FC = () => {
                     setIsCashierStatusMenuOpen(false);
                     setIsWorkspaceMenuOpen((prev) => !prev);
                   }}
-                  className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shrink-0 ${
-                    activePillarMeta || currentModule === 'admin'
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.3)]'
+                  title={
+                    currentModule === 'admin'
+                      ? 'SuperAdmin — Klik untuk pindah 6 Pilar Manajemen'
+                      : activePillarMeta && currentModule !== 'pos'
+                      ? `${activePillarMeta.label} — Klik untuk pindah modul`
+                      : 'SuperAdmin & 6 Pilar Manajemen'
+                  }
+                  aria-label="SuperAdmin & Navigasi Modul"
+                  className={`h-[28px] px-2 sm:px-2.5 md:px-3 rounded-full text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all whitespace-nowrap shrink-0 ${
+                    currentModule !== 'pos'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
                       : isLight
-                      ? 'bg-white hover:bg-slate-100 border-slate-300 text-slate-700'
-                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
+                      ? 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                   }`}
                 >
-                  <Layers className="w-3.5 h-3.5 shrink-0" />
-                  <span>
-                    {activePillarMeta
-                      ? activePillarMeta.shortLabel
-                      : currentModule === 'admin'
+                  {currentModule !== 'pos' && currentModule !== 'admin' ? (
+                    <Layers className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span className="hidden md:inline">
+                    {currentModule === 'admin'
                       ? 'SuperAdmin'
-                      : 'Bypass 6 Manajemen'}
+                      : activePillarMeta && currentModule !== 'pos'
+                      ? activePillarMeta.shortLabel
+                      : 'SuperAdmin'}
                   </span>
-                  <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${isWorkspaceMenuOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown
+                    className={`w-3 h-3 shrink-0 opacity-80 transition-transform ${
+                      isWorkspaceMenuOpen ? 'rotate-180' : ''
+                    }`}
+                  />
                 </button>
 
                 {isWorkspaceMenuOpen && (
                   <div
-                    className={`absolute right-0 mt-2 w-72 rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 ${
+                    className={`absolute right-0 mt-2.5 w-72 max-w-[90vw] rounded-xl border shadow-2xl p-1.5 z-50 space-y-1 ${
                       isLight
-                        ? 'bg-white border-slate-300 text-slate-900'
+                        ? 'bg-white border-slate-200 text-slate-900'
                         : 'bg-slate-900 border-slate-700 text-slate-100'
                     }`}
                   >
@@ -747,7 +696,7 @@ const MainLayout: React.FC = () => {
                             : 'px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[9px] font-bold'
                         }
                       >
-                        JACS ENTERPRISE
+                        JACS
                       </span>
                     </div>
                     {HYBRID_MANAGEMENT_PILLARS.filter((p) => allowedModules.includes(p.id)).map((pillar) => {
@@ -760,7 +709,7 @@ const MainLayout: React.FC = () => {
                           onClick={() => handleWorkspaceSwitch(pillar.id)}
                           className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between gap-2 cursor-pointer transition ${
                             isActivePillar
-                              ? 'bg-cyan-500/20 text-cyan-500 border border-cyan-500/40 font-semibold'
+                              ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/40 font-semibold'
                               : isLight
                               ? 'hover:bg-slate-100 text-slate-800'
                               : 'hover:bg-slate-800 text-slate-200'
@@ -778,7 +727,7 @@ const MainLayout: React.FC = () => {
                       onClick={() => handleWorkspaceSwitch('admin')}
                       className={`w-full text-left px-2.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-between gap-2 cursor-pointer transition border-t mt-1 pt-2 ${
                         currentModule === 'admin'
-                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                          ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40'
                           : isLight
                           ? 'border-slate-200 hover:bg-slate-100 text-slate-800'
                           : 'border-slate-800 hover:bg-slate-800 text-amber-300'
@@ -795,81 +744,98 @@ const MainLayout: React.FC = () => {
             </div>
           )}
 
-          {/* Status Widget + Tanya AI (Khusus Executive & SuperAdmin) + Grup Aksi Ujung Kanan (ID, Tema, & Keluar) */}
-          <div className="flex items-center gap-2 shrink-0">
-            <DualBackendStatusWidget />
+          {/* 3. Lencana Status Cloud Ringkas (SYNCED + Tombol Refresh Kecil) */}
+          <DualBackendStatusWidget />
+        </div>
 
-            {isAiFeatureAuthorized && (
-              <button
-                type="button"
-                id="btn-app-topbar-ask-ai"
-                onClick={openAiAssistant}
-                className={`h-8 px-2.5 rounded-lg border text-[11px] font-medium font-['Plus_Jakarta_Sans'] flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-300 text-cyan-800'
-                    : 'bg-cyan-950/50 hover:bg-cyan-900/70 border-cyan-700/60 text-cyan-300'
-                }`}
-                title={
-                  language === 'en'
-                    ? 'Ask JacS AI Assistant (Executive Manager & SuperAdmin Only)'
-                    : 'Tanya JacS AI Assistant (Khusus Executive Manager & SuperAdmin)'
-                }
-              >
-                <Sparkles className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
-                <span className="hidden sm:inline">{language === 'en' ? 'Ask AI' : 'Tanya AI'}</span>
-              </button>
+        {/* ZONA KANAN: Utilitas & Profil (Tanya AI · Bahasa ID · Tema · Keluar) */}
+        <div className="flex items-center justify-end gap-1.5 shrink-0">
+          {isAiFeatureAuthorized && (
+            <button
+              type="button"
+              id="btn-app-topbar-ask-ai"
+              onClick={openAiAssistant}
+              className={`h-[34px] w-[34px] lg:w-auto lg:px-2.5 rounded-lg border text-[11.5px] font-semibold font-['Plus_Jakarta_Sans'] flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                isLight
+                  ? 'bg-cyan-50 hover:bg-cyan-100 border-cyan-200 text-cyan-800'
+                  : 'bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700/60 text-cyan-300'
+              }`}
+              title={
+                language === 'en'
+                  ? 'Ask JacS AI Assistant (Executive & SuperAdmin)'
+                  : 'Tanya JacS AI Assistant (Executive & SuperAdmin)'
+              }
+              aria-label={language === 'en' ? 'Ask AI' : 'Tanya AI'}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
+              <span className="hidden lg:inline">{language === 'en' ? 'Ask AI' : 'Tanya AI'}</span>
+            </button>
+          )}
+
+          <div
+            className={`hidden sm:block w-px h-5 mx-0.5 shrink-0 ${
+              isLight ? 'bg-slate-200' : 'bg-slate-800'
+            }`}
+            aria-hidden="true"
+          />
+
+          <button
+            type="button"
+            id="btn-app-topbar-language-toggle"
+            onClick={toggleLanguage}
+            className={`w-[34px] h-[34px] rounded-lg border text-[11px] font-mono font-bold uppercase flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+              isLight
+                ? 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-200'
+            }`}
+            title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
+            aria-label={language === 'id' ? 'Ganti Bahasa' : 'Switch Language'}
+          >
+            {(language || 'id').toUpperCase()}
+          </button>
+
+          <button
+            type="button"
+            id="btn-app-topbar-theme-toggle"
+            onClick={toggleTheme}
+            className={`w-[34px] h-[34px] rounded-lg border flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+              isLight
+                ? 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
+            }`}
+            title={
+              theme === 'dark'
+                ? language === 'en'
+                  ? 'Switch to Light Mode'
+                  : 'Mode Terang'
+                : language === 'en'
+                ? 'Switch to Dark Mode'
+                : 'Mode Gelap'
+            }
+            aria-label={theme === 'dark' ? 'Mode Terang' : 'Mode Gelap'}
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-indigo-600" />
             )}
+          </button>
 
-            {/* Grup Aksi Ujung Kanan (ID, Tombol Tema, dan Tombol Keluar) - Terkunci shrink-0 */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                id="btn-app-topbar-language-toggle"
-                onClick={toggleLanguage}
-                className={`h-8 px-2.5 rounded-lg border text-[11px] font-mono font-bold uppercase flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800'
-                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200'
-                }`}
-                title={language === 'id' ? 'Ganti Bahasa (ID / EN)' : 'Switch Language (EN / ID)'}
-              >
-                <Globe className="w-3.5 h-3.5 text-cyan-500 shrink-0" />
-                <span>{(language || 'id').toUpperCase()}</span>
-              </button>
-
-              <button
-                type="button"
-                id="btn-app-topbar-theme-toggle"
-                onClick={toggleTheme}
-                className={`h-8 w-8 rounded-lg border flex items-center justify-center transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
-                    : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300'
-                }`}
-                title={theme === 'dark' ? (language === 'en' ? 'Light Mode' : 'Mode Terang') : (language === 'en' ? 'Dark Mode' : 'Mode Gelap')}
-              >
-                {theme === 'dark' ? (
-                  <Sun className="w-3.5 h-3.5 text-amber-400" />
-                ) : (
-                  <Moon className="w-3.5 h-3.5 text-blue-600" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={logout}
-                className={`h-8 flex items-center gap-1.5 px-2.5 rounded-lg border text-[11px] font-bold transition cursor-pointer shrink-0 ${
-                  isLight
-                    ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
-                    : 'bg-rose-950/60 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
-                }`}
-                title={language === 'en' ? 'Logout & return to Login gateway' : 'Keluar & kembali ke halaman Login'}
-              >
-                <LogOut className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            id="btn-app-topbar-logout"
+            onClick={logout}
+            className={`h-[34px] w-[34px] lg:w-auto lg:px-2.5 rounded-lg border text-[11.5px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              isLight
+                ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700'
+                : 'bg-rose-950/50 hover:bg-rose-600 border-rose-800/60 text-rose-300 hover:text-white'
+            }`}
+            title={language === 'en' ? 'Logout & return to Login gateway' : 'Keluar & kembali ke halaman Login'}
+            aria-label={language === 'en' ? 'Logout' : 'Keluar'}
+          >
+            <LogOut className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden lg:inline">{language === 'en' ? 'Logout' : 'Keluar'}</span>
+          </button>
         </div>
       </header>
 
@@ -1137,8 +1103,8 @@ const MainLayout: React.FC = () => {
         </div>
       )}
 
-      {/* TERMINAL IDLE AUTO-LOCK FULL-SCREEN OVERLAY */}
-      {isIdleLocked && (
+      {/* TERMINAL IDLE AUTO-LOCK FULL-SCREEN OVERLAY — KHUSUS MODUL KASIR POS */}
+      {isIdleLocked && currentModule === 'pos' && (
         <div className="fixed inset-0 z-[150] bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
           <div className="w-full max-w-md rounded-3xl border border-amber-500/50 bg-[#0d1117] text-white p-6 shadow-[0_0_40px_rgba(245,158,11,0.22)] space-y-5">
             <div className="flex items-center gap-3.5 pb-4 border-b border-gray-800">
@@ -1148,14 +1114,14 @@ const MainLayout: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    TERMINAL IDLE AUTO-LOCK
+                    TERMINAL IDLE AUTO-LOCK • POS
                   </span>
                 </div>
                 <h3 className="text-base font-black mt-1">
-                  Layar Kasir / Admin Terkunci Otomatis
+                  Layar Terminal Kasir POS Terkunci Otomatis
                 </h3>
                 <p className="text-[11px] text-gray-400">
-                  {businessProfile?.name || 'JacS RetailOS'} • Modul {(activeNav || 'HOME').toUpperCase()}
+                  {businessProfile?.name || 'JacS RetailOS'} • Modul KASIR POS
                 </p>
               </div>
             </div>

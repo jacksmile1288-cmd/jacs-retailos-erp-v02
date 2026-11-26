@@ -14,9 +14,11 @@ import {
   ShieldAlert,
   Play,
   Trash2,
+  Database,
 } from 'lucide-react';
 import { Product } from '../../types';
 import { parseExcelBuffer, parseDelimitedText } from '../migration/multiFormatParser';
+import { parseAccessMdbBuffer, MdbTableSummary } from './mdbAccessParser';
 import {
   RETAIL_CATEGORY_DICTIONARY,
   toTitleCase,
@@ -382,10 +384,16 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
   const [columnOverrides, setColumnOverrides] = useState<Record<string, RetailOsTargetField>>({});
   const [categoryOverrides, setCategoryOverrides] = useState<Record<number, number>>({});
   const [migrationReport, setMigrationReport] = useState<MigrationExecutionReport | null>(null);
+  const [mdbSummary, setMdbSummary] = useState<MdbTableSummary | null>(null);
+  const [isParsingMdb, setIsParsingMdb] = useState<boolean>(false);
+  const mdbAutoQuarantinedSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem(OFFLINE_MIGRATION_STORAGE_KEY, importText);
+      // Lindungi kuota localStorage bila file database .mdb berukuran besar
+      if (importText.length <= 250_000) {
+        localStorage.setItem(OFFLINE_MIGRATION_STORAGE_KEY, importText);
+      }
     } catch {}
   }, [importText]);
 
@@ -466,6 +474,8 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
     return rev;
   }, [resolvedColumnMapping]);
 
+  const isMdbSource = Boolean(mdbSummary);
+
   // Evaluate every row (dry-run preview & validation)
   const evaluatedRows = useMemo<EvaluatedMigrationRow[]>(() => {
     if (parsedSource.rows.length === 0) return [];
@@ -499,22 +509,31 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
       const attrs = parseProductAttributes(formattedName || 'Produk');
       const brand = rawBrand ? toTitleCase(rawBrand) : formattedName ? attrs.brand : '';
 
-      // Generate ID Internal otomatis (INT-XXXX) bila item tidak memiliki barcode pabrikan
-      const barcode =
-        rawBarcode || `INT-${String(1001 + idx).padStart(4, '0')}`;
+      // Untuk file .mdb: barcode kosong HARUS dikarantina; untuk CSV/Excel tetap auto-generate INT-XXXX
+      const barcode = rawBarcode
+        ? rawBarcode
+        : isMdbSource
+        ? ''
+        : `INT-${String(1001 + idx).padStart(4, '0')}`;
 
       const costPrice = cleanDirtyNumber(rawCost);
       const tiers = calculateTierPrices(Math.max(costPrice, 0));
 
       const parsedRetail = rawRetail ? cleanDirtyNumber(rawRetail) : 0;
-      const retailAutoCalculated = !rawRetail || parsedRetail <= 0;
-      const retailPrice = !retailAutoCalculated ? parsedRetail : tiers.retailPrice;
+      const retailAutoCalculated = !isMdbSource && (!rawRetail || parsedRetail <= 0);
+      const retailPrice = isMdbSource
+        ? parsedRetail
+        : !retailAutoCalculated
+        ? parsedRetail
+        : tiers.retailPrice;
 
       const parsedMember = rawMember ? cleanDirtyNumber(rawMember) : 0;
-      const memberPrice = parsedMember > 0 ? parsedMember : tiers.memberPrice;
+      const memberPrice =
+        parsedMember > 0 ? parsedMember : costPrice > 0 ? tiers.memberPrice : 0;
 
       const parsedWholesale = rawWholesale ? cleanDirtyNumber(rawWholesale) : 0;
-      const wholesalePrice = parsedWholesale > 0 ? parsedWholesale : tiers.wholesalePrice;
+      const wholesalePrice =
+        parsedWholesale > 0 ? parsedWholesale : costPrice > 0 ? tiers.wholesalePrice : 0;
 
       const stock = rawStock ? Math.round(cleanDirtyNumber(rawStock)) : 0;
       const unit = normalizeUnitValue(rawUnit, attrs.unit);
@@ -536,18 +555,27 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         categorySource = catRes.matchedBy;
       }
 
-      const isAlreadyCommitted =
-        Boolean(migrationReport?.successRows?.some((s) => s.barcode === barcode || s.rowNumber === rowNumber));
+      const isAlreadyCommitted = Boolean(
+        migrationReport?.successRows?.some(
+          (s) => s.rowNumber === rowNumber || (barcode && s.barcode === barcode)
+        )
+      );
 
       // Row-by-row validation rules
       const reasons: string[] = [];
       if (!isAlreadyCommitted) {
+        if (isMdbSource && !rawBarcode) {
+          reasons.push('Barcode / ID kosong di database Access (.mdb)');
+        }
         if (!formattedName || formattedName.length < 2) {
           reasons.push('Nama produk (Long Desc) kosong');
         }
         if (!rawCost || costPrice <= 0) {
-          reasons.push('HPP / Harga Modal kosong atau <= Rp 0');
-        } else if (!retailAutoCalculated && retailPrice < costPrice) {
+          reasons.push('Harga Beli / HPP kosong atau <= Rp 0');
+        }
+        if (isMdbSource && (!rawRetail || parsedRetail <= 0)) {
+          reasons.push('Harga Jual Retail (HAR1) kosong atau Rp 0');
+        } else if (!retailAutoCalculated && costPrice > 0 && retailPrice > 0 && retailPrice < costPrice) {
           reasons.push(
             `Harga jual retail (Rp ${retailPrice.toLocaleString('id-ID')}) di bawah HPP (Rp ${costPrice.toLocaleString('id-ID')})`
           );
@@ -587,9 +615,48 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         errorReason: isValid ? null : reasons.join('; '),
       };
     });
-  }, [parsedSource.rows, targetToSourceHeader, firstRowIsHeader, products, categoryOverrides, sortedCategories, migrationReport]);
+  }, [parsedSource.rows, targetToSourceHeader, firstRowIsHeader, products, categoryOverrides, sortedCategories, migrationReport, isMdbSource]);
 
-  // Upload File (.CSV / .XLSX / .XLS / .TSV / .TXT)
+  // Otomatis arahkan baris .mdb yang tidak valid (harga beli/jual 0 atau barcode kosong) ke tab 'Karantina Data'
+  useEffect(() => {
+    if (!isMdbSource || evaluatedRows.length === 0) return;
+    const sessionKey = `${sourceFileName}:${evaluatedRows.length}`;
+    if (mdbAutoQuarantinedSessionRef.current === sessionKey) return;
+    mdbAutoQuarantinedSessionRef.current = sessionKey;
+
+    const failedMdbRows = evaluatedRows.filter((r) => !r.isValid);
+    const validMdbCount = evaluatedRows.length - failedMdbRows.length;
+
+    if (failedMdbRows.length > 0) {
+      try {
+        const stored = localStorage.getItem('jacs_retailos_quarantine_rows_v1');
+        const existing: EvaluatedMigrationRow[] = stored ? JSON.parse(stored) : [];
+        const combined = [
+          ...failedMdbRows,
+          ...existing.filter(
+            (eq) =>
+              !failedMdbRows.some(
+                (fr) =>
+                  fr.rowNumber === eq.rowNumber &&
+                  fr.barcode === eq.barcode &&
+                  fr.name === eq.name
+              )
+          ),
+        ];
+        localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(combined));
+        window.dispatchEvent(new Event('jacs_quarantine_updated'));
+      } catch (e) {
+        console.error('Failed to auto-route .mdb quarantine rows:', e);
+      }
+
+      showToast?.(
+        `Access DB "${sourceFileName}" diekstrak: ${validMdbCount} SKU valid siap impor, ${failedMdbRows.length} baris (harga 0 / barcode kosong) otomatis dikirim ke tab Karantina Data.`,
+        'warning'
+      );
+    }
+  }, [isMdbSource, evaluatedRows, sourceFileName, showToast]);
+
+  // Upload File (.MDB / .CSV / .XLSX / .XLS / .TSV / .TXT)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -599,8 +666,58 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
     setColumnOverrides({});
     setCategoryOverrides({});
     setMigrationReport(null);
+    setMdbSummary(null);
+    mdbAutoQuarantinedSessionRef.current = null;
 
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+    // 1. Microsoft Access Database (.mdb — Standard Jet DB 4.0)
+    if (ext === 'mdb') {
+      setIsParsingMdb(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const mdbRes = await parseAccessMdbBuffer(arrayBuffer, file.name);
+        if (mdbRes.rows.length === 0) {
+          showToast?.(
+            `Tabel "${mdbRes.summary.msBarangTable}" pada "${file.name}" kosong (0 produk).`,
+            'warning'
+          );
+          return;
+        }
+
+        setExcelParsedTable({
+          headers: mdbRes.headers,
+          rows: mdbRes.rows,
+          sheetName: `${mdbRes.summary.msBarangTable} (Access Jet DB 4.0)`,
+        });
+        setMdbSummary(mdbRes.summary);
+        setFirstRowIsHeader(true);
+
+        // Tampilkan ringkasan pratinjau CSV (maks 250 baris di textarea agar UI tetap responsif)
+        const previewRows = mdbRes.rows.slice(0, 250);
+        const previewCsv = [
+          mdbRes.headers.join(','),
+          ...previewRows.map((r) => mdbRes.headers.map((h) => escapeCsvCell(r[h])).join(',')),
+          ...(mdbRes.rows.length > 250
+            ? [`# ... ${mdbRes.rows.length - 250} baris lainnya dimuat langsung dari memori MsBarang (.mdb)`]
+            : []),
+        ].join('\n');
+        setImportText(previewCsv);
+
+        showToast?.(
+          `Database Access "${file.name}" berhasil diekstrak: ${mdbRes.rows.length} produk dari ${mdbRes.summary.msBarangTable} digabungkan otomatis.`,
+          'success'
+        );
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Format database .mdb tidak didukung atau terenkripsi';
+        showToast?.(`Gagal membaca file Access (.mdb): ${errMsg}`, 'error');
+      } finally {
+        setIsParsingMdb(false);
+      }
+      return;
+    }
+
+    // 2. Microsoft Excel (.xlsx / .xls)
     if (ext === 'xlsx' || ext === 'xls') {
       try {
         const buffer = await file.arrayBuffer();
@@ -631,6 +748,7 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
       return;
     }
 
+    // 3. CSV / TSV / TXT
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = String(event.target?.result || '');
@@ -644,6 +762,8 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
 
   const handleLoadSampleLegacyPos = () => {
     setExcelParsedTable(null);
+    setMdbSummary(null);
+    mdbAutoQuarantinedSessionRef.current = null;
     setSourceFileName('contoh_pos_lama.csv');
     setFirstRowIsHeader(true);
     setColumnOverrides({});
@@ -745,7 +865,13 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
         const combined = [
           ...failedRows,
           ...existing.filter(
-            (eq) => !failedRows.some((fr) => fr.barcode === eq.barcode && fr.rowNumber === eq.rowNumber)
+            (eq) =>
+              !failedRows.some(
+                (fr) =>
+                  fr.rowNumber === eq.rowNumber &&
+                  fr.barcode === eq.barcode &&
+                  fr.name === eq.name
+              )
           ),
         ];
         localStorage.setItem('jacs_retailos_quarantine_rows_v1', JSON.stringify(combined));
@@ -834,10 +960,14 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
     const map = new Map<string, number[]>();
     invalidRows.forEach((r) => {
       const reason = r.errorReason || 'Validasi gagal';
-      const groupKey = reason.includes('duplikasi')
+      const groupKey = reason.toLowerCase().includes('duplikasi')
         ? 'Duplikasi Barcode'
-        : reason.includes('HPP')
-        ? 'HPP Kosong atau <= Rp 0'
+        : reason.includes('Barcode / ID kosong')
+        ? 'Barcode / ID Kosong'
+        : reason.includes('HPP') || reason.includes('Harga Beli')
+        ? 'Harga Beli / HPP Kosong atau Rp 0'
+        : reason.includes('Harga Jual Retail')
+        ? 'Harga Jual Retail (HAR1) Rp 0'
         : reason.includes('Nama')
         ? 'Nama Produk Kosong'
         : 'Validasi Data';
@@ -875,29 +1005,38 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
             <div>
               <h2 className="text-sm font-medium tracking-wide text-cyan-600 dark:text-cyan-400 flex items-center gap-2">
                 <Upload className="w-4 h-4" />
-                <span>1. Sumber Data POS Lama (CSV / Excel / Teks)</span>
+                <span>1. Sumber Data POS Lama (CSV / Excel / Access .MDB)</span>
               </h2>
               <p className={`text-[11px] font-normal mt-0.5 ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
-                Nama kolom bebas seperti <code className="font-mono">Kode/PLU</code>,{' '}
-                <code className="font-mono">Nama Item</code>, <code className="font-mono">Modal/Beli</code>,{' '}
-                <code className="font-mono">Harga Jual</code>, <code className="font-mono">Qty/Sisa</code>.
+                Mendukung file <code className="font-mono">.mdb</code> (Microsoft Access Jet DB 4.0 — auto-join{' '}
+                <code className="font-mono">MsBarang</code>, <code className="font-mono">OtherUnitOnStok</code>,{' '}
+                <code className="font-mono">MyItemGroup</code>, <code className="font-mono">MyItemMerk</code>,{' '}
+                <code className="font-mono">PosBARANG</code>) serta CSV/Excel.
               </p>
             </div>
           </div>
 
           {/* Dropzone Upload File */}
           <div
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => !isParsingMdb && fileInputRef.current?.click()}
             className={`p-3.5 rounded-xl border border-dashed flex items-center gap-3 cursor-pointer transition ${
               isLight
                 ? 'bg-slate-50/70 border-cyan-500/50 hover:border-cyan-500 hover:bg-cyan-50/40'
                 : 'bg-slate-950 border-slate-700 hover:border-cyan-500'
             }`}
           >
-            <FileSpreadsheet className="w-6 h-6 text-cyan-500 shrink-0" />
+            {isMdbSource ? (
+              <Database className="w-6 h-6 text-amber-500 shrink-0" />
+            ) : (
+              <FileSpreadsheet className="w-6 h-6 text-cyan-500 shrink-0" />
+            )}
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium truncate">
-                Unggah File .CSV / .XLSX / .XLS / .TXT
+              <div className="text-xs font-medium truncate flex items-center gap-2">
+                <span>
+                  {isParsingMdb
+                    ? 'Mengekstrak Database Access (.mdb)...'
+                    : 'Unggah File .MDB / .CSV / .XLSX / .XLS / .TXT'}
+                </span>
               </div>
               <div className={`text-[11px] font-normal truncate ${isLight ? 'text-slate-600' : 'text-slate-400'}`}>
                 Aktif: <span className="font-mono font-medium text-cyan-600 dark:text-cyan-400">{sourceFileName}</span> ({parsedSource.rows.length} baris terbaca)
@@ -906,11 +1045,50 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.xlsx,.xls,.tsv,.txt"
+              accept=".mdb,.csv,.xlsx,.xls,.tsv,.txt"
               onChange={handleFileUpload}
               className="hidden"
             />
           </div>
+
+          {/* Ringkasan Ekstraksi Relasi Microsoft Access (.mdb) */}
+          {mdbSummary && (
+            <div
+              className={`p-3 rounded-xl border text-[11px] space-y-2 ${
+                isLight
+                  ? 'bg-amber-50/80 border-amber-300 text-amber-950'
+                  : 'bg-amber-950/25 border-amber-500/35 text-amber-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                  <Database className="w-3.5 h-3.5 shrink-0" />
+                  <span>Microsoft Access Jet DB 4.0 — Auto-Join Aktif</span>
+                </span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30">
+                  {mdbSummary.msBarangCount} SKU
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px]">
+                <div className="truncate">
+                  • MsBarang: <strong>{mdbSummary.msBarangCount}</strong>
+                </div>
+                <div className="truncate">
+                  • OtherUnitOnStok: <strong>{mdbSummary.matchedUnits}/{mdbSummary.otherUnitCount}</strong>
+                </div>
+                <div className="truncate">
+                  • MyItemGroup: <strong>{mdbSummary.matchedGroups}/{mdbSummary.itemGroupCount}</strong>
+                </div>
+                <div className="truncate">
+                  • MyItemMerk: <strong>{mdbSummary.matchedBrands}/{mdbSummary.itemMerkCount}</strong>
+                </div>
+                <div className="truncate col-span-2">
+                  • PosBARANG (Stok Awal): <strong>{mdbSummary.matchedStocks}</strong> cocok dari{' '}
+                  <strong>{mdbSummary.posBarangCount}</strong> baris
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Toolbar Aksi Cepat */}
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -941,12 +1119,14 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
               </button>
             </div>
 
-            {importText && (
+            {(importText || excelParsedTable) && (
               <button
                 type="button"
                 onClick={() => {
                   setImportText('');
                   setExcelParsedTable(null);
+                  setMdbSummary(null);
+                  mdbAutoQuarantinedSessionRef.current = null;
                   setColumnOverrides({});
                   setCategoryOverrides({});
                   setMigrationReport(null);
@@ -965,11 +1145,13 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
             value={importText}
             onChange={(e) => {
               setExcelParsedTable(null);
+              setMdbSummary(null);
+              mdbAutoQuarantinedSessionRef.current = null;
               setSourceFileName('Tempel Teks Manual');
               setImportText(e.target.value);
               setMigrationReport(null);
             }}
-            placeholder={`Tempel tabel CSV / Excel / Tab di sini, contoh:\nKode/PLU,Nama Item,Modal/Beli,Harga Jual,Qty/Sisa\n899275321901,Indomie Goreng 85gr,Rp 2.800,Rp 3.500,120`}
+            placeholder={`Tempel tabel CSV / Excel / Tab di sini, atau unggah file .mdb di atas.\nContoh CSV:\nKode/PLU,Nama Item,Modal/Beli,Harga Jual,Qty/Sisa\n899275321901,Indomie Goreng 85gr,Rp 2.800,Rp 3.500,120`}
             className={`w-full rounded-xl border p-3 text-xs font-mono font-normal focus:outline-none focus:border-cyan-500 flex-1 ${
               isLight
                 ? 'bg-white border-slate-300 text-slate-900'
@@ -1436,26 +1618,29 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
               {evaluatedRows.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="py-12 px-4 text-center text-slate-500 font-normal">
-                    Belum ada data yang diunggah atau ditempel. Klik &ldquo;Muat Contoh POS Lama&rdquo; untuk langsung mencoba simulasi konversi &amp; karantina error.
+                    Belum ada data yang diunggah atau ditempel. Unggah file <code className="font-mono">.mdb</code> / <code className="font-mono">.csv</code> / <code className="font-mono">.xlsx</code> atau klik &ldquo;Muat Contoh POS Lama&rdquo;.
                   </td>
                 </tr>
               ) : (
-                evaluatedRows.map((row, idx) => (
-                  <tr
-                    key={`${row.rowNumber}-${idx}`}
-                    className={
-                      row.isValid
-                        ? isLight
-                          ? 'hover:bg-slate-50'
-                          : 'hover:bg-slate-900/60'
-                        : isLight
-                        ? 'bg-rose-50/70 hover:bg-rose-50'
-                        : 'bg-rose-950/20 hover:bg-rose-950/30'
-                    }
-                  >
+                <>
+                  {evaluatedRows.slice(0, 300).map((row, idx) => (
+                    <tr
+                      key={`${row.rowNumber}-${idx}`}
+                      className={
+                        row.isValid
+                          ? isLight
+                            ? 'hover:bg-slate-50'
+                            : 'hover:bg-slate-900/60'
+                          : isLight
+                          ? 'bg-rose-50/70 hover:bg-rose-50'
+                          : 'bg-rose-950/20 hover:bg-rose-950/30'
+                      }
+                    >
                     <td className="py-2 px-3 font-mono font-normal text-[11px] text-slate-400">#{row.rowNumber}</td>
                     <td className="py-2 px-3 whitespace-nowrap">
-                      {migrationReport?.successRows?.some((s) => s.barcode === row.barcode || s.rowNumber === row.rowNumber) ? (
+                      {migrationReport?.successRows?.some(
+                        (s) => s.rowNumber === row.rowNumber || (Boolean(row.barcode) && s.barcode === row.barcode)
+                      ) ? (
                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium uppercase tracking-widest border ${
                           isLight
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-400/70'
@@ -1488,17 +1673,21 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
                       )}
                     </td>
                     <td className="py-2 px-3 font-mono font-normal text-[11px] whitespace-nowrap">
-                      <span
-                        className={
-                          row.barcode.startsWith('INT-')
-                            ? 'px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 font-medium'
-                            : isLight
-                            ? 'text-cyan-700 font-medium'
-                            : 'text-cyan-400'
-                        }
-                      >
-                        {row.barcode}
-                      </span>
+                      {row.barcode ? (
+                        <span
+                          className={
+                            row.barcode.startsWith('INT-')
+                              ? 'px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 font-medium'
+                              : isLight
+                              ? 'text-cyan-700 font-medium'
+                              : 'text-cyan-400'
+                          }
+                        >
+                          {row.barcode}
+                        </span>
+                      ) : (
+                        <span className="italic text-rose-500">(Kosong)</span>
+                      )}
                     </td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       <select
@@ -1557,7 +1746,15 @@ export const SmartMigrationPanel: React.FC<SmartMigrationPanelProps> = ({
                       {row.stock} {row.unit}
                     </td>
                   </tr>
-                ))
+                  ))}
+                  {evaluatedRows.length > 300 && (
+                    <tr>
+                      <td colSpan={12} className="py-3 px-4 text-center text-[11px] font-mono text-cyan-500">
+                        Menampilkan 300 baris pertama dari total {evaluatedRows.length} baris. Seluruh {validPreviewCount} baris valid akan tetap diimpor saat tombol Eksekusi Migrasi diklik.
+                      </td>
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>
