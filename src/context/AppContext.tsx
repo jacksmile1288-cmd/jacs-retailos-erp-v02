@@ -776,6 +776,8 @@ export interface AppContextType {
   isDemoSandbox: boolean;
   activeDemoBusinessType: string;
   switchDemoBusinessType: (bType: string) => void;
+  publicDemoLockEnabled: boolean;
+  setPublicDemoLockEnabled: (enabled: boolean) => void;
   launchInteractiveDemoSession: (businessType: string, targetModule?: ActiveNavModule) => void;
   exitDemoSandboxSession: () => void;
   resetDemoSandboxSession: () => {
@@ -1738,6 +1740,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return 'RETAIL';
     }
   });
+
+  const [publicDemoLockEnabled, setPublicDemoLockEnabledState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('jacs_public_demo_lock_enabled_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const setPublicDemoLockEnabled = useCallback((enabled: boolean) => {
+    setPublicDemoLockEnabledState(enabled);
+    try {
+      localStorage.setItem('jacs_public_demo_lock_enabled_v1', String(enabled));
+    } catch {}
+  }, []);
 
   const switchDemoBusinessType = useCallback((bType: string) => {
     setActiveDemoBusinessType(bType);
@@ -12424,6 +12441,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isDemoSandbox: IS_DEMO_SANDBOX,
     activeDemoBusinessType,
     switchDemoBusinessType,
+    publicDemoLockEnabled,
+    setPublicDemoLockEnabled,
     launchInteractiveDemoSession,
     exitDemoSandboxSession,
     resetDemoSandboxSession,

@@ -425,6 +425,8 @@ export const SuperAdminModule: React.FC = () => {
     isLedgerReset,
     isMasterCatalogWiped,
     isIntegratedDemoMode,
+    publicDemoLockEnabled,
+    setPublicDemoLockEnabled,
     fnbToppings,
     serviceStylists,
     idleAutoLockMinutes,
@@ -7693,6 +7695,78 @@ export const SuperAdminModule: React.FC = () => {
       {/* TAB REMOTE / SYSTEM STATUS */}
       {(adminTab === 'remote' || adminTab === 'system') && (
         <div className="space-y-6">
+          {/* KUNCI AKSES PIN PRODUKSI (MODE SHOWCASE DEMO PUBLIK) SETTING CARD */}
+          <div className={`p-6 rounded-2xl border transition-all duration-200 ${
+            publicDemoLockEnabled
+              ? isLight
+                ? 'bg-amber-50/80 border-amber-500/75 shadow-[0_0_22px_rgba(245,158,11,0.22)]'
+                : 'bg-amber-950/30 border-amber-500/60 shadow-[0_0_25px_rgba(245,158,11,0.25)]'
+              : isLight
+              ? 'bg-white border-cyan-500/70 shadow-[0_0_16px_rgba(6,182,212,0.18)] hover:border-cyan-500 hover:shadow-[0_0_22px_rgba(6,182,212,0.32)]'
+              : 'bg-[#161b22] border-cyan-500/35 shadow-[0_0_16px_rgba(6,182,212,0.08)] hover:border-cyan-400/60 hover:shadow-[0_0_20px_rgba(6,182,212,0.16)]'
+          }`}>
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className={`w-11 h-11 rounded-2xl border flex items-center justify-center shrink-0 shadow-inner ${
+                  publicDemoLockEnabled
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                    : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
+                }`}>
+                  {publicDemoLockEnabled ? <Lock className="w-6 h-6" /> : <Unlock className="w-6 h-6" />}
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className={`text-base font-black tracking-wide ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                      Kunci Akses PIN Produksi (Mode Showcase Demo Publik)
+                    </h3>
+                    <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-black uppercase tracking-wider border flex items-center gap-1.5 ${
+                      publicDemoLockEnabled
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${publicDemoLockEnabled ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                      {publicDemoLockEnabled ? 'TERKUNCI (MODE DEMO PUBLIK)' : 'TERBUKA (MODE PRODUKSI NORMAL)'}
+                    </span>
+                  </div>
+                  <p className={`text-xs mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-300'}`}>
+                    {publicDemoLockEnabled
+                      ? 'Tombol ON (Kunci PIN Publik) — Menyembunyikan input PIN divisi & tombol SuperAdmin di layar depan. Pengunjung hanya dapat mengakses Simulasi Demo (Pilih Tipe Bisnis — Tanpa PIN).'
+                      : 'Tombol OFF (Buka Login Produksi) — Menampilkan kembali form login PIN divisi & SuperAdmin secara normal.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !publicDemoLockEnabled;
+                    setPublicDemoLockEnabled(nextVal);
+                    showToast(
+                      nextVal
+                        ? '🔒 Kunci Akses PIN Produksi diaktifkan (Mode Showcase Demo Publik).'
+                        : '🔓 Kunci Akses PIN Produksi dinonaktifkan (Login Produksi Normal Terbuka).',
+                      nextVal ? 'warning' : 'success'
+                    );
+                    addAuditLog(
+                      `Ubah Status Kunci Akses PIN Publik: ${nextVal ? 'ON (TERKUNCI)' : 'OFF (TERBUKA)'}`,
+                      'SUPER_ADMIN',
+                      'WARN'
+                    );
+                  }}
+                  className={`px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2.5 cursor-pointer transition active:scale-95 shadow-md ${
+                    publicDemoLockEnabled
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/30'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                  }`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-current animate-pulse" />
+                  <span>{publicDemoLockEnabled ? 'ON (Kunci PIN Publik)' : 'OFF (Buka Login Produksi)'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* 4 System Health HUD Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className={`p-4 rounded-2xl border backdrop-blur-xl transition-all duration-200 ${
@@ -9555,6 +9629,55 @@ export const SuperAdminModule: React.FC = () => {
                     <div className="text-[10px] text-cyan-400 font-semibold">{card.sub}</div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Kunci Akses PIN Produksi (Mode Showcase Demo Publik) Card */}
+            <div className={`mt-4 p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 ${
+              publicDemoLockEnabled
+                ? isLight
+                  ? 'bg-amber-50/90 border-amber-300 text-slate-800'
+                  : 'bg-[#1b170c]/95 border-amber-500/45 text-amber-100'
+                : isLight
+                ? 'bg-slate-50/90 border-slate-200 text-slate-800'
+                : 'bg-[#0d1117]/90 border-slate-700/60 text-gray-200'
+            }`}>
+              <div className="flex items-start gap-3.5">
+                <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                  publicDemoLockEnabled
+                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                    : 'bg-slate-500/15 border-slate-500/35 text-slate-400'
+                }`}>
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-black flex items-center gap-2">
+                    <span>Kunci Akses PIN Produksi (Mode Showcase Demo Publik)</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                      publicDemoLockEnabled ? 'bg-amber-500/25 text-amber-300 border border-amber-400/40' : 'bg-slate-800 text-slate-400 border border-slate-700'
+                    }`}>
+                      {publicDemoLockEnabled ? 'ON (MODE PUBLIK)' : 'OFF (PRODUKSI NORMAL)'}
+                    </span>
+                  </div>
+                  <p className={`text-[11px] mt-1 leading-relaxed ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                    {publicDemoLockEnabled
+                      ? 'Form input PIN divisi & SuperAdmin Access disembunyikan dari layar login. Pengunjung hanya dapat mencoba simulasi demo tanpa PIN.'
+                      : 'Gerbang login PIN produksi normal terbuka untuk staf dan manajemen perusahaan.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="text-xs font-bold">{publicDemoLockEnabled ? 'Kunci Aktif' : 'Normal'}</span>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={publicDemoLockEnabled}
+                    onChange={(e) => setPublicDemoLockEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
               </div>
             </div>
 

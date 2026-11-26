@@ -121,10 +121,40 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     isDemoSandbox,
     resetDemoSandboxSession,
     launchInteractiveDemoSession,
+    publicDemoLockEnabled,
   } = useApp();
 
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [selectedDemoBusinessType, setSelectedDemoBusinessType] = useState('RETAIL');
+  const [showBackdoorAuth, setShowBackdoorAuth] = useState(false);
+  const logoClickCountRef = useRef(0);
+  const logoClickTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleLogoClickForBackdoor = () => {
+    if (logoClickTimerRef.current) clearTimeout(logoClickTimerRef.current);
+    logoClickCountRef.current += 1;
+    if (logoClickCountRef.current >= 5) {
+      logoClickCountRef.current = 0;
+      setShowBackdoorAuth(true);
+      showToast('Pintu masuk rahasia SuperAdmin terbuka sementara!', 'success');
+    } else {
+      logoClickTimerRef.current = setTimeout(() => {
+        logoClickCountRef.current = 0;
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+        e.preventDefault();
+        setShowBackdoorAuth((prev) => !prev);
+        showToast('Pintu masuk rahasia SuperAdmin dialihkan via shortcut!', 'info');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showToast]);
 
   const DEMO_BUSINESS_TYPES = [
     { id: 'RETAIL', label: 'RETAIL — Retail & Minimarket' },
@@ -556,7 +586,9 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         {/* 2. SUDUT KIRI ATAS: Watermark Tunggal Logo + Nama Developer */}
         <div className="relative z-20 flex items-center justify-between">
           <div
-            className={`flex items-center gap-2.5 ${
+            onClick={handleLogoClickForBackdoor}
+            title="Klik 5x untuk backdoor SuperAdmin"
+            className={`flex items-center gap-2.5 cursor-pointer select-none ${
               theme === 'light'
                 ? 'bg-transparent border-0 shadow-none p-0'
                 : 'px-3 py-1.5 rounded-xl bg-slate-950/50 border border-cyan-400/25 backdrop-blur-md shadow-lg'
