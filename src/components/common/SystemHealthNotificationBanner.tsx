@@ -1,14 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { AlertTriangle, RefreshCw, Wrench, X, ShieldAlert, ArrowRight } from 'lucide-react';
+import { dualBackendSync } from '../../services/dualBackendSync';
+import { AlertTriangle, RefreshCw, Wrench, X, ShieldAlert, ArrowRight, Trash2 } from 'lucide-react';
 
 export const SystemHealthNotificationBanner: React.FC = () => {
   const {
     offlineQueue,
     gasOfflineQueueCount,
+    supabaseOfflineQueueCount,
     errorLogs,
     syncOfflineTransactions,
     syncOfflineQueues,
+    clearFailedOfflineQueues,
     setActiveNav,
     activeBackendProvider,
     theme,
@@ -17,8 +20,22 @@ export const SystemHealthNotificationBanner: React.FC = () => {
   const isLight = theme === 'light';
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
+  const [dualQueuedCount, setDualQueuedCount] = useState<number>(
+    () => dualBackendSync.getSnapshot().queuedCount
+  );
 
-  const totalOfflineQueued = (offlineQueue?.length || 0) + (gasOfflineQueueCount || 0);
+  useEffect(() => {
+    const unsubscribe = dualBackendSync.subscribe((snap) => {
+      setDualQueuedCount(snap.queuedCount);
+    });
+    return unsubscribe;
+  }, []);
+
+  const totalOfflineQueued =
+    (offlineQueue?.length || 0) +
+    (gasOfflineQueueCount || 0) +
+    (supabaseOfflineQueueCount || 0) +
+    (dualQueuedCount || 0);
   
   const validErrors = useMemo(() => {
     return (errorLogs || []).filter((err) => {
@@ -53,6 +70,11 @@ export const SystemHealthNotificationBanner: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const handleClearStuckQueue = () => {
+    clearFailedOfflineQueues();
+    setDualQueuedCount(dualBackendSync.getSnapshot().queuedCount);
   };
 
   const handleOpenSuperAdmin = () => {
@@ -92,15 +114,28 @@ export const SystemHealthNotificationBanner: React.FC = () => {
 
       <div className="flex flex-wrap items-center gap-2 shrink-0">
         {totalOfflineQueued > 0 && (
-          <button
-            type="button"
-            onClick={handleSyncAll}
-            disabled={isSyncing}
-            className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow transition flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Menyelaraskan...' : 'Sync Sekarang'}</span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={isSyncing}
+              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Menyelaraskan...' : 'Sync Sekarang'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClearStuckQueue}
+              disabled={isSyncing}
+              title="Kosongkan paksa antrean sinkronisasi offline lokal yang macet (Clear Failed Queue)"
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow transition flex items-center gap-1.5 disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Bersihkan Antrean Macet</span>
+            </button>
+          </>
         )}
 
         <button

@@ -19,6 +19,13 @@ export interface SyncQueueItem {
   action: 'UPSERT' | 'DELETE' | 'INSERT';
   payload: any;
   timestamp: string;
+  retryCount?: number;
+  lastError?: string;
+}
+
+export interface FailedDualSyncQueueItem extends SyncQueueItem {
+  failedAt: string;
+  reason: string;
 }
 
 export type BackendProvider = 'SUPABASE' | 'GAS' | 'LOCAL';
@@ -105,6 +112,8 @@ const REMOTE_CMD_BUS_KEY = 'jacs_remote_command_bus';
 const REMOTE_ACK_BUS_KEY = 'jacs_remote_ack_bus';
 const REMOTE_TELEMETRY_BUS_KEY = 'jacs_remote_telemetry_bus';
 const REMOTE_CHANNEL_NAME = 'jacs_retailos_remote_hub';
+const DUAL_FAILED_QUEUE_KEY = 'jacs_dual_backend_failed_queue_v1';
+const MAX_QUEUE_RETRIES = 3;
 
 export function generateTxUuid(): string {
   return 'UUID-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9).toUpperCase();
@@ -254,6 +263,51 @@ class DualBackendSyncEngine {
     try {
       localStorage.setItem('jacs_dual_backend_queue', JSON.stringify(this.queue));
     } catch {}
+  }
+
+  public getQueuedCount(): number {
+    return this.queue.length;
+  }
+
+  public clearQueue(): number {
+    const cleared = this.queue.length;
+    this.queue = [];
+    try {
+      localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem(DUAL_FAILED_QUEUE_KEY);
+    } catch {}
+    this.lastSyncFailed = false;
+    this.lastSyncErrorMessage = null;
+    this.notify();
+    return cleared;
+  }
+
+  private recordFailedQueueItem(item: SyncQueueItem, reason: string) {
+    try {
+      const raw = localStorage.getItem(DUAL_FAILED_QUEUE_KEY);
+      const existing: FailedDualSyncQueueItem[] = raw ? JSON.parse(raw) : [];
+      const entry: FailedDualSyncQueueItem = {
+        ...item,
+        failedAt: new Date().toISOString(),
+        reason,
+      };
+      const next = [entry, ...(Array.isArray(existing) ? existing : [])].slice(0, 50);
+      localStorage.setItem(DUAL_FAILED_QUEUE_KEY, JSON.stringify(next));
+    } catch {}
+  }
+
+  private isNonRetriableHttpError(status: number, bodyText = ''): boolean {
+    if (status === 400 || status === 404 || status === 409 || status === 422) {
+      return true;
+    }
+    if (
+      /23505|23503|23502|23514|22P02|42P01|42703|PGRST|duplicate key|already exists|unique constraint|violates|schema cache|does not exist|could not find|invalid input/i.test(
+        bodyText
+      )
+    ) {
+      return true;
+    }
+    return false;
   }
 
   public getConfig(): DualBackendConfig {
@@ -538,24 +592,63 @@ class DualBackendSyncEngine {
     }
   }
 
-  public async processQueue() {
-    if (this.getStorageMode() === 'LOCAL_ONLY') return;
-    if (this.isSyncing || this.queue.length === 0 || !this.isOnline) return;
+  public async processQueue(): Promise<number> {
+    if (this.getStorageMode() === 'LOCAL_ONLY') return 0;
+    if (this.isSyncing || this.queue.length === 0 || !this.isOnline) return 0;
 
     this.isSyncing = true;
     this.notify();
 
+    let syncedCount = 0;
+
     try {
       while (this.queue.length > 0 && this.isOnline) {
         const item = this.queue[0];
-        const success = await this.sendPayload(item);
-        if (success) {
+        const result = await this.sendPayload(item);
+
+        if (result.outcome === 'SYNCED') {
           this.queue.shift();
           this.saveQueue();
           this.lastSyncTime = new Date().toISOString();
+          syncedCount++;
+        } else if (result.outcome === 'DISCARD_FAILED') {
+          console.warn(
+            '[DualBackendSync] Mengeluarkan item antrean non-retriable (400/404/409/23505):',
+            item.type,
+            result.reason
+          );
+          this.recordFailedQueueItem(item, result.reason || 'Ditolak server (validasi skema/duplikasi)');
+          this.queue.shift();
+          this.saveQueue();
         } else {
-          break;
+          const nextRetry = (item.retryCount || 0) + 1;
+          if (nextRetry >= MAX_QUEUE_RETRIES) {
+            console.warn(
+              '[DualBackendSync] Item melewati batas retry, dikeluarkan dari antrean aktif:',
+              item.type,
+              result.reason
+            );
+            this.recordFailedQueueItem(
+              item,
+              result.reason || `Melewati batas retry (${MAX_QUEUE_RETRIES}x)`
+            );
+            this.queue.shift();
+            this.saveQueue();
+          } else {
+            this.queue[0] = {
+              ...item,
+              retryCount: nextRetry,
+              lastError: result.reason,
+            };
+            this.saveQueue();
+            break;
+          }
         }
+      }
+
+      if (this.queue.length === 0) {
+        this.lastSyncFailed = false;
+        this.lastSyncErrorMessage = null;
       }
     } catch (e) {
       console.warn('Sync error:', e);
@@ -563,6 +656,8 @@ class DualBackendSyncEngine {
       this.isSyncing = false;
       this.notify();
     }
+
+    return syncedCount;
   }
 
   private getSignedHeaders(txUuid: string, timestamp: string): Record<string, string> {
@@ -578,17 +673,32 @@ class DualBackendSyncEngine {
     };
   }
 
-  private async sendPayload(item: SyncQueueItem): Promise<boolean> {
-    let supabaseSuccess = true;
-    let gasSuccess = true;
+  private async sendPayload(
+    item: SyncQueueItem
+  ): Promise<{ outcome: 'SYNCED' | 'DISCARD_FAILED' | 'RETRY_LATER'; reason?: string }> {
+    const hasSupabase = Boolean(this.config.supabaseUrl && this.config.supabaseAnonKey);
+    const hasGas = Boolean(this.config.gasWebhookUrl);
+
+    if (!hasSupabase && !hasGas) {
+      return {
+        outcome: 'DISCARD_FAILED',
+        reason: 'Endpoint Supabase & GAS belum dikonfigurasi untuk antrean item ini.',
+      };
+    }
+
+    let supabaseOutcome: 'SYNCED' | 'DISCARD_FAILED' | 'RETRY_LATER' = 'SYNCED';
+    let gasOutcome: 'SYNCED' | 'DISCARD_FAILED' | 'RETRY_LATER' = 'SYNCED';
+    const reasons: string[] = [];
+
     const sessionSig = typeof localStorage !== 'undefined' ? (localStorage.getItem('jacs_session_sig') || 'JACS-SECURE-SIG') : 'JACS-SECURE-SIG';
     const txUuid = item.payload?.tx_uuid || item.payload?.transaction_id || generateTxUuid();
     const timestamp = new Date().toISOString();
 
     // Supabase Sync (if configured)
-    if (this.config.supabaseUrl && this.config.supabaseAnonKey) {
+    if (hasSupabase) {
       try {
-        const endpoint = `${this.config.supabaseUrl}/rest/v1/${item.type.toLowerCase()}`;
+        const baseUrl = this.config.supabaseUrl.trim().replace(/\/+$/, '');
+        const endpoint = `${baseUrl}/rest/v1/${item.type.toLowerCase()}`;
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -599,27 +709,57 @@ class DualBackendSyncEngine {
           },
           body: JSON.stringify({ ...item.payload, _session_sig: sessionSig, _tx_uuid: txUuid })
         });
-        supabaseSuccess = res.ok;
-      } catch {
-        supabaseSuccess = false;
+        if (res.ok) {
+          supabaseOutcome = 'SYNCED';
+        } else {
+          const errText = await res.text().catch(() => '');
+          if (this.isNonRetriableHttpError(res.status, errText)) {
+            supabaseOutcome = 'DISCARD_FAILED';
+            reasons.push(`Supabase HTTP ${res.status}: ${errText.slice(0, 140) || 'Schema/Conflict'}`);
+          } else {
+            supabaseOutcome = 'RETRY_LATER';
+            reasons.push(`Supabase HTTP ${res.status}`);
+          }
+        }
+      } catch (err: any) {
+        supabaseOutcome = 'RETRY_LATER';
+        reasons.push(`Supabase network error: ${err?.message || 'Fetch failed'}`);
       }
     }
 
     // Google Apps Script Sync (if configured)
-    if (this.config.gasWebhookUrl) {
+    if (hasGas) {
       try {
         const res = await fetch(this.config.gasWebhookUrl, {
           method: 'POST',
           headers: this.getSignedHeaders(txUuid, timestamp),
           body: JSON.stringify({ ...item, session_signature: sessionSig, tx_uuid: txUuid })
         });
-        gasSuccess = res.ok;
-      } catch {
-        gasSuccess = false;
+        if (res.ok) {
+          gasOutcome = 'SYNCED';
+        } else {
+          const errText = await res.text().catch(() => '');
+          if (this.isNonRetriableHttpError(res.status, errText)) {
+            gasOutcome = 'DISCARD_FAILED';
+            reasons.push(`GAS HTTP ${res.status}: ${errText.slice(0, 140) || 'Rejected'}`);
+          } else {
+            gasOutcome = 'RETRY_LATER';
+            reasons.push(`GAS HTTP ${res.status}`);
+          }
+        }
+      } catch (err: any) {
+        gasOutcome = 'RETRY_LATER';
+        reasons.push(`GAS network error: ${err?.message || 'Fetch failed'}`);
       }
     }
 
-    return supabaseSuccess && gasSuccess;
+    if (supabaseOutcome === 'RETRY_LATER' || gasOutcome === 'RETRY_LATER') {
+      return { outcome: 'RETRY_LATER', reason: reasons.join(' | ') };
+    }
+    if (supabaseOutcome === 'DISCARD_FAILED' || gasOutcome === 'DISCARD_FAILED') {
+      return { outcome: 'DISCARD_FAILED', reason: reasons.join(' | ') };
+    }
+    return { outcome: 'SYNCED' };
   }
 
   // =========================================================================

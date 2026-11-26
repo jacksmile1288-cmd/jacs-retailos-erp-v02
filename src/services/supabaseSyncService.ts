@@ -10,6 +10,8 @@ import {
 import { Product, CartItem } from '../types';
 
 const OFFLINE_QUEUE_KEY = 'jacs_supabase_offline_queue_v1';
+const FAILED_OFFLINE_QUEUE_KEY = 'jacs_supabase_failed_queue_v1';
+const MAX_OFFLINE_RETRIES = 3;
 
 export interface QueuedSyncPayload {
   id: string;
@@ -17,6 +19,13 @@ export interface QueuedSyncPayload {
   action: 'UPSERT' | 'INSERT' | 'RPC_TRANSACTION';
   payload: any;
   timestamp: string;
+  retryCount?: number;
+  lastError?: string;
+}
+
+export interface FailedQueuedSyncPayload extends QueuedSyncPayload {
+  failedAt: string;
+  reason: string;
 }
 
 export interface ErpSnapshotPayload {
@@ -30,10 +39,79 @@ export interface ErpSnapshotPayload {
   syncedAt?: string;
 }
 
+const notifyOfflineQueueChanged = () => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('jacs_offline_queue_updated'));
+    }
+  } catch {}
+};
+
+export const isNonRetriableSupabaseError = (error: any, httpStatus?: number): boolean => {
+  const status = Number(httpStatus ?? error?.status ?? 0);
+  if (status === 400 || status === 404 || status === 409 || status === 422) {
+    return true;
+  }
+
+  const code = String(error?.code || '').trim().toUpperCase();
+  if (
+    code === '23505' ||
+    code === '23503' ||
+    code === '23502' ||
+    code === '23514' ||
+    code === '22P02' ||
+    code === '42P01' ||
+    code === '42703' ||
+    code === '42883' ||
+    code === '400' ||
+    code === '404' ||
+    code === '409' ||
+    code === '422' ||
+    code.startsWith('PGRST')
+  ) {
+    return true;
+  }
+
+  const combinedMsg = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  if (
+    combinedMsg.includes('23505') ||
+    combinedMsg.includes('duplicate key') ||
+    combinedMsg.includes('already exists') ||
+    combinedMsg.includes('unique constraint') ||
+    combinedMsg.includes('violates') ||
+    combinedMsg.includes('schema cache') ||
+    combinedMsg.includes('could not find') ||
+    combinedMsg.includes('does not exist') ||
+    combinedMsg.includes('invalid input syntax') ||
+    combinedMsg.includes('bad request') ||
+    combinedMsg.includes('conflict') ||
+    combinedMsg.includes('null value in column')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const recordFailedOfflineItem = (item: QueuedSyncPayload, reason: string) => {
+  try {
+    const raw = localStorage.getItem(FAILED_OFFLINE_QUEUE_KEY);
+    const existing: FailedQueuedSyncPayload[] = raw ? JSON.parse(raw) : [];
+    const failedEntry: FailedQueuedSyncPayload = {
+      ...item,
+      failedAt: new Date().toISOString(),
+      reason,
+    };
+    const next = [failedEntry, ...(Array.isArray(existing) ? existing : [])].slice(0, 50);
+    localStorage.setItem(FAILED_OFFLINE_QUEUE_KEY, JSON.stringify(next));
+  } catch {}
+};
+
 export const getOfflineQueue = (): QueuedSyncPayload[] => {
   try {
     const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -42,9 +120,20 @@ export const getOfflineQueue = (): QueuedSyncPayload[] => {
 export const saveOfflineQueue = (queue: QueuedSyncPayload[]) => {
   try {
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    notifyOfflineQueueChanged();
   } catch (err) {
     console.error('Failed to save offline queue:', err);
   }
+};
+
+export const clearOfflineQueue = (): number => {
+  const count = getOfflineQueue().length;
+  try {
+    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    localStorage.removeItem(FAILED_OFFLINE_QUEUE_KEY);
+  } catch {}
+  notifyOfflineQueueChanged();
+  return count;
 };
 
 export const enqueueOfflineAction = (
@@ -59,6 +148,7 @@ export const enqueueOfflineAction = (
     action,
     payload,
     timestamp: new Date().toISOString(),
+    retryCount: 0,
   };
   queue.push(entry);
   saveOfflineQueue(queue);
@@ -77,25 +167,53 @@ export const syncOfflineQueueToSupabase = async (
 
   for (const item of queue) {
     try {
-      let error = null;
+      let error: any = null;
+      let status: number | undefined;
       if (item.action === 'RPC_TRANSACTION') {
-        const { error: rpcError } = await client.rpc('process_pos_transaction_atomic', item.payload);
-        error = rpcError;
+        const res = await client.rpc('process_pos_transaction_atomic', item.payload);
+        error = res.error;
+        status = res.status;
       } else if (item.action === 'UPSERT') {
         const res = await client.from(item.table).upsert(item.payload);
         error = res.error;
+        status = res.status;
       } else {
         const res = await client.from(item.table).insert(item.payload);
         error = res.error;
+        status = res.status;
       }
 
-      if (error) {
-        remainingQueue.push(item);
-      } else {
+      if (!error) {
         syncedCount++;
+      } else if (isNonRetriableSupabaseError(error, status)) {
+        const reason = `HTTP ${status || error?.status || '-'} (${error?.code || 'SCHEMA/CONFLICT'}): ${error?.message || 'Ditolak oleh Supabase'}`;
+        console.warn('[SupabaseSync] Mengeluarkan item antrean non-retriable agar tidak macet:', item.table, reason);
+        recordFailedOfflineItem(item, reason);
+      } else {
+        const nextRetry = (item.retryCount || 0) + 1;
+        if (nextRetry >= MAX_OFFLINE_RETRIES) {
+          const reason = `Melewati batas retry (${MAX_OFFLINE_RETRIES}x): ${error?.message || 'Error sinkronisasi'}`;
+          console.warn('[SupabaseSync] Item melewati batas retry, dikeluarkan dari antrean aktif:', item.table, reason);
+          recordFailedOfflineItem(item, reason);
+        } else {
+          remainingQueue.push({
+            ...item,
+            retryCount: nextRetry,
+            lastError: error?.message || String(error),
+          });
+        }
       }
-    } catch {
-      remainingQueue.push(item);
+    } catch (err: any) {
+      const nextRetry = (item.retryCount || 0) + 1;
+      if (nextRetry >= MAX_OFFLINE_RETRIES) {
+        recordFailedOfflineItem(item, `Exception setelah ${MAX_OFFLINE_RETRIES}x percobaan: ${err?.message || 'Network error'}`);
+      } else {
+        remainingQueue.push({
+          ...item,
+          retryCount: nextRetry,
+          lastError: err?.message || 'Network error',
+        });
+      }
     }
   }
 
@@ -164,8 +282,12 @@ export const upsertProductToSupabase = async (product: Product): Promise<boolean
   }
 
   try {
-    const { error } = await supabase.from('products').upsert(payload);
+    const { error, status } = await supabase.from('products').upsert(payload);
     if (error) {
+      if (isNonRetriableSupabaseError(error, status)) {
+        console.warn('[SupabaseSync] Upsert product ditolak (non-retriable), tidak dimasukkan antrean retry:', error.message);
+        return false;
+      }
       enqueueOfflineAction('products', 'UPSERT', payload);
       return false;
     }
@@ -277,8 +399,12 @@ export const pushTransactionToSupabase = async (tx: {
   }
 
   try {
-    const { error } = await supabase.from('pos_transactions').upsert(payload);
+    const { error, status } = await supabase.from('pos_transactions').upsert(payload);
     if (error) {
+      if (isNonRetriableSupabaseError(error, status)) {
+        console.warn('[SupabaseSync] Push transaksi ditolak (non-retriable), tidak dimasukkan antrean retry:', error.message);
+        return false;
+      }
       enqueueOfflineAction('pos_transactions', 'INSERT', payload);
       return false;
     }
@@ -320,8 +446,12 @@ export const pushStockMovementToSupabase = async (movement: {
   }
 
   try {
-    const { error } = await supabase.from('stock_movements').insert(payload);
+    const { error, status } = await supabase.from('stock_movements').insert(payload);
     if (error) {
+      if (isNonRetriableSupabaseError(error, status)) {
+        console.warn('[SupabaseSync] Push stock movement ditolak (non-retriable), tidak dimasukkan antrean retry:', error.message);
+        return false;
+      }
       enqueueOfflineAction('stock_movements', 'INSERT', payload);
       return false;
     }

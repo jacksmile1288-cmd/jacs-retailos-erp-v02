@@ -9205,6 +9205,7 @@ export const SuperAdminModule: React.FC = () => {
                       <li>Seluruh transaksi POS, Shift Z-Report & Petty Cash</li>
                       <li>PO, Mutasi Stok, Piutang (AR) & Hutang (AP)</li>
                       <li>Jurnal Buku Besar, Stok menjadi 0 & No. Struk ke 0001</li>
+                      <li>Seluruh antrean sinkronisasi offline lokal (outbox queue)</li>
                     </ul>
                     <div className="font-bold text-emerald-400 pt-1">Dipertahankan:</div>
                     <p className={`text-[10px] ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>

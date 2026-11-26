@@ -168,6 +168,8 @@ import {
   syncSnapshotToSupabase,
   pullLatestSnapshotFromSupabase,
   syncOfflineQueueToSupabase,
+  getOfflineQueue as getSupabaseOfflineQueue,
+  clearOfflineQueue as clearSupabaseOfflineQueue,
 } from '../services/supabaseSyncService';
 import {
   isSupabaseConfigured,
@@ -179,6 +181,8 @@ import {
   testGasConnection,
   syncOfflineQueueToGAS,
   getGasOfflineQueue,
+  clearGasOfflineQueue,
+  getGasWebhookUrl,
   upsertProductToGAS,
   pushTransactionToGAS,
   pushStockMovementToGAS,
@@ -495,7 +499,9 @@ export interface AppContextType {
   setGasWebhookUrl: (url: string) => void;
   testGasConnection: () => Promise<{ ok: boolean; message: string; status: number }>;
   gasOfflineQueueCount: number;
+  supabaseOfflineQueueCount: number;
   syncOfflineQueues: () => Promise<{ supabaseSynced: number; gasSynced: number }>;
+  clearFailedOfflineQueues: () => { clearedCount: number; message: string };
 
   suppliers: SupplierMaster[];
   setSuppliers: React.Dispatch<React.SetStateAction<SupplierMaster[]>>;
@@ -3399,12 +3405,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.removeItem(`${STORAGE_PREFIX}shifts`);
       localStorage.removeItem(`${STORAGE_PREFIX}audit_logs`);
       localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+      localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem('jacs_supabase_failed_queue_v1');
       localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem('jacs_gas_failed_queue_v1');
       localStorage.removeItem(SYSTEM_ERROR_LOGS_KEY);
       localStorage.removeItem('jacs_remote_command_bus');
       localStorage.removeItem('jacs_remote_ack_bus');
       localStorage.removeItem('jacs_remote_telemetry_bus');
     } catch {}
+    dualBackendSync.clearQueue();
+    clearSupabaseOfflineQueue();
+    clearGasOfflineQueue();
+    setGasOfflineQueueCount(0);
+    setSupabaseOfflineQueueCount(0);
 
     const msg = 'Clean Slate Berhasil: Seluruh riwayat transaksi dikosongkan ke Rp 0. Katalog Master Data & Konfigurasi API dipertahankan.';
     showToast(msg, 'success');
@@ -3447,7 +3462,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(`${STORAGE_PREFIX}building_do`, '[]');
       localStorage.setItem(`${STORAGE_PREFIX}building_delivery_orders`, '[]');
       localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+      localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem('jacs_supabase_failed_queue_v1');
+      localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem('jacs_gas_failed_queue_v1');
     } catch {}
+    dualBackendSync.clearQueue();
+    clearSupabaseOfflineQueue();
+    clearGasOfflineQueue();
+    setGasOfflineQueueCount(0);
+    setSupabaseOfflineQueueCount(0);
 
     const auditEntry: AuditLog = {
       id: `AUD-${Date.now()}-LEDGER-RESET`,
@@ -3539,8 +3564,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
           localStorage.removeItem('jacs_pos_station_carts_v1');
           localStorage.removeItem('jacs_dual_backend_queue');
+          localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+          localStorage.removeItem('jacs_supabase_offline_queue_v1');
+          localStorage.removeItem('jacs_supabase_failed_queue_v1');
+          localStorage.removeItem('jacs_gas_offline_queue_v1');
+          localStorage.removeItem('jacs_gas_failed_queue_v1');
           localStorage.setItem(`${STORAGE_PREFIX}doc_seq_counter`, JSON.stringify({ pos: 1, po: 1, pr: 1, grn: 1, jv: 1, do: 1 }));
         } catch {}
+
+        dualBackendSync.clearQueue();
+        clearSupabaseOfflineQueue();
+        clearGasOfflineQueue();
+        setGasOfflineQueueCount(0);
+        setSupabaseOfflineQueueCount(0);
 
         const auditEntry: AuditLog = {
           id: `AUD-${Date.now()}-RESET-L1`,
@@ -3549,12 +3585,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           action: 'SYSTEM_RESET_LEVEL_1',
           module: 'SUPER_ADMIN',
           level: 'WARN',
-          details: `Level 1 Reset dieksekusi pada "${activeBiz}" (${activeSec}): seluruh transaksi POS, shift Z-Report, petty cash, PO, mutasi stok, AR/AP, dan jurnal dihapus; stok ${zeroStockProducts.length} produk di-nol-kan; counter dokumen direset ke 0001. Profil & Katalog Master dipertahankan.`,
+          details: `Level 1 Reset dieksekusi pada "${activeBiz}" (${activeSec}): seluruh transaksi POS, shift Z-Report, petty cash, PO, mutasi stok, AR/AP, jurnal, dan antrean sinkronisasi offline (outbox queue) dihapus; stok ${zeroStockProducts.length} produk di-nol-kan; counter dokumen direset ke 0001. Profil & Katalog Master dipertahankan.`,
         };
         setAuditLogs((prev) => [auditEntry, ...prev].slice(0, 300));
 
         const title = 'Level 1 — Reset Transaksi & Jurnal Selesai';
-        const message = `Seluruh transaksi POS, Z-Report, PO, mutasi stok, AR/AP, dan jurnal dihapus. Stok ${zeroStockProducts.length} item di-nol-kan & counter nomor dokumen direset ke 0001. Profil & Katalog Master tetap utuh.`;
+        const message = `Seluruh transaksi POS, Z-Report, PO, mutasi stok, AR/AP, jurnal, dan antrean offline lokal dihapus. Stok ${zeroStockProducts.length} item di-nol-kan & counter nomor dokumen direset ke 0001. Profil & Katalog Master tetap utuh.`;
         showToast(message, 'success');
         return { success: true, level: 1, title, message, timestamp: nowIso };
       }
@@ -3749,8 +3785,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
         localStorage.removeItem('jacs_pos_station_carts_v1');
         localStorage.removeItem('jacs_dual_backend_queue');
+        localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+        localStorage.removeItem('jacs_supabase_offline_queue_v1');
+        localStorage.removeItem('jacs_supabase_failed_queue_v1');
+        localStorage.removeItem('jacs_gas_offline_queue_v1');
+        localStorage.removeItem('jacs_gas_failed_queue_v1');
         localStorage.setItem(`${STORAGE_PREFIX}doc_seq_counter`, JSON.stringify({ pos: 1, po: 1, pr: 1, grn: 1, jv: 1, do: 1 }));
       } catch {}
+      dualBackendSync.clearQueue();
+      clearSupabaseOfflineQueue();
+      clearGasOfflineQueue();
+      setGasOfflineQueueCount(0);
+      setSupabaseOfflineQueueCount(0);
 
       const auditEntry: AuditLog = {
         id: `AUD-${Date.now()}-RESET-L4-FACTORY`,
@@ -4070,7 +4116,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           localStorage.removeItem(`${STORAGE_PREFIX}journals`);
           localStorage.removeItem(`${STORAGE_PREFIX}supplier_rebates`);
           localStorage.removeItem('jacs_dual_backend_queue');
+          localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+          localStorage.removeItem('jacs_supabase_offline_queue_v1');
+          localStorage.removeItem('jacs_supabase_failed_queue_v1');
+          localStorage.removeItem('jacs_gas_offline_queue_v1');
+          localStorage.removeItem('jacs_gas_failed_queue_v1');
         } catch {}
+        dualBackendSync.clearQueue();
+        clearSupabaseOfflineQueue();
+        clearGasOfflineQueue();
+        setGasOfflineQueueCount(0);
+        setSupabaseOfflineQueueCount(0);
       } else {
         setProducts((prev) => {
           const byKey = new Map<string, Product>();
@@ -4565,17 +4621,108 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const [gasOfflineQueueCount, setGasOfflineQueueCount] = useState(() => getGasOfflineQueue().length);
+  const [supabaseOfflineQueueCount, setSupabaseOfflineQueueCount] = useState(
+    () => getSupabaseOfflineQueue().length
+  );
+
+  useEffect(() => {
+    const refreshQueueCounts = () => {
+      setGasOfflineQueueCount(getGasOfflineQueue().length);
+      setSupabaseOfflineQueueCount(getSupabaseOfflineQueue().length);
+    };
+    window.addEventListener('jacs_offline_queue_updated', refreshQueueCounts);
+    window.addEventListener('storage', refreshQueueCounts);
+    return () => {
+      window.removeEventListener('jacs_offline_queue_updated', refreshQueueCounts);
+      window.removeEventListener('storage', refreshQueueCounts);
+    };
+  }, []);
 
   const syncOfflineQueues = useCallback(async () => {
-    const supabaseSynced = await dualBackendSync.processQueue();
-    const gasSynced = await syncOfflineQueueToGAS();
-    setGasOfflineQueueCount(getGasOfflineQueue().length);
-    const totalSynced = (typeof supabaseSynced === 'number' ? supabaseSynced : 0) + gasSynced;
+    const dualSynced = await dualBackendSync.processQueue();
+    const storedCfg = dualBackendSync.getConfig();
+    const resolvedSb = resolveSupabaseCredentials({
+      supabaseUrl: storedCfg.supabaseUrl,
+      supabaseAnonKey: storedCfg.supabaseAnonKey,
+    });
+    const safeSbUrl =
+      sanitizeAndValidateSupabaseUrl(resolvedSb.supabaseUrl) ||
+      (resolvedSb.supabaseAnonKey ? DEFAULT_FALLBACK_SUPABASE_URL : '');
+
+    let sbQueueSynced = 0;
+    if (safeSbUrl && resolvedSb.supabaseAnonKey) {
+      sbQueueSynced = await syncOfflineQueueToSupabase({
+        supabaseUrl: safeSbUrl,
+        supabaseAnonKey: resolvedSb.supabaseAnonKey,
+      });
+    }
+
+    let gasSynced = 0;
+    if (getGasWebhookUrl()) {
+      gasSynced = await syncOfflineQueueToGAS();
+    } else if (getGasOfflineQueue().length > 0) {
+      // Bersihkan antrean GAS usang jika webhook GAS tidak dikonfigurasi
+      clearGasOfflineQueue();
+    }
+
+    const nextGasCount = getGasOfflineQueue().length;
+    const nextSbCount = getSupabaseOfflineQueue().length;
+    setGasOfflineQueueCount(nextGasCount);
+    setSupabaseOfflineQueueCount(nextSbCount);
+
+    const supabaseSynced = (typeof dualSynced === 'number' ? dualSynced : 0) + sbQueueSynced;
+    const totalSynced = supabaseSynced + gasSynced;
     if (totalSynced > 0) {
       showToast(`Berhasil menyinkronkan ${totalSynced} item antrean offline ke cloud.`, 'success');
+    } else if (
+      dualBackendSync.getQueuedCount() === 0 &&
+      nextGasCount === 0 &&
+      nextSbCount === 0
+    ) {
+      dualBackendSync.markSyncSuccess();
     }
-    return { supabaseSynced: typeof supabaseSynced === 'number' ? supabaseSynced : 0, gasSynced };
+    return { supabaseSynced, gasSynced };
   }, [showToast]);
+
+  const clearFailedOfflineQueues = useCallback(() => {
+    const dualCleared = dualBackendSync.clearQueue();
+    const sbCleared = clearSupabaseOfflineQueue();
+    const gasCleared = clearGasOfflineQueue();
+    try {
+      localStorage.removeItem('jacs_dual_backend_queue');
+      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+      localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem('jacs_supabase_failed_queue_v1');
+      localStorage.removeItem('jacs_gas_offline_queue_v1');
+      localStorage.removeItem('jacs_gas_failed_queue_v1');
+    } catch {}
+    setGasOfflineQueueCount(0);
+    setSupabaseOfflineQueueCount(0);
+    if (typeof navigator === 'undefined' || navigator.onLine) {
+      dualBackendSync.markSyncSuccess();
+    }
+    const clearedCount = dualCleared + sbCleared + gasCleared;
+    const message =
+      clearedCount > 0
+        ? `Antrean sinkronisasi macet (${clearedCount} item) berhasil dibersihkan. Indikator kembali ONLINE — SYNCED.`
+        : 'Seluruh antrean sinkronisasi lokal telah dibersihkan (0 item tertunda).';
+    showToast(message, 'success');
+    setAuditLogs((prev) =>
+      [
+        {
+          id: `AUD-${Date.now()}-CLR-QUEUE`,
+          timestamp: new Date().toISOString(),
+          user: currentUser?.name || 'Operator',
+          action: 'CLEAR_FAILED_OFFLINE_QUEUE',
+          module: 'INTEGRATION',
+          level: 'WARN' as const,
+          details: message,
+        },
+        ...prev,
+      ].slice(0, 300)
+    );
+    return { clearedCount, message };
+  }, [currentUser?.name, showToast]);
 
   const testGasConnectionHandler = useCallback(async () => {
     return await testGasConnection();
@@ -10616,8 +10763,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
           if (hasGasConfig) {
             await syncOfflineQueueToGAS();
-            setGasOfflineQueueCount(getGasOfflineQueue().length);
+          } else if (getGasOfflineQueue().length > 0) {
+            // Snapshot sudah sukses masuk Supabase; bersihkan antrean GAS usang jika GAS tidak aktif
+            clearGasOfflineQueue();
           }
+          setGasOfflineQueueCount(getGasOfflineQueue().length);
+          setSupabaseOfflineQueueCount(getSupabaseOfflineQueue().length);
+          dualBackendSync.markSyncSuccess(nowIso);
           showToast(result.message, 'success');
           appendAudit('CLOUD_SYNC_SUCCESS', 'INTEGRATION', result.message, {
             division: currentUser?.division || 'IT & Systems',
@@ -11743,7 +11895,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setGasWebhookUrl,
     testGasConnection: testGasConnectionHandler,
     gasOfflineQueueCount,
+    supabaseOfflineQueueCount,
     syncOfflineQueues,
+    clearFailedOfflineQueues,
 
     suppliers: domainSuppliers,
     setSuppliers,

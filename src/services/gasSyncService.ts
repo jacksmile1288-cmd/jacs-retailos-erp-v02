@@ -1,6 +1,8 @@
 import { Product, CartItem } from '../types';
 
 const OFFLINE_QUEUE_KEY = 'jacs_gas_offline_queue_v1';
+const FAILED_GAS_QUEUE_KEY = 'jacs_gas_failed_queue_v1';
+const MAX_GAS_RETRIES = 3;
 
 export interface QueuedGasSyncPayload {
   id: string;
@@ -9,7 +11,35 @@ export interface QueuedGasSyncPayload {
   payload: any;
   timestamp: string;
   idempotencyKey?: string;
+  retryCount?: number;
+  lastError?: string;
 }
+
+const notifyGasQueueChanged = () => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('jacs_offline_queue_updated'));
+    }
+  } catch {}
+};
+
+const isNonRetriableGasFailure = (status: number, bodyText = ''): boolean => {
+  if (status === 400 || status === 404 || status === 409 || status === 422) return true;
+  if (/23505|duplicate|already exists|invalid|schema|conflict|bad request/i.test(bodyText)) return true;
+  return false;
+};
+
+const recordFailedGasItem = (item: QueuedGasSyncPayload, reason: string) => {
+  try {
+    const raw = localStorage.getItem(FAILED_GAS_QUEUE_KEY);
+    const existing = raw ? JSON.parse(raw) : [];
+    const next = [
+      { ...item, failedAt: new Date().toISOString(), reason },
+      ...(Array.isArray(existing) ? existing : []),
+    ].slice(0, 50);
+    localStorage.setItem(FAILED_GAS_QUEUE_KEY, JSON.stringify(next));
+  } catch {}
+};
 
 export const getGasWebhookUrl = (): string => {
   if (typeof window === 'undefined') return '';
@@ -44,7 +74,8 @@ export const isGasConfigured = (): boolean => {
 export const getGasOfflineQueue = (): QueuedGasSyncPayload[] => {
   try {
     const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -53,9 +84,20 @@ export const getGasOfflineQueue = (): QueuedGasSyncPayload[] => {
 export const saveGasOfflineQueue = (queue: QueuedGasSyncPayload[]) => {
   try {
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    notifyGasQueueChanged();
   } catch (err) {
     console.error('Failed to save GAS offline queue:', err);
   }
+};
+
+export const clearGasOfflineQueue = (): number => {
+  const count = getGasOfflineQueue().length;
+  try {
+    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    localStorage.removeItem(FAILED_GAS_QUEUE_KEY);
+  } catch {}
+  notifyGasQueueChanged();
+  return count;
 };
 
 export const enqueueGasOfflineAction = (
@@ -64,6 +106,9 @@ export const enqueueGasOfflineAction = (
   payload: any,
   idempotencyKey?: string
 ) => {
+  // Jangan menumpuk antrean GAS jika webhook GAS belum dikonfigurasi
+  if (!getGasWebhookUrl()) return;
+
   const queue = getGasOfflineQueue();
   const key = idempotencyKey || payload?.receiptNumber || payload?.tx_uuid || payload?.id;
 
@@ -79,6 +124,7 @@ export const enqueueGasOfflineAction = (
     payload,
     timestamp: new Date().toISOString(),
     idempotencyKey: key,
+    retryCount: 0,
   };
   queue.push(entry);
   saveGasOfflineQueue(queue);
@@ -110,26 +156,49 @@ export const syncOfflineQueueToGAS = async (): Promise<number> => {
         }),
       });
 
+      const responseText = await res.text().catch(() => '');
       let success = res.ok;
-      if (res.ok) {
+      let errMsg = responseText;
+
+      if (res.ok && responseText) {
         try {
-          const text = await res.text();
-          if (text) {
-            const json = JSON.parse(text);
-            if (json.status === 'error' || json.success === false) {
-              success = false;
-            }
+          const json = JSON.parse(responseText);
+          if (json.status === 'error' || json.success === false) {
+            success = false;
+            errMsg = json.message || json.error || responseText;
           }
         } catch {}
       }
 
-      if (!success) {
-        remainingQueue.push(item);
-      } else {
+      if (success) {
         syncedCount++;
+      } else if (isNonRetriableGasFailure(res.status, errMsg)) {
+        const reason = `GAS HTTP ${res.status}: ${String(errMsg).slice(0, 140) || 'Validation/Duplicate'}`;
+        console.warn('[GASSync] Item non-retriable dikeluarkan dari antrean aktif:', item.table, reason);
+        recordFailedGasItem(item, reason);
+      } else {
+        const nextRetry = (item.retryCount || 0) + 1;
+        if (nextRetry >= MAX_GAS_RETRIES) {
+          recordFailedGasItem(item, `Melewati batas retry (${MAX_GAS_RETRIES}x): HTTP ${res.status}`);
+        } else {
+          remainingQueue.push({
+            ...item,
+            retryCount: nextRetry,
+            lastError: `HTTP ${res.status}`,
+          });
+        }
       }
-    } catch {
-      remainingQueue.push(item);
+    } catch (err: any) {
+      const nextRetry = (item.retryCount || 0) + 1;
+      if (nextRetry >= MAX_GAS_RETRIES) {
+        recordFailedGasItem(item, `Network exception setelah ${MAX_GAS_RETRIES}x percobaan`);
+      } else {
+        remainingQueue.push({
+          ...item,
+          retryCount: nextRetry,
+          lastError: err?.message || 'Network error',
+        });
+      }
     }
   }
 
@@ -208,7 +277,11 @@ export const upsertProductToGAS = async (product: Product): Promise<boolean> => 
 
   const idempotencyKey = `PROD-${product.id}`;
 
-  if (!url || !navigator.onLine) {
+  if (!url) {
+    return false;
+  }
+
+  if (!navigator.onLine) {
     enqueueGasOfflineAction('products', 'UPSERT', payload, idempotencyKey);
     return false;
   }
@@ -226,7 +299,9 @@ export const upsertProductToGAS = async (product: Product): Promise<boolean> => 
       }),
     });
     if (!res.ok) {
-      enqueueGasOfflineAction('products', 'UPSERT', payload, idempotencyKey);
+      if (!isNonRetriableGasFailure(res.status)) {
+        enqueueGasOfflineAction('products', 'UPSERT', payload, idempotencyKey);
+      }
       return false;
     }
     return true;
@@ -281,7 +356,11 @@ export const pushTransactionToGAS = async (tx: {
     tx_uuid: tx.tx_uuid || idempotencyKey,
   };
 
-  if (!url || !navigator.onLine) {
+  if (!url) {
+    return false;
+  }
+
+  if (!navigator.onLine) {
     enqueueGasOfflineAction('pos_transactions', 'INSERT', payload, idempotencyKey);
     return false;
   }
@@ -299,7 +378,9 @@ export const pushTransactionToGAS = async (tx: {
       }),
     });
     if (!res.ok) {
-      enqueueGasOfflineAction('pos_transactions', 'INSERT', payload, idempotencyKey);
+      if (!isNonRetriableGasFailure(res.status)) {
+        enqueueGasOfflineAction('pos_transactions', 'INSERT', payload, idempotencyKey);
+      }
       return false;
     }
     return true;
@@ -337,7 +418,11 @@ export const pushStockMovementToGAS = async (movement: {
     created_at: new Date().toISOString(),
   };
 
-  if (!url || !navigator.onLine) {
+  if (!url) {
+    return false;
+  }
+
+  if (!navigator.onLine) {
     enqueueGasOfflineAction('stock_movements', 'INSERT', payload, idempotencyKey);
     return false;
   }
@@ -355,7 +440,9 @@ export const pushStockMovementToGAS = async (movement: {
       }),
     });
     if (!res.ok) {
-      enqueueGasOfflineAction('stock_movements', 'INSERT', payload, idempotencyKey);
+      if (!isNonRetriableGasFailure(res.status)) {
+        enqueueGasOfflineAction('stock_movements', 'INSERT', payload, idempotencyKey);
+      }
       return false;
     }
     return true;
