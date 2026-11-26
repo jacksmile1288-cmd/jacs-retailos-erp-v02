@@ -1,4 +1,5 @@
 import { Product, CartItem } from '../types';
+import { isDemoSandboxMode } from '../utils/demoSandbox';
 
 const OFFLINE_QUEUE_KEY = 'jacs_gas_offline_queue_v1';
 const FAILED_GAS_QUEUE_KEY = 'jacs_gas_failed_queue_v1';
@@ -68,10 +69,12 @@ export const getGasWebhookUrl = (): string => {
 };
 
 export const isGasConfigured = (): boolean => {
+  if (isDemoSandboxMode()) return false;
   return Boolean(getGasWebhookUrl());
 };
 
 export const getGasOfflineQueue = (): QueuedGasSyncPayload[] => {
+  if (isDemoSandboxMode()) return [];
   try {
     const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -82,6 +85,7 @@ export const getGasOfflineQueue = (): QueuedGasSyncPayload[] => {
 };
 
 export const saveGasOfflineQueue = (queue: QueuedGasSyncPayload[]) => {
+  if (isDemoSandboxMode()) return;
   try {
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
     notifyGasQueueChanged();
@@ -91,6 +95,7 @@ export const saveGasOfflineQueue = (queue: QueuedGasSyncPayload[]) => {
 };
 
 export const clearGasOfflineQueue = (): number => {
+  if (isDemoSandboxMode()) return 0;
   const count = getGasOfflineQueue().length;
   try {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
@@ -106,6 +111,7 @@ export const enqueueGasOfflineAction = (
   payload: any,
   idempotencyKey?: string
 ) => {
+  if (isDemoSandboxMode()) return;
   // Jangan menumpuk antrean GAS jika webhook GAS belum dikonfigurasi
   if (!getGasWebhookUrl()) return;
 
@@ -131,6 +137,7 @@ export const enqueueGasOfflineAction = (
 };
 
 export const syncOfflineQueueToGAS = async (): Promise<number> => {
+  if (isDemoSandboxMode()) return 0;
   const url = getGasWebhookUrl();
   if (!url || !navigator.onLine) return 0;
   const queue = getGasOfflineQueue();
@@ -215,6 +222,7 @@ if (typeof window !== 'undefined') {
 
 // 1. PULL PRODUCTS FROM GAS
 export const pullProductsFromGAS = async (): Promise<Product[]> => {
+  if (isDemoSandboxMode()) return [];
   const url = getGasWebhookUrl();
   if (!url) return [];
   try {
@@ -254,6 +262,7 @@ export const pullProductsFromGAS = async (): Promise<Product[]> => {
 
 // 2. UPSERT PRODUCT TO GAS (IDEMPOTENT)
 export const upsertProductToGAS = async (product: Product): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const url = getGasWebhookUrl();
   const payload = {
     id: product.id,
@@ -327,6 +336,7 @@ export const pushTransactionToGAS = async (tx: {
   changeDue?: number;
   tx_uuid?: string;
 }): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const url = getGasWebhookUrl();
   const idempotencyKey = tx.receiptNumber || tx.tx_uuid || `TX-${Date.now()}`;
 
@@ -402,6 +412,7 @@ export const pushStockMovementToGAS = async (movement: {
   notes?: string;
   createdBy?: string;
 }): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const url = getGasWebhookUrl();
   const idempotencyKey = movement.id || `MOV-${Date.now()}`;
 

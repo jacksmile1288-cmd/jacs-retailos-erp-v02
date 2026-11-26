@@ -1,4 +1,6 @@
 export type StorageOperationalMode = 'LOCAL_ONLY' | 'ONLINE_CLOUD' | 'HYBRID_MIGRATION';
+import { isDemoSandboxMode } from '../utils/demoSandbox';
+
 export const STORAGE_MODE_KEY = 'jacs_storage_mode';
 
 export interface SyncStatusSnapshot {
@@ -524,6 +526,19 @@ class DualBackendSyncEngine {
   }
 
   public getSnapshot(): SyncStatusSnapshot {
+    if (isDemoSandboxMode()) {
+      return {
+        isOnline: this.isOnline,
+        isSyncing: false,
+        queuedCount: 0,
+        lastSyncTime: null,
+        supabaseStatus: 'CONFIG_REQUIRED',
+        gasStatus: 'CONFIG_REQUIRED',
+        lastSyncFailed: false,
+        lastSyncErrorMessage: null,
+        storageMode: 'LOCAL_ONLY',
+      };
+    }
     const hasSupabase = Boolean(this.config.supabaseUrl && this.config.supabaseAnonKey);
     const activeMode = this.getStorageMode();
     return {
@@ -567,6 +582,7 @@ class DualBackendSyncEngine {
   }
 
   public enqueue(type: string, action: 'UPSERT' | 'DELETE' | 'INSERT', payload: any) {
+    if (isDemoSandboxMode()) return;
     const mode = this.getStorageMode();
     if (mode === 'LOCAL_ONLY') {
       // Mode 1: Lokal Saja (100% Offline — Tanpa Cloud) -> Tidak membuat panggilan otomatis ke Cloud
@@ -593,6 +609,7 @@ class DualBackendSyncEngine {
   }
 
   public async processQueue(): Promise<number> {
+    if (isDemoSandboxMode()) return 0;
     if (this.getStorageMode() === 'LOCAL_ONLY') return 0;
     if (this.isSyncing || this.queue.length === 0 || !this.isOnline) return 0;
 

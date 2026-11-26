@@ -2,10 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { dualBackendSync, SyncStatusSnapshot } from '../services/dualBackendSync';
 import { useApp } from '../context/AppContext';
 import { CloudSyncResult, testCloudConnections } from '../services/cloudSyncService';
-import { Cloud, CheckCircle2, AlertTriangle, RefreshCw, X, Download, Server } from 'lucide-react';
+import { Cloud, CheckCircle2, AlertTriangle, RefreshCw, X, Download, Server, FlaskConical, ShieldCheck } from 'lucide-react';
 
 export const DualBackendStatusWidget: React.FC = () => {
-  const { products, transactions, executeCloudSync, language, theme } = useApp();
+  const {
+    products,
+    transactions,
+    executeCloudSync,
+    language,
+    theme,
+    isDemoSandbox,
+    resetDemoSandboxSession,
+  } = useApp();
   const isEn = language === 'en';
   const isLight = theme === 'light';
   const [status, setStatus] = useState<SyncStatusSnapshot>(() => dualBackendSync.getSnapshot());
@@ -107,7 +115,15 @@ export const DualBackendStatusWidget: React.FC = () => {
     ? 'Cloud Online — Synced. Click to configure Supabase & GAS.'
     : 'Cloud Online — Tersinkronisasi. Klik untuk pengaturan Supabase & GAS.';
 
-  if (isLocalOnlyMode) {
+  if (isDemoSandbox) {
+    containerTone = isLight
+      ? 'bg-indigo-50 border-indigo-200 text-indigo-800'
+      : 'bg-indigo-500/15 border-indigo-400/40 text-indigo-300';
+    dotColor = 'bg-indigo-500 animate-pulse';
+    statusLabel = 'DEMO SANDBOX';
+    fullStatusTitle =
+      'Mode Demo Sandbox (?demo=1) — Data simulasi terisolasi di browser, tidak menulis ke database cloud Supabase produksi.';
+  } else if (isLocalOnlyMode) {
     containerTone = isLight
       ? 'bg-amber-50 border-amber-200 text-amber-800'
       : 'bg-amber-500/10 border-amber-500/35 text-amber-300';
@@ -165,10 +181,12 @@ export const DualBackendStatusWidget: React.FC = () => {
           className="h-[28px] px-2 sm:px-2.5 rounded-full flex items-center gap-1.5 text-[10.5px] font-mono font-bold tracking-wide whitespace-nowrap transition-opacity hover:opacity-85 cursor-pointer"
         >
           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-          <span className="hidden sm:inline tabular-nums">{statusLabel}</span>
+          <span className={`${isDemoSandbox ? 'inline' : 'hidden sm:inline'} tabular-nums`}>
+            {statusLabel}
+          </span>
         </button>
 
-        {!isLocalOnlyMode && (
+        {!isLocalOnlyMode && !isDemoSandbox && (
           <button
             type="button"
             onClick={handleSyncNow}
@@ -196,8 +214,70 @@ export const DualBackendStatusWidget: React.FC = () => {
         )}
       </div>
 
-      {/* Modal Konfigurasi Dual-Backend & Backup */}
-      {isModalOpen && (
+      {/* Modal Konfigurasi Dual-Backend & Backup (atau Info Isolasi Demo Sandbox) */}
+      {isModalOpen && isDemoSandbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl w-full max-w-md p-5 text-slate-100 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 flex items-center justify-center shrink-0">
+                  <FlaskConical className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-black text-indigo-300 uppercase tracking-wider">
+                    DEMO SANDBOX TERISOLASI
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Parameter URL <code className="text-indigo-300 font-mono">?demo=1</code> Aktif
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-indigo-950/50 border border-indigo-500/30 space-y-2 text-xs text-slate-200 leading-relaxed">
+              <div className="flex items-center gap-2 text-emerald-300 font-bold">
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>Database Cloud Produksi 100% Aman</span>
+              </div>
+              <p className="text-slate-300 text-[11.5px]">
+                Seluruh transaksi, stok, kasir POS, dan jurnal selama sesi demo ini disimpan terisolasi pada{' '}
+                <code className="font-mono text-indigo-300">sessionStorage / jacs_demo_sandbox_*</code> dan{' '}
+                <strong className="text-white">tidak pernah menulis atau menimpa</strong> database cloud Supabase maupun Google Apps Script produksi.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  resetDemoSandboxSession();
+                  setIsModalOpen(false);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reset Simulasi Demo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isModalOpen && !isDemoSandbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-5 text-slate-100 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">

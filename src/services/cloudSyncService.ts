@@ -5,6 +5,7 @@ import {
   DEFAULT_FALLBACK_SUPABASE_URL,
 } from '../lib/supabaseClient';
 import { pullLatestSnapshotFromSupabase } from './supabaseSyncService';
+import { isDemoSandboxMode } from '../utils/demoSandbox';
 
 export interface CloudSyncSnapshot {
   products: any[];
@@ -84,9 +85,37 @@ export async function pushSyncData(
   payload: CloudSyncSnapshot,
   customConfig?: DualBackendConfig
 ): Promise<CloudSyncResult> {
+  const timestamp = payload.timestamp || new Date().toISOString();
+  if (isDemoSandboxMode()) {
+    return {
+      success: true,
+      message: 'DEMO SANDBOX aktif — data simulasi terisolasi di sesi browser dan tidak menulis ke Supabase produksi.',
+      timestamp,
+      endpoints: {
+        supabase: {
+          endpoint: 'SUPABASE',
+          configured: false,
+          success: false,
+          message: 'Dinonaktifkan otomatis (Mode DEMO SANDBOX)',
+        },
+        gas: {
+          endpoint: 'GAS',
+          configured: false,
+          success: false,
+          message: 'Dinonaktifkan otomatis (Mode DEMO SANDBOX)',
+        },
+      },
+      syncedCounts: {
+        products: Array.isArray(payload.products) ? payload.products.length : 0,
+        transactions: Array.isArray(payload.transactions) ? payload.transactions.length : 0,
+        financeEntries: Array.isArray(payload.financeEntries) ? payload.financeEntries.length : 0,
+        journalEntries: Array.isArray(payload.journalEntries) ? payload.journalEntries.length : 0,
+      },
+      errors: [],
+    };
+  }
   const config = customConfig || dualBackendSync.getConfig();
   const txUuid = payload.txUuid || generateTxUuid();
-  const timestamp = payload.timestamp || new Date().toISOString();
 
   const counts = {
     products: Array.isArray(payload.products) ? payload.products.length : 0,
@@ -437,6 +466,14 @@ const extractCloudSnapshotPayload = (
  * Tarik data snapshot terbaru dari cloud (Supabase jacs_erp_snapshots atau Google Apps Script Webhook).
  */
 export async function pullSyncData(customConfig?: DualBackendConfig): Promise<CloudPullResult> {
+  if (isDemoSandboxMode()) {
+    return {
+      success: false,
+      message: 'Mode DEMO SANDBOX aktif — penarikan data cloud produksi dinonaktifkan.',
+      timestamp: new Date().toISOString(),
+      error: 'DEMO_SANDBOX',
+    };
+  }
   const storedConfig = dualBackendSync.getConfig();
   const effectiveSupabaseUrl =
     sanitizeAndValidateSupabaseUrl(customConfig?.supabaseUrl) ||

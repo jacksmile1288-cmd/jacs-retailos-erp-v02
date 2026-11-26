@@ -28,9 +28,11 @@ import {
   EyeOff,
   KeyRound,
   Sparkles,
+  FlaskConical,
 } from 'lucide-react';
 import { AuditProvider } from './AuditProvider';
 import { AppProvider, useApp } from './context/AppContext';
+import { isDemoSandboxMode } from './utils/demoSandbox';
 import { DualBackendStatusWidget } from './components/DualBackendStatusWidget';
 import { PublicGateway } from './components/auth/PublicGateway';
 import { MasterDataModule } from './components/master/MasterDataModule';
@@ -197,6 +199,9 @@ const MainLayout: React.FC = () => {
     idleAutoLockMinutes,
     unlockIdleScreen,
     openAiAssistant,
+    isDemoSandbox,
+    resetDemoSandboxSession,
+    exitDemoSandboxSession,
   } = useApp();
 
   const [moduleResetCounter, setModuleResetCounter] = useState(0);
@@ -424,6 +429,30 @@ const MainLayout: React.FC = () => {
       <ToastOverlay />
       {isAiFeatureAuthorized && <JacsAiAssistantDrawer />}
 
+      {/* Bar Tipis Indikator Mode Demo Interaktif (?demo=1) */}
+      {isDemoSandbox && (
+        <div
+          id="demo-sandbox-top-banner"
+          className="shrink-0 z-50 w-full px-3 sm:px-4 lg:px-5 py-1.5 bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 text-white border-b border-indigo-400/40 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold shadow-sm"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <FlaskConical className="w-3.5 h-3.5 shrink-0 text-cyan-200" />
+            <span className="truncate tracking-wide font-bold">
+              MODE DEMO INTERAKTIF (Data Simulasi Terisolasi)
+            </span>
+          </div>
+          <button
+            type="button"
+            id="btn-reset-demo-sandbox"
+            onClick={() => resetDemoSandboxSession()}
+            className="px-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/30 text-white text-[10.5px] font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 active:scale-95"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Reset Simulasi Demo</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Header 3-Zona: Identitas (Kiri) · Navigasi & Status Inti (Tengah) · Utilitas & Profil (Kanan) */}
       <header
         id="app-topbar"
@@ -493,6 +522,22 @@ const MainLayout: React.FC = () => {
 
         {/* ZONA TENGAH: Navigasi & Status Inti (Dropdown Kasir · Pill Kasir POS & SuperAdmin · Cloud Sync) */}
         <div className="flex items-center justify-center gap-1.5 sm:gap-2 shrink-0">
+          {isDemoSandbox && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/40 animate-pulse">
+                DEMO SANDBOX
+              </span>
+              <button
+                type="button"
+                onClick={exitDemoSandboxSession}
+                className="h-[32px] px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-300 border border-rose-500/45 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition shadow-sm"
+                title="Keluar dari sesi demo dan bersihkan sandbox"
+              >
+                Keluar Demo
+              </button>
+            </div>
+          )}
+
           {/* 1. Dropdown Ringkas Status Kasir (1/2 Online) — Executive & SuperAdmin */}
           {(currentModule === 'executive' || isSuperAdminSession) && (
             <div className="relative shrink-0" ref={cashierStatusMenuRef}>

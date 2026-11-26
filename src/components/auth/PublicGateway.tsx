@@ -21,9 +21,18 @@ import {
   ChevronDown,
   MonitorPlay,
   Download,
+  FlaskConical,
+  RefreshCw,
+  KeyRound,
 } from 'lucide-react';
 import { User } from '../../types';
 import { signSessionPayload } from '../../utils/securityUtils';
+import {
+  DEMO_DIVISION_QUICK_PINS,
+  DEMO_SANDBOX_ACTIVE_USER_KEY,
+  DEMO_SANDBOX_SESSION_SIG_KEY,
+  DemoDivisionQuickPin,
+} from '../../utils/demoSandbox';
 
 interface PublicGatewayProps {
   onLoginSuccess: (user: any) => void;
@@ -109,7 +118,31 @@ export const PublicGateway: React.FC<PublicGatewayProps> = ({ onLoginSuccess }) 
     businessProfile,
     pwaInstallPrompt,
     triggerPwaInstall,
+    isDemoSandbox,
+    resetDemoSandboxSession,
+    launchInteractiveDemoSession,
   } = useApp();
+
+  const [showDemoModal, setShowDemoModal] = useState(false);
+  const [selectedDemoBusinessType, setSelectedDemoBusinessType] = useState('RETAIL');
+
+  const DEMO_BUSINESS_TYPES = [
+    { id: 'RETAIL', label: 'RETAIL — Retail & Minimarket' },
+    { id: 'FNB', label: 'FNB — F&B / Restoran & Kafe (Meja & BOM)' },
+    { id: 'PHARMACY', label: 'PHARMACY — Apotek & Klinik (Batch & Kedaluwarsa)' },
+    { id: 'WORKSHOP', label: 'WORKSHOP — Bengkel & Otomotif (Jasa & Sparepart)' },
+    { id: 'SALON', label: 'SALON — Salon & Barbershop (Stylist & Paket)' },
+    { id: 'FASHION', label: 'FASHION — Fashion & Butik (Ukuran & Warna)' },
+    { id: 'CONSTRUCTION', label: 'CONSTRUCTION — Toko Bangunan & Material' },
+    { id: 'ELECTRONICS', label: 'ELECTRONICS — Elektronik & Gadget (IMEI & Garansi)' },
+    { id: 'LAUNDRY', label: 'LAUNDRY — Laundry & Jasa (Kiloan & Status)' },
+    { id: 'WHOLESALE', label: 'WHOLESALE — Grosir & Distributor (B2B & Kredit)' },
+  ];
+
+  const handleLaunchDemoDivision = (divId: string) => {
+    launchInteractiveDemoSession(selectedDemoBusinessType, divId as any);
+    setShowDemoModal(false);
+  };
 
   // State Interactive 3D Brand Cover (triggered by 30s idle timer)
   const [isCoverVisible, setIsCoverVisible] = useState<boolean>(false);
@@ -370,10 +403,13 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
       setActiveNav(targetNavModule);
 
       try {
-        localStorage.setItem('jacs_active_user', signedToken);
+        const authStore = isDemoSandbox ? sessionStorage : localStorage;
+        const userKey = isDemoSandbox ? DEMO_SANDBOX_ACTIVE_USER_KEY : 'jacs_active_user';
+        const sigKey = isDemoSandbox ? DEMO_SANDBOX_SESSION_SIG_KEY : 'jacs_session_sig';
+        authStore.setItem(userKey, signedToken);
         const parsed = JSON.parse(atob(signedToken));
         if (parsed?.sig) {
-          localStorage.setItem('jacs_session_sig', parsed.sig);
+          authStore.setItem(sigKey, parsed.sig);
         }
       } catch {}
 
@@ -422,10 +458,13 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         setCurrentUser(superAdminUser);
         setActiveUser(superAdminUser);
         try {
-          localStorage.setItem('jacs_active_user', signedToken);
+          const authStore = isDemoSandbox ? sessionStorage : localStorage;
+          const userKey = isDemoSandbox ? DEMO_SANDBOX_ACTIVE_USER_KEY : 'jacs_active_user';
+          const sigKey = isDemoSandbox ? DEMO_SANDBOX_SESSION_SIG_KEY : 'jacs_session_sig';
+          authStore.setItem(userKey, signedToken);
           const parsed = JSON.parse(atob(signedToken));
           if (parsed?.sig) {
-            localStorage.setItem('jacs_session_sig', parsed.sig);
+            authStore.setItem(sigKey, parsed.sig);
           }
         } catch {}
         addAuditLog('SUPERADMIN_GATEWAY_LOGIN', 'Akses SuperAdmin diverifikasi via SHA-256.', 'SECURITY');
@@ -439,6 +478,16 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
       showToast('Kode otoritas ditolak', 'error');
       setSuperAdminCode('');
     }
+  };
+
+  const handleDemoQuickPinClick = (item: DemoDivisionQuickPin) => {
+    setSelectedModuleId(item.id);
+    setUsername(item.username);
+    setPin(item.pin);
+    setErrorMsg(null);
+    setTimeout(() => {
+      pinInputRef.current?.focus();
+    }, 30);
   };
 
   const shakeTransformClass =
@@ -727,6 +776,29 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         />
       </div>
 
+      {/* Bar Indikator Mode Demo Interaktif (?demo=1) */}
+      {isDemoSandbox && (
+        <div
+          id="demo-sandbox-top-banner-login"
+          className="relative z-20 shrink-0 w-full px-3 sm:px-5 py-1.5 bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 text-white border-b border-indigo-400/40 flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold shadow-sm"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <FlaskConical className="w-3.5 h-3.5 shrink-0 text-cyan-200" />
+            <span className="truncate tracking-wide font-bold">
+              MODE DEMO INTERAKTIF (Data Simulasi Terisolasi)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => resetDemoSandboxSession()}
+            className="px-2.5 py-0.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/30 text-white text-[10.5px] font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 active:scale-95"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Reset Simulasi Demo</span>
+          </button>
+        </div>
+      )}
+
       {/* 1. Header Atas */}
       <header
         className={`relative z-10 h-14 px-6 flex items-center justify-between shrink-0 ${
@@ -796,8 +868,12 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         </div>
       </header>
 
-      {/* 2. Konten Utama: Zero-Scroll Viewport */}
-      <main className="relative z-10 max-w-4xl mx-auto w-full px-4 flex-1 flex flex-col justify-center gap-4 overflow-hidden">
+      {/* 2. Konten Utama */}
+      <main
+        className={`relative z-10 max-w-4xl mx-auto w-full px-4 flex-1 flex flex-col justify-center gap-3.5 ${
+          isDemoSandbox ? 'overflow-y-auto py-3' : 'overflow-hidden'
+        }`}
+      >
         <div className="text-center">
           <h1 className="text-slate-900 dark:text-white font-['Plus_Jakarta_Sans'] font-extrabold uppercase tracking-wide text-base sm:text-lg">
             Selamat datang di RetailOS ERP
@@ -897,6 +973,68 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
             );
           })}
         </div>
+
+        {/* Kartu Info PIN Cepat Demo (Hanya tampil saat ?demo=1 aktif) */}
+        {isDemoSandbox && (
+          <div
+            id="demo-quick-pins-card"
+            className={`mx-auto w-full max-w-3xl rounded-xl border px-3 py-2.5 backdrop-blur-md transition-colors ${
+              theme === 'light'
+                ? 'bg-indigo-50/90 border-indigo-200/90 text-indigo-950'
+                : 'bg-indigo-950/55 border-indigo-500/35 text-indigo-100'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold">
+                <KeyRound className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-300 shrink-0" />
+                <span>PIN Cepat Divisi Demo</span>
+                <span className="text-[10px] font-normal opacity-75">
+                  — Klik divisi untuk mengisi otomatis Username &amp; PIN
+                </span>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-400/30">
+                DEMO SANDBOX
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {DEMO_DIVISION_QUICK_PINS.map((item) => {
+                const isActiveChip = selectedModuleId === item.id && pin === item.pin;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleDemoQuickPinClick(item)}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                      isActiveChip
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : theme === 'light'
+                        ? 'bg-white/95 hover:bg-indigo-100/80 text-slate-800 border-indigo-200/80'
+                        : 'bg-slate-900/80 hover:bg-indigo-500/20 text-slate-200 border-indigo-500/30'
+                    }`}
+                    title={`Klik untuk isi otomatis ${item.label} (PIN: ${item.pin})`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: item.accentHex }}
+                    />
+                    <span>{item.label}</span>
+                    <span
+                      className={`font-mono text-[10px] px-1.5 py-0.2 rounded ${
+                        isActiveChip
+                          ? 'bg-white/20 text-white'
+                          : theme === 'light'
+                          ? 'bg-slate-100 text-indigo-700'
+                          : 'bg-slate-800 text-cyan-300'
+                      }`}
+                    >
+                      {item.pin}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Floating Pill Inputs & Actions */}
         <div
@@ -1040,6 +1178,15 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>SuperAdmin Access</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setShowDemoModal(true)}
+            className="mx-auto mt-2 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 hover:text-indigo-500 bg-indigo-50/80 dark:bg-indigo-500/15 backdrop-blur-md border border-indigo-300/80 dark:border-indigo-500/40 hover:border-indigo-400 hover:bg-indigo-500/25 rounded-full py-1.5 px-5 transition-all duration-300 active:scale-95 cursor-pointer text-center font-['JetBrains_Mono'] flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+            <span>Coba Simulasi Demo (Pilih Tipe Bisnis — Tanpa PIN)</span>
+          </button>
         </div>
 
         {/* Super Admin Auth Modal */}
@@ -1104,6 +1251,80 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
                     <span>Verifikasi</span>
                   )}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Demo Mode Selection Modal */}
+        {showDemoModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all duration-300">
+            <div className="bg-slate-900/95 backdrop-blur-2xl border border-indigo-500/50 p-6 rounded-2xl w-full max-w-md shadow-[0_0_60px_rgba(99,102,241,0.35)] space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-white font-bold text-sm">Simulasi Demo Interaktif</h3>
+                    <p className="text-[11px] text-slate-400">Pilih model industri & masuk divisi dalam 1 klik (Tanpa PIN)</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDemoModal(false)}
+                  className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">1. Pilih Tipe Bisnis / Model Industri:</label>
+                  <select
+                    value={selectedDemoBusinessType}
+                    onChange={(e) => setSelectedDemoBusinessType(e.target.value)}
+                    className="w-full h-11 bg-slate-950 border border-slate-700 focus:border-indigo-400 text-white text-xs px-3 rounded-xl outline-none font-semibold cursor-pointer"
+                  >
+                    {DEMO_BUSINESS_TYPES.map((t) => (
+                      <option key={t.id} value={t.id}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-2">2. Pilih Divisi Tujuan (Masuk Instan Tanpa PIN):</label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[
+                      { id: 'pos', label: 'Kasir POS', icon: Store, color: 'from-rose-500 to-pink-500' },
+                      { id: 'executive', label: 'Executive', icon: Briefcase, color: 'from-blue-500 to-cyan-500' },
+                      { id: 'finance', label: 'Finance', icon: CreditCard, color: 'from-emerald-500 to-teal-500' },
+                      { id: 'purchasing', label: 'Purchasing', icon: ShoppingBag, color: 'from-orange-500 to-amber-500' },
+                      { id: 'warehouse', label: 'Warehouse', icon: Boxes, color: 'from-cyan-500 to-blue-500' },
+                      { id: 'hr', label: 'HR / Staf', icon: Users, color: 'from-purple-500 to-indigo-500' },
+                    ].map((div) => {
+                      const DIcon = div.icon;
+                      return (
+                        <button
+                          key={div.id}
+                          type="button"
+                          onClick={() => handleLaunchDemoDivision(div.id)}
+                          className={`p-3 rounded-xl bg-gradient-to-r ${div.color} text-slate-950 font-black text-xs flex items-center gap-2.5 shadow-md hover:opacity-95 transition-all active:scale-95 cursor-pointer`}
+                        >
+                          <DIcon className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{div.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800 text-center">
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  Sesi berjalan di sandbox lokal terisolasi (<code className="text-indigo-400 font-mono">jacs_demo_sandbox_*</code>). Tidak pernah menyentuh database Supabase produksi.
+                </p>
               </div>
             </div>
           </div>

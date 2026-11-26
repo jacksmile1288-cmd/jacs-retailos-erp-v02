@@ -9,6 +9,7 @@ import {
   OperationalTopologyMode,
   Terminal,
 } from '../types';
+import { DEMO_SANDBOX_PREFIX, isDemoSandboxMode } from './demoSandbox';
 
 export interface CanonicalSectorMeta {
   id: CanonicalBusinessSector;
@@ -961,6 +962,13 @@ export const saveActiveBusinessProfileToStorage = <T extends BusinessEntityProfi
     return normalized;
   }
 
+  if (isDemoSandboxMode()) {
+    try {
+      sessionStorage.setItem(`${DEMO_SANDBOX_PREFIX}active_business_profile_v1`, JSON.stringify(normalized));
+    } catch {}
+    return normalized;
+  }
+
   const writeAllKeys = (payload: T) => {
     const serialized = JSON.stringify(payload);
     localStorage.setItem(ACTIVE_BUSINESS_PROFILE_STORAGE_KEY, serialized);
@@ -1003,6 +1011,22 @@ export const loadActiveBusinessProfileFromStorage = <T extends BusinessEntityPro
   fallbackDefault: T
 ): T => {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return normalizeBusinessProfileDomain(fallbackDefault);
+  }
+
+  if (isDemoSandboxMode()) {
+    try {
+      const demoRaw = sessionStorage.getItem(`${DEMO_SANDBOX_PREFIX}active_business_profile_v1`);
+      if (demoRaw) {
+        const parsed = JSON.parse(demoRaw);
+        if (parsed && typeof parsed === 'object') {
+          return normalizeBusinessProfileDomain({
+            ...fallbackDefault,
+            ...parsed,
+          } as T);
+        }
+      }
+    } catch {}
     return normalizeBusinessProfileDomain(fallbackDefault);
   }
 

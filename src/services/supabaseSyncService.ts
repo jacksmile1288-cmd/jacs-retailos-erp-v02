@@ -8,6 +8,7 @@ import {
   RuntimeSupabaseCredentials,
 } from '../lib/supabaseClient';
 import { Product, CartItem } from '../types';
+import { isDemoSandboxMode } from '../utils/demoSandbox';
 
 const OFFLINE_QUEUE_KEY = 'jacs_supabase_offline_queue_v1';
 const FAILED_OFFLINE_QUEUE_KEY = 'jacs_supabase_failed_queue_v1';
@@ -108,6 +109,7 @@ const recordFailedOfflineItem = (item: QueuedSyncPayload, reason: string) => {
 };
 
 export const getOfflineQueue = (): QueuedSyncPayload[] => {
+  if (isDemoSandboxMode()) return [];
   try {
     const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -118,6 +120,7 @@ export const getOfflineQueue = (): QueuedSyncPayload[] => {
 };
 
 export const saveOfflineQueue = (queue: QueuedSyncPayload[]) => {
+  if (isDemoSandboxMode()) return;
   try {
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
     notifyOfflineQueueChanged();
@@ -127,6 +130,7 @@ export const saveOfflineQueue = (queue: QueuedSyncPayload[]) => {
 };
 
 export const clearOfflineQueue = (): number => {
+  if (isDemoSandboxMode()) return 0;
   const count = getOfflineQueue().length;
   try {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
@@ -141,6 +145,7 @@ export const enqueueOfflineAction = (
   action: 'UPSERT' | 'INSERT' | 'RPC_TRANSACTION',
   payload: any
 ) => {
+  if (isDemoSandboxMode()) return;
   const queue = getOfflineQueue();
   const entry: QueuedSyncPayload = {
     id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -157,6 +162,7 @@ export const enqueueOfflineAction = (
 export const syncOfflineQueueToSupabase = async (
   runtimeConfig?: RuntimeSupabaseCredentials
 ): Promise<number> => {
+  if (isDemoSandboxMode()) return 0;
   const client = getRuntimeSupabaseClient(runtimeConfig);
   if (!client || !navigator.onLine) return 0;
   const queue = getOfflineQueue();
@@ -223,7 +229,7 @@ export const syncOfflineQueueToSupabase = async (
 
 // 1. PULL DATA FROM SUPABASE
 export const pullProductsFromSupabase = async (): Promise<Product[]> => {
-  if (!isSupabaseConfigured) return [];
+  if (isDemoSandboxMode() || !isSupabaseConfigured) return [];
   try {
     const { data, error } = await supabase.from('products').select('*');
     if (error || !data) return [];
@@ -256,6 +262,7 @@ export const pullProductsFromSupabase = async (): Promise<Product[]> => {
 
 // 2. UPSERT PRODUCT (IDEMPOTENT)
 export const upsertProductToSupabase = async (product: Product): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const payload = {
     id: product.id,
     sku: product.sku || product.id,
@@ -313,6 +320,7 @@ export const pushTransactionAtomicRpc = async (tx: {
   cashTendered?: number;
   changeDue?: number;
 }): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const rpcPayload = {
     p_receipt_number: tx.receiptNumber,
     p_shift_id: tx.shiftId || 'DEFAULT-SHIFT',
@@ -368,6 +376,7 @@ export const pushTransactionToSupabase = async (tx: {
   cashTendered?: number;
   changeDue?: number;
 }): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const payload = {
     receipt_number: tx.receiptNumber,
     shift_id: tx.shiftId || 'DEFAULT-SHIFT',
@@ -427,6 +436,7 @@ export const pushStockMovementToSupabase = async (movement: {
   notes?: string;
   createdBy?: string;
 }): Promise<boolean> => {
+  if (isDemoSandboxMode()) return true;
   const payload = {
     id: movement.id,
     product_id: movement.productId,
@@ -467,6 +477,7 @@ export const syncSnapshotToSupabase = async (
   snapshot: ErpSnapshotPayload,
   runtimeConfig?: RuntimeSupabaseCredentials
 ): Promise<boolean> => {
+  if (isDemoSandboxMode()) return false;
   const creds = resolveSupabaseCredentials(runtimeConfig);
   const safeUrl =
     sanitizeAndValidateSupabaseUrl(creds.supabaseUrl) ||
@@ -520,6 +531,7 @@ export const pullLatestSnapshotFromSupabase = async (
   id = 'default-snapshot',
   runtimeConfig?: RuntimeSupabaseCredentials
 ) => {
+  if (isDemoSandboxMode()) return null;
   const creds = resolveSupabaseCredentials(runtimeConfig);
   const safeUrl =
     sanitizeAndValidateSupabaseUrl(creds.supabaseUrl) ||
@@ -580,7 +592,7 @@ export const pullLatestSnapshotFromSupabase = async (
 
 // 6. REALTIME SUBSCRIPTION
 export const subscribeToSupabaseChanges = (onProductChange: (payload: any) => void) => {
-  if (!isSupabaseConfigured) return () => {};
+  if (isDemoSandboxMode() || !isSupabaseConfigured) return () => {};
 
   try {
     const channel = supabase

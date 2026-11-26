@@ -15,6 +15,7 @@ import {
   RAW_INGREDIENTS_AS_INVENTORY,
   normalizeFnbRawMaterialId,
 } from '../data/rawIngredientsData';
+import { isDemoSandboxMode } from './demoSandbox';
 
 export const BUILDING_PURCHASE_UNIT_OPTIONS = [
   'Sak',
@@ -1448,6 +1449,7 @@ export const isFashionApparelPO = (po?: Partial<PurchaseOrder> | null): boolean 
 export const LEDGER_RESET_ACTIVE_ENTITY_KEY = 'jacs_retailos_erp_v2_2_ledger_reset_active_entity';
 
 export const isLedgerResetToActiveEntity = (): boolean => {
+  if (isDemoSandboxMode()) return false;
   try {
     return typeof localStorage !== 'undefined' && localStorage.getItem(LEDGER_RESET_ACTIVE_ENTITY_KEY) === 'true';
   } catch {

@@ -139,9 +139,20 @@ import {
   filterSuppliersByBusinessDomain,
   filterGoodsReceiptsByBusinessDomain,
   resolveGrnBulkCubicConversion,
-  LEDGER_RESET_ACTIVE_ENTITY_KEY,
+  LEDGER_RESET_ACTIVE_ENTITY_KEY as RAW_LEDGER_RESET_ACTIVE_ENTITY_KEY,
 } from '../utils/buildingDomainIsolation';
-import { buildIntegratedDemoPackage } from '../data/integratedDemoPackage';
+import { buildIntegratedDemoPackage, generateIntegratedDemoForBusiness } from '../data/integratedDemoPackage';
+import {
+  isDemoSandboxMode,
+  activateDemoSandbox,
+  deactivateDemoSandbox,
+  DEMO_SANDBOX_PREFIX,
+  DEMO_SANDBOX_INIT_FLAG,
+  DEMO_SANDBOX_ACTIVE_USER_KEY,
+  DEMO_SANDBOX_SESSION_SIG_KEY,
+  DEMO_DIVISION_QUICK_PINS,
+  clearAllDemoSandboxStorage,
+} from '../utils/demoSandbox';
 import {
   dualBackendSync,
   generateTxUuid,
@@ -762,6 +773,17 @@ export interface AppContextType {
   isLedgerReset: boolean;
   isMasterCatalogWiped: boolean;
   isIntegratedDemoMode: boolean;
+  isDemoSandbox: boolean;
+  activeDemoBusinessType: string;
+  switchDemoBusinessType: (bType: string) => void;
+  launchInteractiveDemoSession: (businessType: string, targetModule?: ActiveNavModule) => void;
+  exitDemoSandboxSession: () => void;
+  resetDemoSandboxSession: () => {
+    success: boolean;
+    title: string;
+    message: string;
+    timestamp: string;
+  };
   executeSystemResetByLevel: (level: 1 | 2 | 3 | 4) => {
     success: boolean;
     level: 1 | 2 | 3 | 4;
@@ -769,7 +791,7 @@ export interface AppContextType {
     message: string;
     timestamp: string;
   };
-  restoreDemoSimulationData: () => {
+  restoreDemoSimulationData: (options?: { silent?: boolean }) => {
     success: boolean;
     title: string;
     message: string;
@@ -874,7 +896,21 @@ export interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-const STORAGE_PREFIX = 'jacs_retailos_erp_v2_2_';
+const IS_DEMO_SANDBOX = isDemoSandboxMode();
+const STORAGE_PREFIX = IS_DEMO_SANDBOX ? DEMO_SANDBOX_PREFIX : 'jacs_retailos_erp_v2_2_';
+const LEDGER_RESET_ACTIVE_ENTITY_KEY = IS_DEMO_SANDBOX
+  ? `${DEMO_SANDBOX_PREFIX}ledger_reset_v1`
+  : RAW_LEDGER_RESET_ACTIVE_ENTITY_KEY;
+const ACTIVE_USER_STORAGE_KEY = IS_DEMO_SANDBOX ? DEMO_SANDBOX_ACTIVE_USER_KEY : 'jacs_active_user';
+const SESSION_SIG_STORAGE_KEY = IS_DEMO_SANDBOX ? DEMO_SANDBOX_SESSION_SIG_KEY : 'jacs_session_sig';
+const getAuthSessionStorage = (): Storage | null => {
+  try {
+    if (typeof window === 'undefined') return null;
+    return IS_DEMO_SANDBOX ? window.sessionStorage : window.localStorage;
+  } catch {
+    return null;
+  }
+};
 const DIVISION_PIN_HASHES_KEY = `${STORAGE_PREFIX}division_pin_hashes`;
 const SUPERADMIN_CODE_HASH_KEY = `${STORAGE_PREFIX}superadmin_code_hash`;
 const MANAGEMENT_AUTH_PIN_KEY = `${STORAGE_PREFIX}management_auth_pin_v1`;
@@ -1444,12 +1480,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const savedUser = localStorage.getItem('jacs_active_user');
+      const store = getAuthSessionStorage();
+      const savedUser = store?.getItem(ACTIVE_USER_STORAGE_KEY);
       if (!savedUser) return null;
       const decoded = JSON.parse(atob(savedUser));
       if (decoded && decoded.payload) {
         if (Date.now() > (decoded.payload._expiresAt || 0)) {
-          localStorage.removeItem('jacs_active_user');
+          store?.removeItem(ACTIVE_USER_STORAGE_KEY);
           return null;
         }
         const { _expiresAt, _nonce, ...user } = decoded.payload;
@@ -1464,12 +1501,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const verifyStoredSession = async () => {
       try {
-        const savedUser = localStorage.getItem('jacs_active_user');
+        const store = getAuthSessionStorage();
+        const savedUser = store?.getItem(ACTIVE_USER_STORAGE_KEY);
         if (!savedUser) return;
         const restored = await verifyAndDecodeSession(savedUser);
         if (!restored) {
-          localStorage.removeItem('jacs_active_user');
-          localStorage.removeItem('jacs_session_sig');
+          store?.removeItem(ACTIVE_USER_STORAGE_KEY);
+          store?.removeItem(SESSION_SIG_STORAGE_KEY);
           setCurrentUser(null);
           setIsSuperAdminAuthenticated(false);
           showToast('Sesi kedaluwarsa atau integritas token tidak valid. Silakan login kembali.', 'warning');
@@ -1692,6 +1730,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
   });
+
+  const [activeDemoBusinessType, setActiveDemoBusinessType] = useState<string>(() => {
+    try {
+      return localStorage.getItem('jacs_active_demo_business_type') || 'RETAIL';
+    } catch {
+      return 'RETAIL';
+    }
+  });
+
+  const switchDemoBusinessType = useCallback((bType: string) => {
+    setActiveDemoBusinessType(bType);
+    try {
+      localStorage.setItem('jacs_active_demo_business_type', bType);
+    } catch {}
+
+    const now = new Date();
+    const activeSec = bType;
+    const activeBiz = businessProfileRef.current?.name || DEFAULT_BUSINESS_PROFILE.name;
+
+    isMasterCatalogWipedRef.current = false;
+    setIsMasterCatalogWiped(false);
+    setIsLedgerReset(false);
+    setIsIntegratedDemoMode(true);
+
+    const pkg = generateIntegratedDemoForBusiness(activeSec, {
+      activeSector: activeSec,
+      businessName: activeBiz,
+      now,
+    });
+
+    const normalizedDemoProducts = pkg.products.map((p, idx) => normalizeProductPricing(p, idx));
+
+    productsRef.current = normalizedDemoProducts;
+    setProducts(normalizedDemoProducts);
+    fnbToppingsRef.current = DEFAULT_FNB_TOPPING_MASTERS;
+    setFnbToppings(DEFAULT_FNB_TOPPING_MASTERS);
+    serviceStylistsRef.current = DEFAULT_SERVICE_STYLISTS;
+    setServiceStylists(DEFAULT_SERVICE_STYLISTS);
+    setSuppliers(pkg.suppliers);
+    setCustomers(pkg.customers);
+    setEmployees(pkg.employees);
+    setAttendance(pkg.attendance);
+    setLeaves(pkg.leaves);
+    setBrands(pkg.brands);
+    setCategoriesMaster(pkg.categories);
+    setPurchaseOrders(pkg.purchaseOrders);
+    setPurchaseRequests(pkg.purchaseRequests);
+    setGoodsReceipts(pkg.goodsReceipts);
+    setStockMutations(pkg.stockMutations);
+    setSales(pkg.sales);
+    setCashierShifts(pkg.cashierShifts);
+    setFinanceEntries(pkg.financeEntries);
+    setJournalEntries(pkg.journalEntries);
+    setInvoicesDue(pkg.invoicesDue);
+    setSalesReturns([]);
+    setPurchaseReturns([]);
+    setVoidLogs([]);
+    setBadStocks([]);
+    setBulkShrinkageLogs([]);
+    setSupplierRebateClaims([]);
+    setLaundryOrders([]);
+    setBuildingDeliveryOrders([]);
+    setBuildingAuthRequests([]);
+
+    try {
+      localStorage.setItem(INTEGRATED_DEMO_MODE_KEY, 'true');
+      localStorage.setItem(`${STORAGE_PREFIX}products`, JSON.stringify(normalizedDemoProducts));
+      localStorage.setItem(`${STORAGE_PREFIX}suppliers`, JSON.stringify(pkg.suppliers));
+      localStorage.setItem(`${STORAGE_PREFIX}customers`, JSON.stringify(pkg.customers));
+      localStorage.setItem(`${STORAGE_PREFIX}employees`, JSON.stringify(pkg.employees));
+      localStorage.setItem(`${STORAGE_PREFIX}attendance`, JSON.stringify(pkg.attendance));
+      localStorage.setItem(`${STORAGE_PREFIX}leaves`, JSON.stringify(pkg.leaves));
+      localStorage.setItem(`${STORAGE_PREFIX}purchasing`, JSON.stringify(pkg.purchaseOrders));
+      localStorage.setItem(`${STORAGE_PREFIX}purchase_requests`, JSON.stringify(pkg.purchaseRequests));
+      localStorage.setItem(`${STORAGE_PREFIX}goods_receipts`, JSON.stringify(pkg.goodsReceipts));
+      localStorage.setItem(`${STORAGE_PREFIX}stock_mutations`, JSON.stringify(pkg.stockMutations));
+      localStorage.setItem(`${STORAGE_PREFIX}invoices_due`, JSON.stringify(pkg.invoicesDue));
+      localStorage.setItem(`${STORAGE_PREFIX}sales`, JSON.stringify(pkg.sales));
+      localStorage.setItem(`${STORAGE_PREFIX}shifts`, JSON.stringify(pkg.cashierShifts));
+      localStorage.setItem(`${STORAGE_PREFIX}finance`, JSON.stringify(pkg.financeEntries));
+      localStorage.setItem(`${STORAGE_PREFIX}journals`, JSON.stringify(pkg.journalEntries));
+    } catch {}
+
+    showToast(`Unit Bisnis Demo dialihkan ke ${bType} (${pkg.summary.productCount} SKU siap)`, 'success');
+  }, [showToast]);
 
   const [products, setProducts] = useState<Product[]>(() => {
     const hydrateWithServiceSeeds = (baseList: Product[]): Product[] => {
@@ -3918,7 +4041,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [currentUser, showToast]
   );
 
-  const restoreDemoSimulationData = useCallback((): {
+  const restoreDemoSimulationData = useCallback((options?: { silent?: boolean }): {
     success: boolean;
     title: string;
     message: string;
@@ -3953,9 +4076,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLedgerReset(false);
     setIsIntegratedDemoMode(true);
 
-    // 2. Bangun Paket Demo Terintegrasi End-to-End untuk seluruh 6 pilar ERP
-    const pkg = buildIntegratedDemoPackage({
-      activeSector: activeSec,
+    const targetSector = activeDemoBusinessType || activeSec;
+    const pkg = generateIntegratedDemoForBusiness(targetSector, {
+      activeSector: targetSector,
       businessName: activeBiz,
       now,
     });
@@ -4001,26 +4124,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setBuildingDeliveryOrders([]);
     setBuildingAuthRequests([]);
 
-    dualBackendSync.clearQueue();
-    clearSupabaseOfflineQueue();
-    clearGasOfflineQueue();
+    if (!IS_DEMO_SANDBOX) {
+      dualBackendSync.clearQueue();
+      clearSupabaseOfflineQueue();
+      clearGasOfflineQueue();
+    }
     setGasOfflineQueueCount(0);
     setSupabaseOfflineQueueCount(0);
 
-    // 4. Simpan persisten ke localStorage
+    // 4. Simpan persisten ke storage terisolasi (jacs_demo_sandbox_* di ?demo=1, produksi di mode normal)
     try {
       localStorage.removeItem(MASTER_CATALOG_WIPED_KEY);
       localStorage.removeItem(LEDGER_RESET_ACTIVE_ENTITY_KEY);
       localStorage.setItem(INTEGRATED_DEMO_MODE_KEY, 'true');
-      localStorage.removeItem('jacs_pos_receipt_seq_v1');
-      localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
-      localStorage.removeItem('jacs_pos_station_carts_v1');
-      localStorage.removeItem('jacs_dual_backend_queue');
-      localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
-      localStorage.removeItem('jacs_supabase_offline_queue_v1');
-      localStorage.removeItem('jacs_supabase_failed_queue_v1');
-      localStorage.removeItem('jacs_gas_offline_queue_v1');
-      localStorage.removeItem('jacs_gas_failed_queue_v1');
+      if (!IS_DEMO_SANDBOX) {
+        localStorage.removeItem('jacs_pos_receipt_seq_v1');
+        localStorage.removeItem('jacs_pos_held_orders_by_station_v1');
+        localStorage.removeItem('jacs_pos_station_carts_v1');
+        localStorage.removeItem('jacs_dual_backend_queue');
+        localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
+        localStorage.removeItem('jacs_supabase_offline_queue_v1');
+        localStorage.removeItem('jacs_supabase_failed_queue_v1');
+        localStorage.removeItem('jacs_gas_offline_queue_v1');
+        localStorage.removeItem('jacs_gas_failed_queue_v1');
+      }
 
       localStorage.setItem(`${STORAGE_PREFIX}products`, JSON.stringify(normalizedDemoProducts));
       localStorage.setItem(`${STORAGE_PREFIX}fnb_toppings`, JSON.stringify(DEFAULT_FNB_TOPPING_MASTERS));
@@ -4044,7 +4171,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const auditEntry: AuditLog = {
       id: `AUD-${Date.now()}-INTEGRATED-DEMO`,
       timestamp: nowIso,
-      user: currentUser?.name || 'Super Admin',
+      user: currentUser?.name || (IS_DEMO_SANDBOX ? 'Demo Sandbox' : 'Super Admin'),
       action: 'LOAD_INTEGRATED_DEMO_PACKAGE',
       module: 'SUPER_ADMIN',
       level: 'INFO',
@@ -4054,9 +4181,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const title = 'Paket Demo Terintegrasi End-to-End Aktif';
     const message = `${pkg.summary.productCount} SKU (${pkg.summary.bomProductCount} BOM), ${pkg.summary.supplierCount} supplier, ${pkg.summary.customerCount} member VIP, ${pkg.summary.employeeCount} karyawan + presensi, ${pkg.summary.poCount} PO (1 antrean Executive Approval), ${pkg.summary.saleCount} transaksi POS, 2 shift kasir, dan ${pkg.summary.journalCount} jurnal akuntansi balance siap diuji lintas 6 pilar.`;
-    showToast(message, 'success');
+    if (!options?.silent) {
+      showToast(message, 'success');
+    }
     return { success: true, title, message, timestamp: nowIso };
   }, [currentUser, showToast]);
+
+  const resetDemoSandboxSession = useCallback((): {
+    success: boolean;
+    title: string;
+    message: string;
+    timestamp: string;
+  } => {
+    clearAllDemoSandboxStorage();
+    const res = restoreDemoSimulationData({ silent: true });
+    try {
+      sessionStorage.setItem(DEMO_SANDBOX_INIT_FLAG, 'true');
+    } catch {}
+    showToast('Simulasi Demo Terisolasi berhasil direset ke kondisi awal End-to-End!', 'success');
+    return res;
+  }, [restoreDemoSimulationData, showToast]);
+
+  const launchInteractiveDemoSession = useCallback((businessType: string, targetModule: ActiveNavModule = 'pos') => {
+    activateDemoSandbox();
+    switchDemoBusinessType(businessType);
+    restoreDemoSimulationData({ silent: true });
+
+    const roleMap: Record<string, User['role']> = {
+      executive: 'EXECUTIVE',
+      finance: 'FINANCE_MANAGER',
+      purchasing: 'PURCHASING_OFFICER',
+      pos: 'Kasir',
+      warehouse: 'WAREHOUSE_HEAD',
+      hr: 'HR_MANAGER',
+      admin: 'Super Admin',
+    };
+
+    const demoUser: User = {
+      id: `demo-${targetModule}`,
+      user_id: `USR-DEMO-${targetModule.toUpperCase()}`,
+      name: `Demo ${targetModule.toUpperCase()} User`,
+      role: roleMap[targetModule] || 'Kasir',
+      division: targetModule.toUpperCase(),
+      assignedTerminalId: targetModule === 'pos' ? 'POS-01' : undefined,
+      email: `demo-${targetModule}@jacs.retailos.id`,
+      status: 'Active',
+      pin: '',
+    };
+
+    setCurrentUser(demoUser);
+    setActiveNav(targetModule);
+    showToast(`Simulasi Demo Interaktif (${businessType}) aktif di divisi ${targetModule.toUpperCase()}!`, 'success');
+  }, [switchDemoBusinessType, restoreDemoSimulationData, setCurrentUser, setActiveNav, showToast]);
+
+  const exitDemoSandboxSession = useCallback(() => {
+    deactivateDemoSandbox();
+    clearAllDemoSandboxStorage();
+    window.location.reload();
+  }, []);
+
+  // Auto-bootstrap Mode Demo Instan ketika URL mengandung ?demo=1
+  const demoSandboxBootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (!IS_DEMO_SANDBOX || demoSandboxBootstrappedRef.current) return;
+    demoSandboxBootstrappedRef.current = true;
+    try {
+      const alreadyInitialized = sessionStorage.getItem(DEMO_SANDBOX_INIT_FLAG) === 'true';
+      if (!alreadyInitialized) {
+        clearAllDemoSandboxStorage();
+        restoreDemoSimulationData({ silent: true });
+        sessionStorage.setItem(DEMO_SANDBOX_INIT_FLAG, 'true');
+      } else {
+        setIsIntegratedDemoMode(true);
+        setIsFirstRunSetup(false);
+      }
+    } catch {
+      restoreDemoSimulationData({ silent: true });
+    }
+  }, [restoreDemoSimulationData]);
 
   const clearDemoDataToZero = useCallback((): {
     success: boolean;
@@ -4755,6 +4957,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const syncOfflineQueues = useCallback(async () => {
+    if (IS_DEMO_SANDBOX) {
+      setGasOfflineQueueCount(0);
+      setSupabaseOfflineQueueCount(0);
+      return { supabaseSynced: 0, gasSynced: 0 };
+    }
     const dualSynced = await dualBackendSync.processQueue();
     const storedCfg = dualBackendSync.getConfig();
     const resolvedSb = resolveSupabaseCredentials({
@@ -4801,6 +5008,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [showToast]);
 
   const clearFailedOfflineQueues = useCallback(() => {
+    if (IS_DEMO_SANDBOX) {
+      setGasOfflineQueueCount(0);
+      setSupabaseOfflineQueueCount(0);
+      return {
+        clearedCount: 0,
+        message: 'DEMO SANDBOX aktif: tidak ada antrean cloud produksi.',
+      };
+    }
     const dualCleared = dualBackendSync.clearQueue();
     const sbCleared = clearSupabaseOfflineQueue();
     const gasCleared = clearGasOfflineQueue();
@@ -10220,6 +10435,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cleaned = pin.trim();
       if (!cleaned) return false;
 
+      // Mode Demo Sandbox (?demo=1): izinkan PIN cepat demo resmi agar semua divisi langsung bisa diuji
+      if (IS_DEMO_SANDBOX) {
+        const matchedDemoPin = DEMO_DIVISION_QUICK_PINS.find(
+          (item) => item.id === divisionId.toLowerCase() && item.pin === cleaned
+        );
+        if (matchedDemoPin || cleaned === '1234') {
+          return true;
+        }
+      }
+
       // Untuk divisi POS / Kasir, izinkan juga verifikasi menggunakan PIN akun Kasir aktif (misal Kasir 01 = 1101, Kasir 02 = 1102)
       if (divisionId.toLowerCase() === 'pos') {
         const matchedCashier = users.find((u) => {
@@ -10586,10 +10811,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           String(currentUser?.user_id || currentUser?.id || '').toUpperCase().includes('SUPER') ||
           String(currentUser?.id || '').toUpperCase() === 'USR-001'
       );
-      if (isSuperAdminLoggingOut) {
+      if (isSuperAdminLoggingOut && !IS_DEMO_SANDBOX) {
         void autoBackupRef.current?.('SUPERADMIN_LOGOUT');
       }
-      localStorage.removeItem('jacs_active_user');
+      const store = getAuthSessionStorage();
+      store?.removeItem(ACTIVE_USER_STORAGE_KEY);
+      store?.removeItem(SESSION_SIG_STORAGE_KEY);
       sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
     setIsAiAssistantOpen(false);
@@ -10600,7 +10827,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const exitSuperAdminSession = useCallback(() => {
     try {
-      void autoBackupRef.current?.('SUPERADMIN_EXIT_CONSOLE');
+      if (!IS_DEMO_SANDBOX) {
+        void autoBackupRef.current?.('SUPERADMIN_EXIT_CONSOLE');
+      }
       sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
     setIsAiAssistantOpen(false);
@@ -10609,7 +10838,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
   const emergencySessionReset = useCallback(() => {
     try {
-      localStorage.removeItem('jacs_active_user');
+      const store = getAuthSessionStorage();
+      store?.removeItem(ACTIVE_USER_STORAGE_KEY);
+      store?.removeItem(SESSION_SIG_STORAGE_KEY);
       sessionStorage.removeItem('jacs_cloud_pin_unlocked');
     } catch {}
     setIsAiAssistantOpen(false);
@@ -10685,6 +10916,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const executeCloudSync = useCallback(
     async (customConfig?: DualBackendConfig): Promise<CloudSyncResult> => {
       const nowIso = new Date().toISOString();
+      if (IS_DEMO_SANDBOX) {
+        const sandboxMsg = 'DEMO SANDBOX aktif (?demo=1): Sinkronisasi ke database cloud produksi dinonaktifkan demi keamanan data asli.';
+        showToast(sandboxMsg, 'info');
+        return {
+          success: false,
+          message: sandboxMsg,
+          timestamp: nowIso,
+          endpoints: {
+            supabase: { endpoint: 'SUPABASE', configured: false, success: false, message: 'Diblokir di Mode Demo Sandbox' },
+            gas: { endpoint: 'GAS', configured: false, success: false, message: 'Diblokir di Mode Demo Sandbox' },
+          },
+          syncedCounts: { products: 0, transactions: 0, financeEntries: 0, journalEntries: 0 },
+          errors: [sandboxMsg],
+        };
+      }
       const txUuid = generateTxUuid();
       const storedConfig = dualBackendSync.getConfig();
       const rawMergedSupabaseUrl =
@@ -10954,6 +11200,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const pullCloudSyncDataHandler = useCallback(
     async (customConfig?: DualBackendConfig): Promise<CloudPullResult> => {
+      if (IS_DEMO_SANDBOX) {
+        const sandboxMsg = 'DEMO SANDBOX aktif (?demo=1): Tarik data dari cloud produksi dinonaktifkan agar data simulasi tetap terisolasi.';
+        showToast(sandboxMsg, 'info');
+        return {
+          success: false,
+          message: sandboxMsg,
+          timestamp: new Date().toISOString(),
+          error: 'DEMO_SANDBOX_ISOLATED',
+        };
+      }
       try {
         (dualBackendSync as any).isSyncing = true;
         (dualBackendSync as any).notify?.();
@@ -12165,6 +12421,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isLedgerReset,
     isMasterCatalogWiped,
     isIntegratedDemoMode,
+    isDemoSandbox: IS_DEMO_SANDBOX,
+    activeDemoBusinessType,
+    switchDemoBusinessType,
+    launchInteractiveDemoSession,
+    exitDemoSandboxSession,
+    resetDemoSandboxSession,
     executeSystemResetByLevel,
     restoreDemoSimulationData,
     clearDemoDataToZero,
