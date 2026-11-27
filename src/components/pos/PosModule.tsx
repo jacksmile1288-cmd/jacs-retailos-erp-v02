@@ -136,6 +136,10 @@ import {
   estimateFleetDeliveryExpense,
   calculateBuildingLoadingFeeTotal,
 } from '../../utils/buildingTierPricing';
+import {
+  resolveFnbMenuImageUrl,
+  getFnbFallbackImageUrl,
+} from '../../utils/demoSandbox';
 
 interface PosIdentityCard {
   id: string;
@@ -179,6 +183,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     unbindPosStation,
     businessProfile,
     businessDomainConfig,
+    businessType,
+    isDemoSandbox,
     activeSector,
     isFnb,
     isFashion,
@@ -203,6 +209,11 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     activeCashierQuota,
     triggerSilentAutoBackupIfDue,
   } = useApp();
+
+  const isFnbMode =
+    businessType === 'FNB' ||
+    (typeof window !== 'undefined' &&
+      localStorage.getItem('jacs_demo_sandbox_business_type') === 'FNB');
 
   const sessionOperator = currentUser || activeUser;
   const canManageStationBinding = useMemo(() => {
@@ -429,7 +440,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasExplicitLobbyReturn, setHasExplicitLobbyReturn] = useState(false);
   const [isRegisterOpen, setIsRegisterOpen] = useState<boolean>(() =>
-    Boolean(activeStationShift && activeStationShift.status === 'OPEN')
+    Boolean(activeStationShift && activeStationShift.status === 'OPEN') || (isFnbMode && isDemoSandbox)
   );
   const [hoveredTerminalId, setHoveredTerminalId] = useState<string | null>(null);
   const [isStationPickerOpen, setIsStationPickerOpen] = useState(false);
@@ -761,7 +772,15 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   }, [isRegisterOpen, setIsCashierWorkspaceActive]);
 
   const [showAllCategories, setShowAllCategories] = useState<boolean>(false);
-  const [isFnbPhotoMenuMode, setIsFnbPhotoMenuMode] = useState<boolean>(false);
+  const [isFnbPhotoMenuMode, setIsFnbPhotoMenuMode] = useState<boolean>(() => isFnbMode);
+  const [fnbCustomerName, setFnbCustomerName] = useState<string>('');
+  const [fnbKitchenNote, setFnbKitchenNote] = useState<string>('');
+
+  useEffect(() => {
+    if (isFnbMode) {
+      setIsFnbPhotoMenuMode(true);
+    }
+  }, [isFnbMode]);
 
   const [barcodeInput, setBarcodeInput] = useState('');
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -924,6 +943,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     setAreaModalService(null);
     setAreaTargetCartIndex(null);
     setLaundryCustomerName('');
+    setFnbCustomerName('');
+    setFnbKitchenNote('');
     setLaundryCustomerPhone('');
     setLaundryTotalPieces(1);
     setLaundryConditionNotes('');
@@ -1339,14 +1360,18 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   const isMultiPosSelectorActive = isHybridMode || visiblePosIdentities.length > 1;
 
   const isFnbTerminal = useMemo(() => {
+    if (isFnbMode) return true;
+    const primaryModel = String(businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType || '').toUpperCase();
+    if (primaryModel === 'FNB' || primaryModel === 'RESTO_CAFE' || businessDomainConfig?.mechanismFamily === 'FNB_CULINARY' || isFnb) return true;
     if (!isHybridMode) return isFnb;
     if (!activeTerminal) return isFnb;
     return (
       activeTerminal.modelType === 'fnb' ||
       activeTerminal.code === 'POS-FNB' ||
-      (activeTerminal.businessModel || '').toLowerCase().includes('f&b')
+      (activeTerminal.businessModel || '').toLowerCase().includes('f&b') ||
+      primaryModel === 'FNB'
     );
-  }, [activeTerminal, isHybridMode, isFnb]);
+  }, [isFnbMode, activeTerminal, isHybridMode, isFnb, businessDomainConfig?.primaryBusinessModel, businessDomainConfig?.mechanismFamily, businessProfile?.businessType]);
 
   const isBuildingTerminal = useMemo(() => {
     if (!isHybridMode) return isBuilding;
@@ -1707,11 +1732,23 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
   }, [cart, laundrySlaOverrideHours]);
 
   useEffect(() => {
-    if (isRegisterOpen && activeTerminal) {
-      setIsFnbPhotoMenuMode(isFnbTerminal);
-      setReceiptNumber(peekStationReceiptNumber(activeStationCode));
+    if (isRegisterOpen) {
+      const primaryModel = String(businessDomainConfig?.primaryBusinessModel || businessProfile?.businessType || '').toUpperCase();
+      const isFnbActive =
+        isFnbMode ||
+        primaryModel === 'FNB' ||
+        primaryModel === 'RESTO_CAFE' ||
+        businessDomainConfig?.mechanismFamily === 'FNB_CULINARY' ||
+        isFnb ||
+        isFnbTerminal;
+      if (isFnbActive) {
+        setIsFnbPhotoMenuMode(true);
+      }
+      if (activeTerminal) {
+        setReceiptNumber(peekStationReceiptNumber(activeStationCode));
+      }
     }
-  }, [activeTerminal, activeStationCode, isRegisterOpen, isFnbTerminal]);
+  }, [isFnbMode, activeTerminal, activeStationCode, isRegisterOpen, isFnbTerminal, businessDomainConfig?.primaryBusinessModel, businessDomainConfig?.mechanismFamily, businessProfile?.businessType, isFnb]);
 
   const applyBuildingTierPricingToCart = (
     items: CartItem[],
@@ -2411,7 +2448,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             toppings: [],
             toppingDetails: [],
             toppingExtraPrice: 0,
-            notes: '',
+            notes: fnbKitchenNote.trim(),
           },
         },
       ]);
@@ -2451,7 +2488,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     );
   };
 
-  const isFnbModeActive = isFnbTerminal || isFnbPhotoMenuMode;
+  const isFnbModeActive = isFnbMode || isFnbTerminal || isFnbPhotoMenuMode;
   const isItemSentToKot = (it?: CartItem | null) => Boolean(it?.kotSent && (it.kotSentQty ?? 0) > 0);
   const hasAnyKotSentItem = hasSentKot || cart.some((it) => isItemSentToKot(it));
 
@@ -3364,24 +3401,32 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       activeProducts.forEach((p) => { if (p.category) cats.add(p.category); });
       return ['ALL', ...Array.from(cats)];
     }
-    return ['ALL', 'Kopi', 'Non-Kopi / Segar', 'Makanan Utama', 'Pastry & Bakery', 'Paket Hemat'];
+    return ['ALL', 'Kopi & Espresso', 'Non-Kopi', 'Makanan', 'Snack'];
   }, [activeProducts, showAllCategories]);
 
   const filteredFnbProducts = useMemo(() => {
     const fnbFromActive = activeProducts.filter(
       (p) =>
-        (p.itemType === 'MENU_FB' || p.businessModel === 'fnb' || (p.id || '').startsWith('FNB-')) &&
+        (isFnbMode ||
+          p.itemType === 'MENU_FB' ||
+          p.businessModel === 'fnb' ||
+          (p.id || '').toUpperCase().includes('FNB')) &&
         p.itemType !== 'RAW_MATERIAL' &&
         !(p.id || '').startsWith('RM-FNB-') &&
-        !(p.id || '').startsWith('ING-')
+        !(p.id || '').startsWith('ING-') &&
+        !(p.id || '').toUpperCase().includes('-FNB-R')
     );
 
     const mergedMap = new Map<string, Product>();
-    FNB_MENU_ITEMS.forEach((item) => mergedMap.set(item.id, item));
-    FNB_RESTAURANT_PRODUCTS.forEach((item) => mergedMap.set(item.id, item));
+    // Prioritaskan katalog aktif F&B (termasuk paket demo FNB) agar tampil di urutan teratas
     fnbFromActive.forEach((item) => {
-      const canonical = mergedMap.get(item.id);
-      mergedMap.set(item.id, canonical ? { ...canonical, ...item, category: canonical.category || item.category, image: item.image || canonical.image } : item);
+      mergedMap.set(item.id, item);
+    });
+    FNB_MENU_ITEMS.forEach((item) => {
+      if (!mergedMap.has(item.id)) mergedMap.set(item.id, item);
+    });
+    FNB_RESTAURANT_PRODUCTS.forEach((item) => {
+      if (!mergedMap.has(item.id)) mergedMap.set(item.id, item);
     });
 
     const fullFnbCatalog = Array.from(mergedMap.values());
@@ -3391,20 +3436,51 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
       if (
         product.itemType === 'RAW_MATERIAL' ||
         (product.id || '').startsWith('RM-FNB-') ||
-        (product.id || '').startsWith('ING-')
+        (product.id || '').startsWith('ING-') ||
+        (product.id || '').toUpperCase().includes('-FNB-R')
       ) {
         return false;
       }
       const cat = (product.category || '').toLowerCase();
+      const nameLower = (product.name || '').toLowerCase();
       const selCat = selectedFnbCategory.toLowerCase();
       const matchCat =
         selectedFnbCategory === 'ALL' ||
         product.category === selectedFnbCategory ||
-        (selCat === 'kopi' && cat.includes('kopi') && !cat.includes('non-kopi')) ||
-        (selCat.includes('non-kopi') && (cat.includes('segar') || cat.includes('non-kopi') || (cat.includes('minuman') && !cat.includes('kopi')))) ||
-        (selCat.includes('pastry') && (cat.includes('pastry') || cat.includes('bakery') || cat.includes('snack'))) ||
-        (selCat.includes('makanan') && cat.includes('makanan')) ||
-        (selCat.includes('paket') && cat.includes('paket'));
+        (selCat.includes('kopi & espresso') &&
+          ((cat.includes('kopi') && !cat.includes('non-kopi')) ||
+            cat.includes('espresso') ||
+            cat.includes('coffee') ||
+            nameLower.includes('kopi') ||
+            nameLower.includes('espresso') ||
+            nameLower.includes('latte') ||
+            nameLower.includes('cappuccino') ||
+            nameLower.includes('americano'))) ||
+        (selCat === 'non-kopi' &&
+          (cat.includes('non-kopi') ||
+            cat.includes('segar') ||
+            cat.includes('juice') ||
+            cat.includes('jus') ||
+            cat.includes('teh') ||
+            (cat.includes('minuman') && !cat.includes('kopi')))) ||
+        (selCat === 'makanan' &&
+          (cat.includes('makanan') ||
+            cat.includes('mi &') ||
+            cat.includes('mie') ||
+            cat.includes('bakso') ||
+            cat.includes('sup') ||
+            cat.includes('soto') ||
+            cat.includes('paket') ||
+            cat.includes('rice') ||
+            cat.includes('nasi'))) ||
+        (selCat === 'snack' &&
+          (cat.includes('snack') ||
+            cat.includes('camilan') ||
+            cat.includes('pastry') ||
+            cat.includes('bakery') ||
+            cat.includes('pelengkap') ||
+            cat.includes('dessert') ||
+            cat.includes('kue')));
 
       const matchSearch =
         !fnbSearchQuery ||
@@ -3413,7 +3489,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
         (product.category || '').toLowerCase().includes(fnbSearchQuery.toLowerCase());
       return matchCat && matchSearch;
     });
-  }, [activeProducts, showAllCategories, isHybridMode, selectedFnbCategory, fnbSearchQuery]);
+  }, [isFnbMode, activeProducts, showAllCategories, isHybridMode, selectedFnbCategory, fnbSearchQuery]);
 
   const subtotalBeforePromo = useMemo(
     () =>
@@ -3812,6 +3888,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     const laundryTagCode = `TAG-${String(committedReceiptNumber).replace(/[^A-Z0-9]/gi, '').slice(-4)}`;
     const resolvedLaundryCustName =
       selectedCustomer?.name ||
+      (isFnbModeActive && fnbCustomerName.trim() ? fnbCustomerName.trim() : undefined) ||
       (isLaundryTerminal && laundryCustomerName.trim() ? laundryCustomerName.trim() : undefined);
     const resolvedLaundryCustPhone =
       selectedCustomer?.phone ||
@@ -4015,7 +4092,10 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
     const isFleetOrder = deliveryFleetActive || deliveryMethod === 'FLEET_DELIVERY' || deliveryPolicy === 'FRANGKO';
     const committedReceiptNumber = commitStationReceiptNumber(activeStationCode);
     const laundryTagCode = `TAG-${String(committedReceiptNumber).replace(/[^A-Z0-9]/gi, '').slice(-4)}`;
-    const resolvedCustName = resolvedCustomerNameForOrder || undefined;
+    const resolvedCustName =
+      (isFnbModeActive && fnbCustomerName.trim() ? fnbCustomerName.trim() : '') ||
+      resolvedCustomerNameForOrder ||
+      undefined;
     const resolvedCustPhone =
       selectedCustomer?.phone ||
       (isLaundryTerminal && laundryCustomerPhone.trim() ? laundryCustomerPhone.trim() : undefined);
@@ -4859,34 +4939,43 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                 )}
               </div>
 
-              <form onSubmit={handleBarcodeSubmit} className="relative w-36 sm:w-44 xl:w-52 shrink-0">
-                <Barcode className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  ref={barcodeInputRef}
-                  type="text"
-                  placeholder="Scan Barcode [F2]..."
-                  value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
-                  className={`w-full text-xs leading-4 pl-7 pr-8 py-1 rounded-lg outline-none font-normal border transition ${
-                    isLight
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500 placeholder:text-slate-400/80 placeholder:italic'
-                      : 'bg-slate-950 border-slate-800 text-white focus:border-cyan-500 placeholder:text-slate-500 placeholder:italic'
-                  }`}
-                />
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 px-1 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 text-[9px] font-mono font-normal">
-                  F2
-                </span>
-              </form>
+              {!(isFnbMode || isFnbPhotoMenuMode) ? (
+                <>
+                  <form onSubmit={handleBarcodeSubmit} className="relative w-36 sm:w-44 xl:w-52 shrink-0">
+                    <Barcode className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      ref={barcodeInputRef}
+                      type="text"
+                      placeholder="Scan Barcode [F2]..."
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      className={`w-full text-xs leading-4 pl-7 pr-8 py-1 rounded-lg outline-none font-normal border transition ${
+                        isLight
+                          ? 'bg-slate-50 border-slate-300 text-slate-900 focus:border-cyan-500 placeholder:text-slate-400/80 placeholder:italic'
+                          : 'bg-slate-950 border-slate-800 text-white focus:border-cyan-500 placeholder:text-slate-500 placeholder:italic'
+                      }`}
+                    />
+                    <span className="absolute right-1 top-1/2 -translate-y-1/2 px-1 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 text-[9px] font-mono font-normal">
+                      F2
+                    </span>
+                  </form>
 
-              <button
-                type="button"
-                onClick={() => setIsManualSearchOpen(true)}
-                className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs leading-4 font-normal flex items-center gap-1 cursor-pointer shrink-0 transition-all duration-200 active:scale-[0.99]"
-              >
-                <Search className="w-3 h-3" />
-                <span className="hidden sm:inline">Cari</span>
-                <span className="text-[10px] opacity-80 font-mono font-normal">[F3]</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsManualSearchOpen(true)}
+                    className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs leading-4 font-normal flex items-center gap-1 cursor-pointer shrink-0 transition-all duration-200 active:scale-[0.99]"
+                  >
+                    <Search className="w-3 h-3" />
+                    <span className="hidden sm:inline">Cari</span>
+                    <span className="text-[10px] opacity-80 font-mono font-normal">[F3]</span>
+                  </button>
+                </>
+              ) : (
+                <div className="px-2.5 py-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5 shrink-0">
+                  <UtensilsCrossed className="w-3.5 h-3.5" />
+                  <span>Kasir F&amp;B • Visual Menu</span>
+                </div>
+              )}
 
               {isRetailWholesalerTerminal && (
                 <div className={`flex items-center p-0.5 rounded-lg border gap-0.5 text-xs font-normal shrink-0 ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-slate-950 border-slate-800'}`}>
@@ -5152,29 +5241,29 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             </div>
           </div>
 
-          <div className={`flex-1 mb-1 flex flex-col ${isFnbPhotoMenuMode || isSalonServiceTerminal || isLaundryTerminal ? 'min-h-0 overflow-hidden' : 'min-h-0 overflow-y-auto'}`}>
-            {isFnbPhotoMenuMode ? (
+          <div className={`flex-1 mb-1 flex flex-col ${(isFnbMode || isFnbPhotoMenuMode) || isSalonServiceTerminal || isLaundryTerminal ? 'min-h-0 overflow-hidden' : 'min-h-0 overflow-y-auto'}`}>
+            {(isFnbMode || isFnbPhotoMenuMode) ? (
               <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden h-full">
-                <div className="w-full lg:w-[65%] flex flex-col h-full min-h-0 overflow-hidden">
-                  <div className={`p-2.5 rounded-xl border flex flex-col gap-2 mb-2 shrink-0 ${isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'}`}>
+                <div className="w-full lg:w-[58%] lg:flex-1 min-w-0 flex flex-col h-full min-h-0 overflow-hidden">
+                  <div className={`p-2 rounded-xl border flex flex-col gap-1.5 mb-2 shrink-0 ${isLight ? 'bg-white border-slate-200' : 'bg-[#161b22] border-[#30363d]'}`}>
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
-                        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                         <input
                           type="text"
                           placeholder="Cari nama masakan, minuman, kopi, snack..."
                           value={fnbSearchQuery}
                           onChange={(e) => setFnbSearchQuery(e.target.value)}
-                          className={`w-full text-xs pl-9 pr-3 py-2 rounded-xl outline-none border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'}`}
+                          className={`w-full text-xs pl-8 pr-3 py-1.5 rounded-lg outline-none border ${isLight ? 'bg-slate-50 border-slate-300' : 'bg-[#0d1117] border-[#30363d]'}`}
                         />
                       </div>
                       <button
                         type="button"
                         onClick={() => setIsKotModalOpen(true)}
                         disabled={cart.length === 0}
-                        className="px-3 py-2 rounded-xl text-xs font-black bg-emerald-500 text-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                        className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-500 hover:bg-emerald-400 text-black flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition shrink-0"
                       >
-                        <ChefHat className="w-4 h-4" />
+                        <ChefHat className="w-3.5 h-3.5" />
                         <span>KOT Dapur</span>
                       </button>
                     </div>
@@ -5183,76 +5272,93 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                         <button
                           key={`cat-${cat}-${idx}`}
                           onClick={() => setSelectedFnbCategory(cat)}
-                          className={`px-3 py-1 rounded-xl whitespace-nowrap font-bold text-xs cursor-pointer ${
-                            selectedFnbCategory === cat ? 'bg-emerald-500 text-black' : 'bg-[#0d1117] text-gray-400 border border-[#30363d]'
+                          className={`px-2.5 py-1 rounded-lg whitespace-nowrap font-bold text-[11px] cursor-pointer transition ${
+                            selectedFnbCategory === cat
+                              ? 'bg-emerald-500 text-black shadow-sm'
+                              : isLight
+                              ? 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
+                              : 'bg-[#0d1117] text-gray-400 border border-[#30363d] hover:text-white'
                           }`}
                         >
-                          {cat === 'ALL' ? 'Semua Menu' : cat}
+                          {cat === 'ALL' ? 'Semua' : cat}
                         </button>
                       ))}
                     </div>
                   </div>
 
                   <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 pb-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 pb-2">
                       {filteredFnbProducts.map((product, idx) => {
-                        const catLower = (product.category || '').toLowerCase();
-                        const catIcon = catLower.includes('kopi') && !catLower.includes('non-kopi')
-                          ? '☕'
-                          : catLower.includes('segar') || catLower.includes('minuman')
-                          ? '🧋'
-                          : catLower.includes('pastry') || catLower.includes('bakery') || catLower.includes('snack')
-                          ? '🥐'
-                          : catLower.includes('paket')
-                          ? '🍱'
-                          : '🍽️';
+                        const menuImageUrl = resolveFnbMenuImageUrl(
+                          product.name,
+                          product.category,
+                          product.image
+                        );
+                        const fallbackImageUrl = getFnbFallbackImageUrl(product.category);
                         return (
                           <div
                             key={`fnb-${product.id}-${idx}`}
-                            onClick={() => {
-                              setSelectedFnbProduct(product);
-                              setIsFnbModalOpen(true);
-                            }}
-                            className={`group rounded-2xl border overflow-hidden flex flex-col justify-between cursor-pointer transition-all hover:border-emerald-500/50 ${
-                              isLight ? 'bg-white border-slate-200 shadow-sm' : 'bg-[#161b22] border-[#30363d]'
+                            onClick={() => handleQuickAddFnbProduct(product)}
+                            className={`group rounded-xl border overflow-hidden flex flex-col justify-between cursor-pointer transition-all duration-150 hover:border-emerald-500/80 hover:shadow-md active:scale-[0.98] ${
+                              isLight ? 'bg-white border-slate-200 shadow-xs' : 'bg-[#161b22] border-[#30363d]'
                             }`}
                           >
-                            <div>
-                              <div className="relative h-24 w-full overflow-hidden bg-slate-900">
-                                {product.image ? (
-                                  <img
-                                    src={product.image}
-                                    alt={product.name}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    loading="lazy"
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-2xl">
-                                    {catIcon}
-                                  </div>
-                                )}
-                                <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-lg bg-black/75 backdrop-blur-sm border border-white/10 text-[10px] font-semibold text-white flex items-center gap-1">
-                                  <span>{catIcon}</span>
-                                  <span className="truncate max-w-[95px]">{product.category || 'Menu F&B'}</span>
-                                </div>
+                            <div className="flex flex-col">
+                              <div className="relative h-24 w-full overflow-hidden rounded-t-xl bg-slate-200 dark:bg-slate-800">
+                                <img
+                                  src={menuImageUrl}
+                                  alt={product.name}
+                                  className="w-full h-full object-cover rounded-t-xl group-hover:scale-105 transition-transform duration-300"
+                                  loading="lazy"
+                                  onError={(e) => {
+                                    const imgEl = e.currentTarget;
+                                    if (imgEl.dataset.fallbackApplied === '1') return;
+                                    imgEl.dataset.fallbackApplied = '1';
+                                    imgEl.src = fallbackImageUrl;
+                                  }}
+                                />
+                                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-black/45 to-transparent" />
+                                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-black/65 backdrop-blur-sm border border-white/15 text-[9px] font-semibold tracking-wide text-white/95 truncate max-w-[88%]">
+                                  {product.category || 'Menu F&B'}
+                                </span>
                               </div>
-                              <div className="p-2.5 pb-1.5">
-                                <h4 className="text-xs font-bold line-clamp-2 leading-snug">{product.name}</h4>
+                              <div className="px-2 pt-1.5 pb-1">
+                                <h4 className="text-[11px] font-bold leading-tight line-clamp-2 min-h-[1.75rem] text-slate-900 dark:text-slate-100">
+                                  {product.name}
+                                </h4>
                               </div>
                             </div>
-                            <div className="px-2.5 pb-2.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between gap-1.5">
-                              <span className="text-xs font-black text-emerald-400 font-mono">
+                            <div className="px-2 pb-1.5 pt-1 border-t border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-1">
+                              <span className="text-[11.5px] font-extrabold font-mono tracking-tight text-emerald-600 dark:text-emerald-400 truncate">
                                 Rp {product.sell_price.toLocaleString('id-ID')}
                               </span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickAddFnbProduct(product, e)}
-                                title="Klik cepat masuk keranjang"
-                                className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black flex items-center gap-1 cursor-pointer active:scale-95 transition shrink-0"
-                              >
-                                <Plus className="w-3 h-3 stroke-[3]" />
-                                <span>Keranjang</span>
-                              </button>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedFnbProduct(product);
+                                    setIsFnbModalOpen(true);
+                                  }}
+                                  title="Atur Topping / Level Pedas / Catatan Khusus"
+                                  className={`px-1.5 h-6 rounded-md text-[10px] font-semibold cursor-pointer active:scale-95 transition border ${
+                                    isLight
+                                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                      : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 border-slate-700'
+                                  }`}
+                                >
+                                  Opsi
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleQuickAddFnbProduct(product, e)}
+                                  title="Tambah 1 porsi ke pesanan"
+                                  aria-label={`Tambah ${product.name}`}
+                                  className="w-6 h-6 rounded-md bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center justify-center cursor-pointer active:scale-95 transition shadow-xs"
+                                >
+                                  <Plus className="w-3.5 h-3.5 stroke-[2.75]" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         );
@@ -5261,20 +5367,23 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                   </div>
                 </div>
 
-                <div className={`w-full lg:w-[35%] flex flex-col h-full rounded-2xl border overflow-hidden ${isLight ? 'bg-white border-slate-300' : 'bg-[#161b22] border-[#30363d]'}`}>
-                  <div className={`p-2.5 border-b space-y-2 shrink-0 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'}`}>
-                    <div className="flex items-center justify-between gap-1.5">
-                      <div className="grid grid-cols-3 gap-1 flex-1 bg-black/20 p-1 rounded-xl border border-slate-800">
-                        {(['Dine-In', 'Takeaway', 'Delivery'] as const).map((mode) => {
-                          const isSelected = fnbOrderMode === mode;
+                <div className={`w-full lg:w-[42%] lg:min-w-[420px] shrink-0 flex flex-col h-full rounded-2xl border overflow-hidden ${isLight ? 'bg-white border-slate-300 shadow-sm' : 'bg-[#161b22] border-[#30363d]'}`}>
+                  <div className={`p-3 border-b space-y-2.5 shrink-0 ${isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#0d1117] border-[#30363d]'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className={`grid grid-cols-3 gap-1 flex-1 p-1 rounded-xl border ${isLight ? 'bg-slate-200/70 border-slate-300' : 'bg-black/30 border-slate-800'}`}>
+                        {(['Dine-In', 'Take Away', 'Delivery / Online'] as const).map((mode) => {
+                          const internalMode = mode === 'Take Away' ? 'Takeaway' : mode === 'Delivery / Online' ? 'Delivery' : 'Dine-In';
+                          const isSelected = fnbOrderMode === internalMode;
                           return (
                             <button
                               key={mode}
                               type="button"
-                              onClick={() => handleChangeFnbOrderMode(mode)}
-                              className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                              onClick={() => handleChangeFnbOrderMode(internalMode)}
+                              className={`py-2 px-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer whitespace-nowrap truncate ${
                                 isSelected
                                   ? 'bg-emerald-500 text-black shadow-sm'
+                                  : isLight
+                                  ? 'text-slate-600 hover:text-slate-900'
                                   : 'text-gray-400 hover:text-white'
                               }`}
                             >
@@ -5288,13 +5397,13 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           value={fnbTableNo}
                           onChange={(e) => handleChangeFnbTableNo(e.target.value)}
                           aria-label="Pilih Meja Resto"
-                          className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer ${
+                          className={`px-3 py-2 rounded-xl border text-xs font-extrabold outline-none cursor-pointer min-w-[108px] shrink-0 ${
                             isLight
                               ? 'bg-white border-slate-300 text-slate-900'
-                              : 'bg-[#161b22] border-cyan-500/40 text-cyan-300'
+                              : 'bg-[#161b22] border-cyan-500/45 text-cyan-300'
                           }`}
                         >
-                          {Array.from({ length: 15 }, (_, i) => {
+                          {Array.from({ length: 12 }, (_, i) => {
                             const label = `Meja ${String(i + 1).padStart(2, '0')}`;
                             return (
                               <option key={label} value={label}>
@@ -5306,7 +5415,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       ) : (
                         <span
                           id="fnb-no-table-badge"
-                          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold inline-flex items-center gap-1.5 shrink-0 ${
+                          className={`px-3 py-2 rounded-xl border text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 ${
                             fnbOrderMode === 'Delivery'
                               ? isLight
                                 ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
@@ -5319,21 +5428,58 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           {fnbOrderMode === 'Delivery' ? (
                             <>
                               <Truck className="w-3.5 h-3.5 shrink-0" />
-                              <span>Tanpa Meja • Kurir</span>
+                              <span>Online</span>
                             </>
                           ) : (
                             <>
                               <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-                              <span>Tanpa Meja • Bungkus</span>
+                              <span>Take Away</span>
                             </>
                           )}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-gray-400 px-1">
+                    <div className="grid grid-cols-1 gap-2 pt-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11px] font-semibold shrink-0 w-28 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                          Nama Pelanggan:
+                        </span>
+                        <input
+                          type="text"
+                          value={fnbCustomerName}
+                          onChange={(e) => setFnbCustomerName(e.target.value)}
+                          placeholder="Nama Pelanggan (Opsional)..."
+                          className={`w-full text-xs px-3 py-1.5 rounded-xl outline-none border ${
+                            isLight
+                              ? 'bg-white border-slate-300 text-slate-900'
+                              : 'bg-[#0d1117] border-[#30363d] text-white'
+                          }`}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[11px] font-semibold shrink-0 w-28 ${isLight ? 'text-slate-600' : 'text-gray-400'}`}>
+                          Catatan Dapur:
+                        </span>
+                        <input
+                          type="text"
+                          value={fnbKitchenNote}
+                          onChange={(e) => {
+                            const nextNote = e.target.value;
+                            setFnbKitchenNote(nextNote);
+                          }}
+                          placeholder="Contoh: Kurangi es, tidak pedas, pisah saus..."
+                          className={`w-full text-xs px-3 py-1.5 rounded-xl outline-none border ${
+                            isLight
+                              ? 'bg-amber-50/70 border-amber-300 text-slate-900 placeholder:text-slate-400'
+                              : 'bg-[#0d1117] border-amber-500/40 text-amber-200 placeholder:text-slate-500'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-xs text-gray-400 px-0.5">
                       <span>
-                        Mode Pesanan: <strong className="text-emerald-400">{fnbOrderMode}</strong> •{' '}
-                        <strong className="text-cyan-400">
+                        Mode Pesanan: <strong className="text-emerald-500 dark:text-emerald-400">{fnbOrderMode}</strong> •{' '}
+                        <strong className="text-cyan-600 dark:text-cyan-400">
                           {fnbOrderMode === 'Dine-In'
                             ? fnbTableNo
                             : fnbOrderMode === 'Delivery'
@@ -5341,7 +5487,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             : 'Tanpa Meja • Bungkus'}
                         </strong>
                       </span>
-                      <span className="font-mono tabular-nums">{cart.reduce((s, i) => s + i.quantity, 0)} Porsi/Item</span>
+                      <span className="font-mono font-bold tabular-nums text-slate-700 dark:text-slate-200">
+                        {cart.reduce((s, i) => s + i.quantity, 0)} Porsi/Item
+                      </span>
                     </div>
                     {hasAnyKotSentItem && kotSentAt && (
                       <div
@@ -5376,7 +5524,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     )}
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2">
                     {cart.map((item, idx) => {
                       const savings = item.promoSavings ?? ((item.itemDiscount || 0) * item.quantity);
                       const isSentKotItem = isItemSentToKot(item);
@@ -5393,13 +5541,22 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           mods?.notes
                       );
                       return (
-                        <div key={`fnb-cart-${idx}`} className="p-2 rounded-xl border border-slate-800 flex items-start justify-between text-xs gap-2">
+                        <div
+                          key={`fnb-cart-${idx}`}
+                          className={`p-2.5 rounded-xl border flex items-start justify-between gap-3 ${
+                            isLight
+                              ? 'bg-slate-50/75 border-slate-200'
+                              : 'bg-[#0d1117]/75 border-slate-800'
+                          }`}
+                        >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-bold truncate">{item.product.name}</span>
+                              <span className={`text-[13px] font-bold leading-snug ${isLight ? 'text-slate-900' : 'text-slate-100'}`}>
+                                {item.product.name}
+                              </span>
                               {item.kotSent && (
                                 <span
-                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                                  className={`px-1.5 py-0.5 rounded text-[9.5px] font-mono border ${
                                     isKotGraceExpired
                                       ? 'bg-rose-500/20 text-rose-300 border-rose-500/35'
                                       : 'bg-amber-500/20 text-amber-300 border-amber-500/35'
@@ -5409,13 +5566,13 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 </span>
                               )}
                               {item.promoBadge && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                <span className="px-1.5 py-0.5 rounded text-[9.5px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                                   {item.promoBadge}
                                 </span>
                               )}
                             </div>
                             {hasToppingsOrNotes && (
-                              <div className="mt-0.5 pl-1.5 border-l-2 border-emerald-500/40 space-y-0.5 text-[10px] leading-snug">
+                              <div className="mt-1 pl-2 border-l-2 border-emerald-500/40 space-y-0.5 text-[11px] leading-snug">
                                 {mods?.toppings && mods.toppings.length > 0 && (
                                   <div className={isLight ? 'text-emerald-700 font-medium' : 'text-emerald-300 font-medium'}>
                                     +{' '}
@@ -5450,8 +5607,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 )}
                               </div>
                             )}
-                            <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                              <span className="tabular-nums">
+                            <div className="text-[11px] text-slate-500 dark:text-gray-400 mt-1 flex items-center gap-2 flex-wrap">
+                              <span className="tabular-nums font-medium">
                                 {item.quantity}x @ Rp {item.product.sell_price.toLocaleString('id-ID')}
                               </span>
                               <button
@@ -5464,7 +5621,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                     ? 'Ubah Topping / Catatan (Wajib PIN Supervisor)'
                                     : 'Tambah / Ubah Topping & Catatan'
                                 }
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9.5px] font-semibold transition ${
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-semibold transition ${
                                   isToppingLocked
                                     ? 'border-slate-700/60 bg-slate-800/40 text-slate-500 opacity-60 cursor-not-allowed'
                                     : hasToppingsOrNotes
@@ -5484,90 +5641,97 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 <span>+ Topping</span>
                               </button>
                               {(item.freeBonusQty || 0) > 0 && (
-                                <span className="text-cyan-400 font-mono font-semibold">
+                                <span className="text-cyan-500 dark:text-cyan-400 font-mono font-semibold">
                                   (+ Gratis {item.freeBonusQty})
                                 </span>
                               )}
                               {savings > 0 && (
-                                <span className="text-emerald-400 font-mono">
+                                <span className="text-emerald-600 dark:text-emerald-400 font-mono">
                                   (Hemat Rp {savings.toLocaleString('id-ID')})
                                 </span>
                               )}
                             </div>
                             {item.promoHint && (
-                              <div className="text-[9px] text-amber-400/90 truncate mt-0.5">
+                              <div className="text-[10px] text-amber-500 dark:text-amber-400/90 truncate mt-0.5">
                                 {item.promoHint}
                               </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-                            <div className="inline-flex items-center gap-0.5">
+                          <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                            <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => handleUpdateQty(idx, -1)}
-                                className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] transition ${
+                                className={`w-7 h-7 flex items-center justify-center rounded-lg border transition ${
                                   isLockedKotItem
                                     ? 'border-slate-700/60 bg-slate-800/40 text-slate-500 opacity-50 cursor-not-allowed'
                                     : isLight
-                                    ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800 cursor-pointer'
+                                    ? 'border-slate-300 bg-white hover:bg-slate-200 text-slate-800 cursor-pointer'
                                     : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white cursor-pointer'
                                 }`}
                                 title={isLockedKotItem ? KOT_EXPIRED_LOCK_MESSAGE : 'Kurangi Qty'}
                               >
-                                <Minus className="w-2.5 h-2.5" />
+                                <Minus className="w-3.5 h-3.5" />
                               </button>
+                              <span className={`min-w-[1.5rem] text-center font-mono font-bold text-xs tabular-nums ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                                {item.quantity}
+                              </span>
                               <button
                                 type="button"
                                 onClick={() => handleUpdateQty(idx, 1)}
-                                className={`w-5 h-5 flex items-center justify-center rounded border text-[10px] cursor-pointer transition ${
-                                  isLight ? 'border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
+                                className={`w-7 h-7 flex items-center justify-center rounded-lg border cursor-pointer transition ${
+                                  isLight ? 'border-slate-300 bg-white hover:bg-slate-200 text-slate-800' : 'border-slate-700 bg-slate-800 hover:bg-slate-700 text-white'
                                 }`}
                                 title="Tambah Qty (Add-on)"
                               >
-                                <Plus className="w-2.5 h-2.5" />
+                                <Plus className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                            <span className="font-mono font-bold text-emerald-400 tabular-nums">Rp {item.subtotal.toLocaleString('id-ID')}</span>
+                            <span className="font-mono font-extrabold text-[13px] text-emerald-600 dark:text-emerald-400 tabular-nums min-w-[84px] text-right">
+                              Rp {item.subtotal.toLocaleString('id-ID')}
+                            </span>
                             <button
                               type="button"
                               onClick={() => handleRequestRemoveItem(idx)}
-                              className={
+                              className={`p-1 rounded-md transition ${
                                 isKotGraceExpired && isSentKotItem
                                   ? 'text-rose-500/40 cursor-not-allowed'
-                                  : 'text-rose-500 hover:text-rose-400 cursor-pointer'
-                              }
+                                  : 'text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer'
+                              }`}
                               title={
                                 isKotGraceExpired && isSentKotItem
                                   ? KOT_EXPIRED_LOCK_MESSAGE
                                   : 'Hapus Item'
                               }
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 space-y-1.5 shrink-0">
+                  <div className={`p-3 border-t space-y-2.5 shrink-0 ${isLight ? 'bg-slate-50/70 border-slate-200' : 'bg-[#0d1117]/60 border-slate-800'}`}>
                     {totalAllDiscounts > 0 && (
-                      <div className="flex justify-between items-center text-[11px] text-emerald-500 font-mono">
+                      <div className="flex justify-between items-center text-xs text-emerald-500 font-mono font-semibold">
                         <span>Total Hemat Promo</span>
                         <span>-Rp {totalAllDiscounts.toLocaleString('id-ID')}</span>
                       </div>
                     )}
-                    <div className="flex justify-between items-center text-sm leading-5 font-medium">
-                      <span className="text-slate-500 dark:text-slate-400">TOTAL</span>
-                      <span className="text-emerald-600 dark:text-emerald-400 font-mono font-semibold text-base sm:text-lg">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-sm font-extrabold tracking-wide text-slate-600 dark:text-slate-300">
+                        TOTAL
+                      </span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-mono font-extrabold text-xl tabular-nums">
                         Rp {grandTotal.toLocaleString('id-ID')}
                       </span>
                     </div>
 
                     {paymentMethod === 'SPLIT' ? (
-                      <div className="p-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 space-y-1">
-                        <div className="grid grid-cols-2 gap-1.5">
+                      <div className="p-2 rounded-xl border border-indigo-500/40 bg-indigo-500/10 space-y-1.5">
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 block">
+                            <label className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 block mb-0.5">
                               Nominal Tunai (1-10101):
                             </label>
                             <input
@@ -5579,7 +5743,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 setSplitCashAmount(val);
                               }}
                               placeholder="0"
-                              className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                              className={`h-8 w-full px-2 text-xs font-mono font-semibold border rounded-lg outline-none ${
                                 isLight
                                   ? 'border-emerald-500/60 bg-white text-slate-900'
                                   : 'border-emerald-500/50 bg-slate-950 text-white'
@@ -5587,8 +5751,8 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             />
                           </div>
                           <div>
-                            <div className="flex items-center justify-between">
-                              <label className="text-[9px] font-mono text-indigo-600 dark:text-indigo-300">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[10px] font-mono text-indigo-600 dark:text-indigo-300">
                                 Non-Tunai ({splitNonCashChannel}):
                               </label>
                               <button
@@ -5602,7 +5766,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                       : 'QRIS';
                                   setSplitNonCashChannel(next);
                                 }}
-                                className="text-[9px] font-mono px-1 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
+                                className="text-[10px] font-mono px-1.5 rounded bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 cursor-pointer"
                               >
                                 Ubah
                               </button>
@@ -5617,7 +5781,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                   setSplitNonCashAmount(val);
                                 }}
                                 placeholder="0"
-                                className={`h-7 w-full px-1.5 text-xs font-mono font-semibold border rounded outline-none ${
+                                className={`h-8 w-full px-2 text-xs font-mono font-semibold border rounded-lg outline-none ${
                                   isLight
                                     ? 'border-indigo-500/60 bg-white text-slate-900'
                                     : 'border-indigo-500/50 bg-slate-950 text-white'
@@ -5628,14 +5792,14 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                                 onClick={() =>
                                   setSplitNonCashAmount(Math.max(0, grandTotal - splitCashAmount))
                                 }
-                                className="h-7 px-1.5 rounded text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
+                                className="h-8 px-2 rounded-lg text-[10px] font-semibold bg-indigo-600 text-white cursor-pointer shrink-0"
                               >
                                 Sisa
                               </button>
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center justify-between text-[10px] font-mono pt-0.5">
+                        <div className="flex items-center justify-between text-[11px] font-mono pt-0.5">
                           <span className="text-slate-500 dark:text-slate-400">
                             Status Split (1-10101 + 1-10102):
                           </span>
@@ -5653,9 +5817,9 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                         </div>
                       </div>
                     ) : paymentMethod === 'CASH' ? (
-                      <div className="flex items-center justify-between gap-1.5 pt-0.5">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">Diterima:</span>
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Diterima:</span>
                           <input
                             type="number"
                             min={0}
@@ -5667,7 +5831,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                             }}
                             onKeyDown={handleCashInputKeyDown}
                             placeholder="0"
-                            className={`h-7 w-20 px-1.5 text-xs font-mono font-semibold text-center border rounded-lg outline-none ${
+                            className={`h-8 w-28 px-2 text-xs font-mono font-bold text-center border rounded-lg outline-none ${
                               isLight
                                 ? 'border-emerald-500/60 bg-white text-slate-900'
                                 : 'border-emerald-500/50 bg-slate-950 text-white'
@@ -5679,17 +5843,17 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                               setCashGiven(grandTotal);
                               setIsCashUnderpaid(false);
                             }}
-                            className="h-7 px-2 rounded-lg text-[10px] font-medium bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                            className="h-8 px-2.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
                           >
                             Pas
                           </button>
                         </div>
-                        <div className="text-right font-mono text-[11px]">
-                          <span className="text-slate-400 mr-1">
+                        <div className="text-right font-mono text-xs">
+                          <span className="text-slate-500 dark:text-slate-400 mr-1">
                             {cashGiven >= grandTotal ? 'Kembali:' : 'Kurang:'}
                           </span>
                           <span
-                            className={`font-bold ${
+                            className={`font-extrabold tabular-nums ${
                               cashGiven >= grandTotal
                                 ? 'text-emerald-600 dark:text-emerald-400'
                                 : 'text-amber-500'
@@ -5706,14 +5870,14 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                     ) : null}
 
                     <div
-                      className={`grid grid-cols-4 p-0.5 rounded-lg border text-[11px] gap-0.5 ${
+                      className={`grid grid-cols-4 p-1 rounded-xl border text-xs gap-1 ${
                         isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950 border-slate-800'
                       }`}
                     >
                       <button
                         type="button"
                         onClick={() => setPaymentMethod('CASH')}
-                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                        className={`h-8 px-2 rounded-lg cursor-pointer text-[11px] font-semibold whitespace-nowrap transition ${
                           paymentMethod === 'CASH'
                             ? 'bg-cyan-600 text-white shadow-xs'
                             : isLight
@@ -5729,7 +5893,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                           setPaymentMethod('QRIS');
                           setIsQrisModalOpen(true);
                         }}
-                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                        className={`h-8 px-2 rounded-lg cursor-pointer text-[11px] font-semibold whitespace-nowrap transition ${
                           paymentMethod === 'QRIS'
                             ? 'bg-cyan-600 text-white shadow-xs'
                             : isLight
@@ -5742,7 +5906,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       <button
                         type="button"
                         onClick={() => setPaymentMethod('EDC_DEBIT')}
-                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-medium whitespace-nowrap transition ${
+                        className={`h-8 px-2 rounded-lg cursor-pointer text-[11px] font-semibold whitespace-nowrap transition ${
                           paymentMethod === 'EDC_DEBIT'
                             ? 'bg-cyan-600 text-white shadow-xs'
                             : isLight
@@ -5755,7 +5919,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       <button
                         type="button"
                         onClick={handleSelectSplitPayment}
-                        className={`h-7 px-1.5 rounded-md cursor-pointer text-[10px] font-semibold whitespace-nowrap transition ${
+                        className={`h-8 px-2 rounded-lg cursor-pointer text-[11px] font-semibold whitespace-nowrap transition ${
                           paymentMethod === 'SPLIT'
                             ? 'bg-indigo-600 text-white shadow-xs'
                             : isLight
@@ -5771,7 +5935,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
                       type="button"
                       onClick={handleManualBayarClick}
                       disabled={cart.length === 0 || (paymentMethod === 'SPLIT' && !isSplitReadyToPay)}
-                      className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold text-xs leading-5 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-[0.99] transition-all duration-200"
+                      className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-extrabold text-sm tracking-wide leading-5 cursor-pointer shadow-md shadow-emerald-600/20 active:scale-[0.99] transition-all duration-200"
                     >
                       {paymentMethod === 'SPLIT'
                         ? isSplitReadyToPay
@@ -8547,7 +8711,7 @@ export const PosModule: React.FC<{ returnToRegisterSignal?: number }> = ({
             </div>
           )}
 
-          {!isFnbPhotoMenuMode && !isSalonServiceTerminal && !isLaundryTerminal && (
+          {!(isFnbMode || isFnbPhotoMenuMode) && !isSalonServiceTerminal && !isLaundryTerminal && (
             <div
               id="bar-pos-bottom-payment"
               className={`w-full min-h-[60px] shrink-0 mt-auto border rounded-xl px-2.5 sm:px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5 transition-all duration-200 ${

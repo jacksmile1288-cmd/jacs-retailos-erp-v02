@@ -72,6 +72,7 @@ import {
 import {
   ACTIVE_BUSINESS_PROFILE_STORAGE_KEY,
   ACTIVE_CASHIER_QUOTA_STORAGE_KEY,
+  createBusinessDomainConfig,
   deriveExecutiveVerticalFromProfile,
   getEffectiveBusinessDomainConfig,
   getStoredActiveCashierQuota,
@@ -146,6 +147,9 @@ import {
   isDemoSandboxMode,
   activateDemoSandbox,
   deactivateDemoSandbox,
+  setDemoSandboxBusinessType,
+  getDemoSandboxBusinessType,
+  getDemoBusinessProfileMeta,
   DEMO_SANDBOX_PREFIX,
   DEMO_SANDBOX_INIT_FLAG,
   DEMO_SANDBOX_ACTIVE_USER_KEY,
@@ -774,6 +778,8 @@ export interface AppContextType {
   isMasterCatalogWiped: boolean;
   isIntegratedDemoMode: boolean;
   isDemoSandbox: boolean;
+  businessType: string;
+  setBusinessType: (bType: string) => void;
   activeDemoBusinessType: string;
   switchDemoBusinessType: (bType: string) => void;
   publicDemoLockEnabled: boolean;
@@ -1733,9 +1739,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  const [isDemoSandboxState, setIsDemoSandboxState] = useState<boolean>(() => isDemoSandboxMode());
+
   const [activeDemoBusinessType, setActiveDemoBusinessType] = useState<string>(() => {
     try {
-      return localStorage.getItem('jacs_active_demo_business_type') || 'RETAIL';
+      return getDemoSandboxBusinessType();
     } catch {
       return 'RETAIL';
     }
@@ -1767,15 +1775,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
   }, [isSupabaseConfigured]);
 
+  const setBusinessType = useCallback((bType: string) => {
+    const normalizedType = String(bType || 'RETAIL').trim().toUpperCase();
+    setActiveDemoBusinessType(normalizedType);
+    if (isDemoSandboxMode()) {
+      setDemoSandboxBusinessType(normalizedType);
+    } else {
+      try {
+        localStorage.setItem('jacs_active_business_type', normalizedType);
+      } catch {}
+    }
+
+    const demoMeta = getDemoBusinessProfileMeta(normalizedType);
+    const nextDomainConfig = createBusinessDomainConfig(demoMeta.modelHint);
+    const prevProfile = businessProfileRef.current || DEFAULT_BUSINESS_PROFILE;
+    const updatedProfile = saveActiveBusinessProfileToStorage({
+      ...prevProfile,
+      ...(isDemoSandboxMode()
+        ? {
+            name: demoMeta.unitName,
+            businessName: demoMeta.unitName,
+            companyName: demoMeta.unitName,
+            tagline: demoMeta.tagline,
+          }
+        : {}),
+      businessType: normalizedType as any,
+      domainConfig: nextDomainConfig,
+      isConfigured: true,
+      updatedAt: Date.now(),
+    } as any);
+    businessProfileRef.current = updatedProfile;
+    setBusinessProfile(updatedProfile);
+  }, []);
+
   const switchDemoBusinessType = useCallback((bType: string) => {
-    setActiveDemoBusinessType(bType);
-    try {
-      localStorage.setItem('jacs_active_demo_business_type', bType);
-    } catch {}
+    const normalizedType = String(bType || 'RETAIL').trim().toUpperCase();
+    const demoMeta = getDemoBusinessProfileMeta(normalizedType);
+
+    setActiveDemoBusinessType(normalizedType);
+    setDemoSandboxBusinessType(normalizedType);
+
+    const nextDomainConfig = createBusinessDomainConfig(demoMeta.modelHint);
+    const prevProfile = businessProfileRef.current || DEFAULT_BUSINESS_PROFILE;
+    const nextDemoProfile = saveActiveBusinessProfileToStorage({
+      ...prevProfile,
+      name: demoMeta.unitName,
+      businessName: demoMeta.unitName,
+      companyName: demoMeta.unitName,
+      tagline: demoMeta.tagline,
+      businessType: normalizedType as any,
+      domainConfig: nextDomainConfig,
+      isConfigured: true,
+      updatedAt: Date.now(),
+    } as any);
+    businessProfileRef.current = nextDemoProfile;
+    setBusinessProfile(nextDemoProfile);
+    setIsFirstRunSetup(false);
+    setBranches((prev) =>
+      prev.length > 0
+        ? prev.map((br, idx) =>
+            idx === 0
+              ? {
+                  ...br,
+                  name: demoMeta.unitName,
+                  slogan: demoMeta.tagline,
+                  footerNote: `Terima kasih telah berkunjung ke ${demoMeta.unitName}`,
+                }
+              : br
+          )
+        : prev
+    );
 
     const now = new Date();
-    const activeSec = bType;
-    const activeBiz = businessProfileRef.current?.name || DEFAULT_BUSINESS_PROFILE.name;
+    const activeSec = normalizedType;
+    const activeBiz = demoMeta.unitName;
 
     isMasterCatalogWipedRef.current = false;
     setIsMasterCatalogWiped(false);
@@ -1822,26 +1895,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setBuildingDeliveryOrders([]);
     setBuildingAuthRequests([]);
 
+    const effectivePrefix = isDemoSandboxMode() ? DEMO_SANDBOX_PREFIX : STORAGE_PREFIX;
     try {
       localStorage.setItem(INTEGRATED_DEMO_MODE_KEY, 'true');
-      localStorage.setItem(`${STORAGE_PREFIX}products`, JSON.stringify(normalizedDemoProducts));
-      localStorage.setItem(`${STORAGE_PREFIX}suppliers`, JSON.stringify(pkg.suppliers));
-      localStorage.setItem(`${STORAGE_PREFIX}customers`, JSON.stringify(pkg.customers));
-      localStorage.setItem(`${STORAGE_PREFIX}employees`, JSON.stringify(pkg.employees));
-      localStorage.setItem(`${STORAGE_PREFIX}attendance`, JSON.stringify(pkg.attendance));
-      localStorage.setItem(`${STORAGE_PREFIX}leaves`, JSON.stringify(pkg.leaves));
-      localStorage.setItem(`${STORAGE_PREFIX}purchasing`, JSON.stringify(pkg.purchaseOrders));
-      localStorage.setItem(`${STORAGE_PREFIX}purchase_requests`, JSON.stringify(pkg.purchaseRequests));
-      localStorage.setItem(`${STORAGE_PREFIX}goods_receipts`, JSON.stringify(pkg.goodsReceipts));
-      localStorage.setItem(`${STORAGE_PREFIX}stock_mutations`, JSON.stringify(pkg.stockMutations));
-      localStorage.setItem(`${STORAGE_PREFIX}invoices_due`, JSON.stringify(pkg.invoicesDue));
-      localStorage.setItem(`${STORAGE_PREFIX}sales`, JSON.stringify(pkg.sales));
-      localStorage.setItem(`${STORAGE_PREFIX}shifts`, JSON.stringify(pkg.cashierShifts));
-      localStorage.setItem(`${STORAGE_PREFIX}finance`, JSON.stringify(pkg.financeEntries));
-      localStorage.setItem(`${STORAGE_PREFIX}journals`, JSON.stringify(pkg.journalEntries));
+      localStorage.setItem(`${effectivePrefix}products`, JSON.stringify(normalizedDemoProducts));
+      localStorage.setItem(`${effectivePrefix}suppliers`, JSON.stringify(pkg.suppliers));
+      localStorage.setItem(`${effectivePrefix}customers`, JSON.stringify(pkg.customers));
+      localStorage.setItem(`${effectivePrefix}employees`, JSON.stringify(pkg.employees));
+      localStorage.setItem(`${effectivePrefix}attendance`, JSON.stringify(pkg.attendance));
+      localStorage.setItem(`${effectivePrefix}leaves`, JSON.stringify(pkg.leaves));
+      localStorage.setItem(`${effectivePrefix}purchasing`, JSON.stringify(pkg.purchaseOrders));
+      localStorage.setItem(`${effectivePrefix}purchase_requests`, JSON.stringify(pkg.purchaseRequests));
+      localStorage.setItem(`${effectivePrefix}goods_receipts`, JSON.stringify(pkg.goodsReceipts));
+      localStorage.setItem(`${effectivePrefix}stock_mutations`, JSON.stringify(pkg.stockMutations));
+      localStorage.setItem(`${effectivePrefix}invoices_due`, JSON.stringify(pkg.invoicesDue));
+      localStorage.setItem(`${effectivePrefix}sales`, JSON.stringify(pkg.sales));
+      localStorage.setItem(`${effectivePrefix}shifts`, JSON.stringify(pkg.cashierShifts));
+      localStorage.setItem(`${effectivePrefix}finance`, JSON.stringify(pkg.financeEntries));
+      localStorage.setItem(`${effectivePrefix}journals`, JSON.stringify(pkg.journalEntries));
     } catch {}
 
-    showToast(`Unit Bisnis Demo dialihkan ke ${bType} (${pkg.summary.productCount} SKU siap)`, 'success');
+    showToast(`Unit Bisnis Demo aktif: ${demoMeta.unitName} (${normalizedType} • ${pkg.summary.productCount} SKU)`, 'success');
   }, [showToast]);
 
   const [products, setProducts] = useState<Product[]>(() => {
@@ -4104,10 +4178,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLedgerReset(false);
     setIsIntegratedDemoMode(true);
 
-    const targetSector = activeDemoBusinessType || activeSec;
+    const targetSector = isDemoSandboxMode()
+      ? getDemoSandboxBusinessType()
+      : activeDemoBusinessType || activeSec;
+    const demoMeta = getDemoBusinessProfileMeta(targetSector);
+    const resolvedDemoBizName = isDemoSandboxMode() ? demoMeta.unitName : activeBiz;
+    if (isDemoSandboxMode()) {
+      const nextDemoProfile = saveActiveBusinessProfileToStorage({
+        ...activeProfile,
+        name: demoMeta.unitName,
+        businessName: demoMeta.unitName,
+        companyName: demoMeta.unitName,
+        tagline: demoMeta.tagline,
+        businessType: targetSector as any,
+        domainConfig: createBusinessDomainConfig(demoMeta.modelHint),
+        isConfigured: true,
+        updatedAt: Date.now(),
+      } as any);
+      businessProfileRef.current = nextDemoProfile;
+      setBusinessProfile(nextDemoProfile);
+    }
     const pkg = generateIntegratedDemoForBusiness(targetSector, {
       activeSector: targetSector,
-      businessName: activeBiz,
+      businessName: resolvedDemoBizName,
       now,
     });
 
@@ -4230,10 +4323,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return res;
   }, [restoreDemoSimulationData, showToast]);
 
-  const launchInteractiveDemoSession = useCallback((businessType: string, targetModule: ActiveNavModule = 'pos') => {
+  const launchInteractiveDemoSession = useCallback((selectedBusinessType: string, targetModule: ActiveNavModule = 'pos') => {
+    const normalizedType = String(selectedBusinessType || 'RETAIL').trim().toUpperCase();
+    const demoMeta = getDemoBusinessProfileMeta(normalizedType);
+
     activateDemoSandbox();
-    switchDemoBusinessType(businessType);
-    restoreDemoSimulationData({ silent: true });
+    setIsDemoSandboxState(true);
+    setDemoSandboxBusinessType(normalizedType);
+    switchDemoBusinessType(normalizedType);
+    try {
+      sessionStorage.setItem(DEMO_SANDBOX_INIT_FLAG, 'true');
+    } catch {}
 
     const roleMap: Record<string, User['role']> = {
       executive: 'EXECUTIVE',
@@ -4259,11 +4359,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser(demoUser);
     setActiveNav(targetModule);
-    showToast(`Simulasi Demo Interaktif (${businessType}) aktif di divisi ${targetModule.toUpperCase()}!`, 'success');
-  }, [switchDemoBusinessType, restoreDemoSimulationData, setCurrentUser, setActiveNav, showToast]);
+    showToast(`Simulasi Demo ${demoMeta.unitName} (${normalizedType}) aktif di divisi ${targetModule.toUpperCase()}!`, 'success');
+  }, [switchDemoBusinessType, setCurrentUser, setActiveNav, showToast]);
 
   const exitDemoSandboxSession = useCallback(() => {
     deactivateDemoSandbox();
+    setIsDemoSandboxState(false);
     clearAllDemoSandboxStorage();
     window.location.reload();
   }, []);
@@ -12468,7 +12569,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isLedgerReset,
     isMasterCatalogWiped,
     isIntegratedDemoMode,
-    isDemoSandbox: IS_DEMO_SANDBOX,
+    isDemoSandbox: isDemoSandboxState,
+    businessType: isDemoSandboxState
+      ? activeDemoBusinessType
+      : String(resolveCanonicalSector(effectiveDomainConfig) || businessProfile?.businessType || 'RETAIL').toUpperCase(),
+    setBusinessType,
     activeDemoBusinessType,
     switchDemoBusinessType,
     publicDemoLockEnabled,

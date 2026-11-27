@@ -23,6 +23,7 @@ import {
   StockMutation,
   SupplierMaster,
 } from '../types';
+import { resolveFnbMenuImageUrl } from '../utils/demoSandbox';
 
 export interface IntegratedDemoPackageResult {
   products: Product[];
@@ -111,6 +112,7 @@ interface RawProductSpec {
   batchNumber?: string;
   expiryDate?: string;
   description?: string;
+  image?: string;
 }
 
 const getIndustryCatalog = (businessType: string): { suppliers: SupplierMaster[]; products: RawProductSpec[] } => {
@@ -196,16 +198,16 @@ const getIndustryCatalog = (businessType: string): { suppliers: SupplierMaster[]
 
     const fnbProducts: RawProductSpec[] = [
       ...rawMats,
-      { id: 'DEMO-SKU-FNB-01', barcode: '8992001000103', name: 'Es Kopi Susu Gula Aren Signature', category: 'Minuman Kopi', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Cup', hpp: bomHpp, minStock: 20, rackLocation: 'BAR-01', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', recipe: bomRecipe, costing: bomCosting },
-      { id: 'DEMO-SKU-FNB-02', barcode: '8992001000110', name: 'Nasi Goreng Spesial Seafood', category: 'Makanan Utama', categoryCode: 2, brand: 'Resto Rasa', unit: 'Porsi', hpp: 18000, minStock: 10, rackLocation: 'KITCHEN-01', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-03', barcode: '8992001000127', name: 'Ayam Bakar Madu Special', category: 'Makanan Utama', categoryCode: 2, brand: 'Resto Rasa', unit: 'Porsi', hpp: 21000, minStock: 10, rackLocation: 'KITCHEN-02', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-04', barcode: '8992001000134', name: 'Mie Ayam Jamur Bakso', category: 'Mi & Bakso', categoryCode: 3, brand: 'Resto Rasa', unit: 'Porsi', hpp: 14000, minStock: 15, rackLocation: 'KITCHEN-03', supplierId: 'SUP-DEMO-01', supplierName: 'PT Indofood Distribusi Nusantara', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-05', barcode: '8992001000141', name: 'Es Teh Manis Melati', category: 'Minuman Segar', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Gelas', hpp: 3000, minStock: 30, rackLocation: 'BAR-02', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-06', barcode: '8992001000158', name: 'Juice Alpukat Alpukat Kerok', category: 'Juice Buah', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Glass', hpp: 10000, minStock: 15, rackLocation: 'BAR-03', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-07', barcode: '8992001000165', name: 'Pisang Goreng Crispy Keju Susu', category: 'Camilan', categoryCode: 4, brand: 'Resto Rasa', unit: 'Porsi', hpp: 8500, minStock: 15, rackLocation: 'KITCHEN-04', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-08', barcode: '8992001000172', name: 'Soto Ayam Lamongan Koya', category: 'Sup & Soto', categoryCode: 2, brand: 'Resto Rasa', unit: 'Mangkok', hpp: 16000, minStock: 12, rackLocation: 'KITCHEN-05', supplierId: 'SUP-DEMO-01', supplierName: 'PT Indofood Distribusi Nusantara', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-09', barcode: '8992001000189', name: 'Lemon Tea Hangat / Dingin', category: 'Minuman Segar', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Cup', hpp: 5000, minStock: 20, rackLocation: 'BAR-04', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'RETAIL' },
-      { id: 'DEMO-SKU-FNB-10', barcode: '8992001000196', name: 'Kerupuk Udang Special (Toples)', category: 'Pelengkap', categoryCode: 4, brand: 'Resto Rasa', unit: 'Toples', hpp: 12000, minStock: 10, rackLocation: 'RAK-MEJA-01', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'RETAIL' },
+      { id: 'DEMO-SKU-FNB-01', barcode: '8992001000103', name: 'Es Kopi Susu Gula Aren Signature', category: 'Minuman Kopi', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Cup', hpp: bomHpp, minStock: 20, rackLocation: 'BAR-01', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', recipe: bomRecipe, costing: bomCosting, image: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-02', barcode: '8992001000110', name: 'Nasi Goreng Spesial Seafood', category: 'Makanan Utama', categoryCode: 2, brand: 'Resto Rasa', unit: 'Porsi', hpp: 18000, minStock: 10, rackLocation: 'KITCHEN-01', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-03', barcode: '8992001000127', name: 'Ayam Bakar Madu Special', category: 'Makanan Utama', categoryCode: 2, brand: 'Resto Rasa', unit: 'Porsi', hpp: 21000, minStock: 10, rackLocation: 'KITCHEN-02', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-04', barcode: '8992001000134', name: 'Mie Ayam Jamur Bakso', category: 'Mi & Bakso', categoryCode: 3, brand: 'Resto Rasa', unit: 'Porsi', hpp: 14000, minStock: 15, rackLocation: 'KITCHEN-03', supplierId: 'SUP-DEMO-01', supplierName: 'PT Indofood Distribusi Nusantara', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-05', barcode: '8992001000141', name: 'Es Teh Manis Melati', category: 'Minuman Segar', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Gelas', hpp: 3000, minStock: 30, rackLocation: 'BAR-02', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-06', barcode: '8992001000158', name: 'Juice Alpukat Alpukat Kerok', category: 'Juice Buah', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Glass', hpp: 10000, minStock: 15, rackLocation: 'BAR-03', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1623065422902-30a2d299bbe4?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-07', barcode: '8992001000165', name: 'Pisang Goreng Crispy Keju Susu', category: 'Camilan', categoryCode: 4, brand: 'Resto Rasa', unit: 'Porsi', hpp: 8500, minStock: 15, rackLocation: 'KITCHEN-04', supplierId: 'SUP-DEMO-04', supplierName: 'CV Mitra Bahan Segar Mandiri', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-08', barcode: '8992001000172', name: 'Soto Ayam Lamongan Koya', category: 'Sup & Soto', categoryCode: 2, brand: 'Resto Rasa', unit: 'Mangkok', hpp: 16000, minStock: 12, rackLocation: 'KITCHEN-05', supplierId: 'SUP-DEMO-01', supplierName: 'PT Indofood Distribusi Nusantara', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-09', barcode: '8992001000189', name: 'Lemon Tea Hangat / Dingin', category: 'Minuman Segar', categoryCode: 1, brand: 'Kafe Nusantara', unit: 'Cup', hpp: 5000, minStock: 20, rackLocation: 'BAR-04', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=400&q=80' },
+      { id: 'DEMO-SKU-FNB-10', barcode: '8992001000196', name: 'Kerupuk Udang Special (Toples)', category: 'Pelengkap', categoryCode: 4, brand: 'Resto Rasa', unit: 'Toples', hpp: 12000, minStock: 10, rackLocation: 'RAK-MEJA-01', supplierId: 'SUP-DEMO-03', supplierName: 'PT Mayora Prima Niaga', itemType: 'MENU_FB', image: 'https://images.unsplash.com/photo-1599490659213-e2b9527bd087?auto=format&fit=crop&w=400&q=80' },
     ];
     return { suppliers: defaultSuppliers, products: fnbProducts };
   }
@@ -434,8 +436,13 @@ const buildProductSnapshot = (spec: RawProductSpec, stock: number, initialIn: nu
     rackLocation: spec.rackLocation,
     supplier: spec.supplierName,
     status: 'Active',
-    businessModel: 'retail',
+    businessModel: spec.itemType === 'MENU_FB' ? 'fnb' : 'retail',
     itemType: spec.itemType || 'RETAIL',
+    image:
+      spec.image ||
+      (spec.itemType === 'MENU_FB' || spec.id.toUpperCase().includes('-FNB-')
+        ? resolveFnbMenuImageUrl(spec.name, spec.category)
+        : undefined),
     recipe: spec.recipe,
     costing: spec.costing,
     batchNumber: spec.batchNumber,
