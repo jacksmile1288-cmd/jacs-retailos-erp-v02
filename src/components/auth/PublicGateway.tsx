@@ -1072,144 +1072,148 @@ const displayStoreLabel = rawStoreName || 'KHANSA SWALAYAN';
         <div
           className={`mx-auto w-full max-w-sm flex flex-col gap-3 mt-1 transition-transform duration-75 ${shakeTransformClass}`}
         >
-          <div
-            className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
-            style={{
-              borderColor:
-                focusedField === 'username'
-                  ? selectedModule.colorHex
-                  : theme === 'light'
-                  ? 'rgba(203,213,225,0.9)'
-                  : 'rgba(51,65,85,0.8)',
-              boxShadow:
-                focusedField === 'username'
-                  ? `0 0 22px ${selectedModule.colorHex}55, 0 8px 20px -6px rgba(0,0,0,0.35)`
-                  : '0 6px 18px -6px rgba(0,0,0,0.22)',
-            }}
-          >
-            <span className="pl-4 pr-2.5 flex items-center pointer-events-none transition-colors duration-300">
-              <UserIcon
-                className="w-4 h-4 transition-colors duration-300"
-                style={{ color: focusedField === 'username' ? selectedModule.colorHex : '#22d3ee' }}
-              />
-            </span>
-            <input
-              id="gateway_operator_id"
-              name="gateway_operator_id"
-              type="text"
-              autoComplete="off"
-              data-lpignore="true"
-              data-form-type="other"
-              value={username}
-              onFocus={() => setFocusedField('username')}
-              onBlur={() => setFocusedField((prev) => (prev === 'username' ? null : prev))}
-              onChange={(e) => setUsername(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && executeLogin()}
-              placeholder="Username Operator..."
-              className="flex-1 h-full !bg-transparent !border-0 focus:!shadow-none text-slate-900 dark:text-white placeholder:text-slate-400 text-xs font-bold pr-5 rounded-r-full outline-none"
-            />
-          </div>
-
-          <div
-            className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
-            style={{
-              borderColor: errorMsg
-                ? '#f43f5e'
-                : focusedField === 'pin'
-                ? selectedModule.colorHex
-                : theme === 'light'
-                ? 'rgba(203,213,225,0.9)'
-                : 'rgba(51,65,85,0.8)',
-              boxShadow: errorMsg
-                ? '0 0 20px rgba(244,63,94,0.4), 0 8px 20px -6px rgba(0,0,0,0.35)'
-                : focusedField === 'pin'
-                ? `0 0 22px ${selectedModule.colorHex}55, 0 8px 20px -6px rgba(0,0,0,0.35)`
-                : '0 6px 18px -6px rgba(0,0,0,0.22)',
-            }}
-          >
-            <span className="pl-4 pr-2.5 flex items-center pointer-events-none transition-colors duration-300">
-              <Lock
-                className="w-4 h-4 transition-colors duration-300"
+          {(!publicDemoLockEnabled || showBackdoorAuth) && (
+            <>
+              <div
+                className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
                 style={{
-                  color: errorMsg
+                  borderColor:
+                    focusedField === 'username'
+                      ? selectedModule.colorHex
+                      : theme === 'light'
+                      ? 'rgba(203,213,225,0.9)'
+                      : 'rgba(51,65,85,0.8)',
+                  boxShadow:
+                    focusedField === 'username'
+                      ? `0 0 22px ${selectedModule.colorHex}55, 0 8px 20px -6px rgba(0,0,0,0.35)`
+                      : '0 6px 18px -6px rgba(0,0,0,0.22)',
+                }}
+              >
+                <span className="pl-4 pr-2.5 flex items-center pointer-events-none transition-colors duration-300">
+                  <UserIcon
+                    className="w-4 h-4 transition-colors duration-300"
+                    style={{ color: focusedField === 'username' ? selectedModule.colorHex : '#22d3ee' }}
+                  />
+                </span>
+                <input
+                  id="gateway_operator_id"
+                  name="gateway_operator_id"
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  value={username}
+                  onFocus={() => setFocusedField('username')}
+                  onBlur={() => setFocusedField((prev) => (prev === 'username' ? null : prev))}
+                  onChange={(e) => setUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && executeLogin()}
+                  placeholder="Username Operator..."
+                  className="flex-1 h-full !bg-transparent !border-0 focus:!shadow-none text-slate-900 dark:text-white placeholder:text-slate-400 text-xs font-bold pr-5 rounded-r-full outline-none"
+                />
+              </div>
+
+              <div
+                className="relative flex items-center h-11 rounded-full border-2 backdrop-blur-xl bg-[#F6F8FB]/90 dark:bg-slate-900/75 transition-all duration-300"
+                style={{
+                  borderColor: errorMsg
                     ? '#f43f5e'
                     : focusedField === 'pin'
                     ? selectedModule.colorHex
-                    : '#10b981',
+                    : theme === 'light'
+                    ? 'rgba(203,213,225,0.9)'
+                    : 'rgba(51,65,85,0.8)',
+                  boxShadow: errorMsg
+                    ? '0 0 20px rgba(244,63,94,0.4), 0 8px 20px -6px rgba(0,0,0,0.35)'
+                    : focusedField === 'pin'
+                    ? `0 0 22px ${selectedModule.colorHex}55, 0 8px 20px -6px rgba(0,0,0,0.35)`
+                    : '0 6px 18px -6px rgba(0,0,0,0.22)',
                 }}
-              />
-            </span>
-            <input
-              ref={pinInputRef}
-              id="gateway_access_code"
-              name="gateway_access_code"
-              type="text"
-              inputMode="numeric"
-              autoComplete="off"
-              data-lpignore="true"
-              data-form-type="other"
-              style={!showPin ? ({ WebkitTextSecurity: 'disc' } as React.CSSProperties) : undefined}
-              value={pin}
-              onFocus={() => setFocusedField('pin')}
-              onBlur={() => setFocusedField((prev) => (prev === 'pin' ? null : prev))}
-              onChange={(e) => {
-                setPin(e.target.value);
-                setErrorMsg(null);
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && executeLogin()}
-              placeholder="Masukkan PIN Divisi..."
-              className="flex-1 h-full !bg-transparent !border-0 focus:!shadow-none text-slate-900 dark:text-white placeholder:text-slate-400 text-xs font-mono tracking-widest pr-2 rounded-none outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPin(!showPin)}
-              className="pr-4 pl-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
-            >
-              {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
+              >
+                <span className="pl-4 pr-2.5 flex items-center pointer-events-none transition-colors duration-300">
+                  <Lock
+                    className="w-4 h-4 transition-colors duration-300"
+                    style={{
+                      color: errorMsg
+                        ? '#f43f5e'
+                        : focusedField === 'pin'
+                        ? selectedModule.colorHex
+                        : '#10b981',
+                    }}
+                  />
+                </span>
+                <input
+                  ref={pinInputRef}
+                  id="gateway_access_code"
+                  name="gateway_access_code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  style={!showPin ? ({ WebkitTextSecurity: 'disc' } as React.CSSProperties) : undefined}
+                  value={pin}
+                  onFocus={() => setFocusedField('pin')}
+                  onBlur={() => setFocusedField((prev) => (prev === 'pin' ? null : prev))}
+                  onChange={(e) => {
+                    setPin(e.target.value);
+                    setErrorMsg(null);
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && executeLogin()}
+                  placeholder="Masukkan PIN Divisi..."
+                  className="flex-1 h-full !bg-transparent !border-0 focus:!shadow-none text-slate-900 dark:text-white placeholder:text-slate-400 text-xs font-mono tracking-widest pr-2 rounded-none outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="pr-4 pl-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
+                >
+                  {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
 
-          {errorMsg && (
-            <div className="py-1.5 px-4 rounded-full bg-rose-500/15 backdrop-blur-md border border-rose-500/40 text-rose-500 dark:text-rose-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-[0_0_14px_rgba(244,63,94,0.22)] transition-all duration-200">
-              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-              <span>{errorMsg}</span>
-            </div>
+              {errorMsg && (
+                <div className="py-1.5 px-4 rounded-full bg-rose-500/15 backdrop-blur-md border border-rose-500/40 text-rose-500 dark:text-rose-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 shadow-[0_0_14px_rgba(244,63,94,0.22)] transition-all duration-200">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                id="btn-public-gateway-login"
+                disabled={isVerifying}
+                onClick={executeLogin}
+                className="w-full h-11 rounded-full font-black text-xs bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:via-teal-400 hover:to-emerald-400 text-white hover:-translate-y-0.5 flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer active:scale-95 disabled:opacity-75 disabled:cursor-wait uppercase tracking-wider"
+                style={{
+                  boxShadow: `0 10px 26px -6px ${selectedModule.colorHex}70, 0 0 18px rgba(6,182,212,0.35)`,
+                }}
+              >
+                {isVerifying ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>MEMVERIFIKASI...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>MASUK</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSuperAdminError(null);
+                  setShowSuperAdminModal(true);
+                }}
+                className="mx-auto text-[11px] text-slate-700 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-300 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md border border-slate-300/80 dark:border-slate-700/70 hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:shadow-[0_0_16px_rgba(6,182,212,0.25)] rounded-full py-1.5 px-5 transition-all duration-300 active:scale-95 cursor-pointer text-center font-['JetBrains_Mono'] flex items-center justify-center gap-1.5"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>SuperAdmin Access</span>
+              </button>
+            </>
           )}
-
-          <button
-            type="button"
-            id="btn-public-gateway-login"
-            disabled={isVerifying}
-            onClick={executeLogin}
-            className="w-full h-11 rounded-full font-black text-xs bg-gradient-to-r from-cyan-500 via-teal-500 to-emerald-500 hover:from-cyan-400 hover:via-teal-400 hover:to-emerald-400 text-white hover:-translate-y-0.5 flex items-center justify-center gap-2 transition-all duration-300 cursor-pointer active:scale-95 disabled:opacity-75 disabled:cursor-wait uppercase tracking-wider"
-            style={{
-              boxShadow: `0 10px 26px -6px ${selectedModule.colorHex}70, 0 0 18px rgba(6,182,212,0.35)`,
-            }}
-          >
-            {isVerifying ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>MEMVERIFIKASI...</span>
-              </>
-            ) : (
-              <>
-                <LogIn className="w-4 h-4" />
-                <span>MASUK</span>
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSuperAdminError(null);
-              setShowSuperAdminModal(true);
-            }}
-            className="mx-auto text-[11px] text-slate-700 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-300 bg-[#F6F8FB]/80 dark:bg-slate-900/50 backdrop-blur-md border border-slate-300/80 dark:border-slate-700/70 hover:border-cyan-400/60 hover:bg-cyan-500/10 hover:shadow-[0_0_16px_rgba(6,182,212,0.25)] rounded-full py-1.5 px-5 transition-all duration-300 active:scale-95 cursor-pointer text-center font-['JetBrains_Mono'] flex items-center justify-center gap-1.5"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>SuperAdmin Access</span>
-          </button>
 
           <button
             type="button"

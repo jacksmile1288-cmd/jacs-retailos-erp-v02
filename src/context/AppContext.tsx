@@ -1741,9 +1741,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  const executeCloudSyncRef = useRef<any>(null);
+
   const [publicDemoLockEnabled, setPublicDemoLockEnabledState] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('jacs_public_demo_lock_enabled_v1') === 'true';
+      return (
+        localStorage.getItem('jacs_public_demo_lock') === 'true' ||
+        localStorage.getItem('jacs_public_demo_lock_enabled_v1') === 'true'
+      );
     } catch {
       return false;
     }
@@ -1752,9 +1757,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setPublicDemoLockEnabled = useCallback((enabled: boolean) => {
     setPublicDemoLockEnabledState(enabled);
     try {
+      localStorage.setItem('jacs_public_demo_lock', String(enabled));
       localStorage.setItem('jacs_public_demo_lock_enabled_v1', String(enabled));
     } catch {}
-  }, []);
+    try {
+      if (dualBackendSync.getConfig().supabaseUrl || isSupabaseConfigured) {
+        executeCloudSyncRef.current?.().catch(() => {});
+      }
+    } catch {}
+  }, [isSupabaseConfigured]);
 
   const switchDemoBusinessType = useCallback((bType: string) => {
     setActiveDemoBusinessType(bType);
@@ -10979,6 +10990,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         financeEntries: financeEntries || [],
         journalEntries: journalEntries || [],
         businessProfile: businessProfile || DEFAULT_BUSINESS_PROFILE,
+        publicDemoLockEnabled,
         timestamp: nowIso,
         txUuid,
         appVersion: '2.5.0-ENTERPRISE',
@@ -11391,6 +11403,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
 
+        // 6. Terapkan publicDemoLockEnabled dari cloud tanpa menimpa local true jika cloud kosong/undefined
+        const cloudLock = pulled.publicDemoLockEnabled ?? pulled.businessProfile?.publicDemoLockEnabled;
+        const localLock = localStorage.getItem('jacs_public_demo_lock') === 'true' || localStorage.getItem('jacs_public_demo_lock_enabled_v1') === 'true';
+        if (cloudLock === true) {
+          setPublicDemoLockEnabledState(true);
+          localStorage.setItem('jacs_public_demo_lock', 'true');
+          localStorage.setItem('jacs_public_demo_lock_enabled_v1', 'true');
+        } else if (localLock) {
+          setPublicDemoLockEnabledState(true);
+          localStorage.setItem('jacs_public_demo_lock', 'true');
+          localStorage.setItem('jacs_public_demo_lock_enabled_v1', 'true');
+        } else if (cloudLock === false) {
+          setPublicDemoLockEnabledState(false);
+          localStorage.setItem('jacs_public_demo_lock', 'false');
+          localStorage.setItem('jacs_public_demo_lock_enabled_v1', 'false');
+        }
+
         const transportLabel =
           result.transport === 'SUPABASE'
             ? 'Supabase (jacs_erp_snapshots)'
@@ -11437,6 +11466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     [showToast, appendAudit, currentUser, updateBusinessProfile]
   );
+  executeCloudSyncRef.current = executeCloudSync;
 
   const testCloudEndpointsHandler = useCallback(
     async (customConfig?: DualBackendConfig): Promise<CloudConnectionPingResult> => {

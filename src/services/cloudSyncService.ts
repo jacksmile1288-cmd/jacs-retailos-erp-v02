@@ -13,6 +13,7 @@ export interface CloudSyncSnapshot {
   financeEntries: any[];
   journalEntries: any[];
   businessProfile: any;
+  publicDemoLockEnabled?: boolean;
   timestamp?: string;
   txUuid?: string;
   sourceTerminalId?: string;
