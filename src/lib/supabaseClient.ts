@@ -206,6 +206,7 @@ export const SUPABASE_SETUP_SQL_SCRIPT = `-- ===================================
 -- 1. TABEL PRODUCTS (Master Produk, Harga, Stok & Multi-UOM)
 CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT DEFAULT 'default-tenant',
     sku TEXT,
     barcode TEXT,
     name TEXT NOT NULL,
@@ -225,15 +226,19 @@ CREATE TABLE IF NOT EXISTS products (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE products ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default-tenant';
+CREATE INDEX IF NOT EXISTS idx_products_tenant ON products(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
 CREATE INDEX IF NOT EXISTS idx_products_updated_at ON products(updated_at DESC);
 
--- 2. TABEL POS_TRANSACTIONS (Transaksi Penjualan Kasir & ERP)
+-- 2. TABEL POS_TRANSACTIONS (Transaksi Append-Only Multi-Kasir Berbasis UUID)
 CREATE TABLE IF NOT EXISTS pos_transactions (
-    receipt_number TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT DEFAULT 'default-tenant',
+    receipt_number TEXT,
     shift_id TEXT,
-    terminal_id TEXT,
+    terminal_id TEXT NOT NULL DEFAULT 'POS-01',
     station_code TEXT,
     cashier_name TEXT,
     customer_id TEXT,
@@ -248,16 +253,23 @@ CREATE TABLE IF NOT EXISTS pos_transactions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE pos_transactions ADD COLUMN IF NOT EXISTS id TEXT;
+ALTER TABLE pos_transactions ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default-tenant';
+CREATE INDEX IF NOT EXISTS idx_transactions_tenant ON pos_transactions(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_terminal ON pos_transactions(terminal_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON pos_transactions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_station ON pos_transactions(station_code);
 
--- 3. TABEL STOCK_MOVEMENTS (Mutasi Stok & Log Inventory)
+-- 3. TABEL STOCK_MOVEMENTS (Mutasi Stok Delta & Audit Inventory)
 CREATE TABLE IF NOT EXISTS stock_movements (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT DEFAULT 'default-tenant',
+    terminal_id TEXT DEFAULT 'POS-01',
     product_id TEXT NOT NULL,
     sku TEXT,
     product_name TEXT,
-    delta_qty NUMERIC NOT NULL,
+    qty_delta NUMERIC NOT NULL,
+    delta_qty NUMERIC,
     movement_type TEXT NOT NULL, -- 'SALE', 'RESTOCK', 'ADJUSTMENT', 'RETURN'
     reference_id TEXT,
     notes TEXT,
@@ -265,6 +277,10 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default-tenant';
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS terminal_id TEXT DEFAULT 'POS-01';
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS qty_delta NUMERIC;
+CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant ON stock_movements(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at DESC);
 
@@ -282,8 +298,8 @@ CREATE POLICY "Public Upsert Products" ON products FOR ALL TO anon, authenticate
 DROP POLICY IF EXISTS "Public Read Transactions" ON pos_transactions;
 CREATE POLICY "Public Read Transactions" ON pos_transactions FOR SELECT TO anon, authenticated USING (true);
 
-DROP POLICY IF EXISTS "Public Insert Transactions" ON pos_transactions;
-CREATE POLICY "Public Insert Transactions" ON pos_transactions FOR INSERT TO anon, authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Public Upsert Transactions" ON pos_transactions;
+CREATE POLICY "Public Upsert Transactions" ON pos_transactions FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public Read Stock Movements" ON stock_movements;
 CREATE POLICY "Public Read Stock Movements" ON stock_movements FOR SELECT TO anon, authenticated USING (true);
@@ -296,7 +312,29 @@ ALTER PUBLICATION supabase_realtime ADD TABLE products;
 ALTER PUBLICATION supabase_realtime ADD TABLE pos_transactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE stock_movements;
 
--- 6. POSTGRESQL ATOMIC & IDEMPOTENT POS TRANSACTION RPC FUNCTION
+-- 6. POSTGRESQL ATOMIC STOCK ADJUSTMENT RPC (ANTI RACE-CONDITION MULTI-KASIR)
+CREATE OR REPLACE FUNCTION adjust_product_stock(
+    p_product_id TEXT,
+    p_delta NUMERIC
+)
+RETURNS TABLE(product_id TEXT, new_stock NUMERIC)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_new_stock NUMERIC;
+BEGIN
+    UPDATE products
+    SET stock = GREATEST(0, COALESCE(stock, 0) + COALESCE(p_delta, 0)),
+        updated_at = NOW()
+    WHERE id = p_product_id
+    RETURNING stock INTO v_new_stock;
+
+    RETURN QUERY SELECT p_product_id, COALESCE(v_new_stock, 0);
+END;
+$$;
+
+-- 7. POSTGRESQL ATOMIC & IDEMPOTENT POS TRANSACTION RPC FUNCTION
 CREATE OR REPLACE FUNCTION process_pos_transaction_atomic(
     p_receipt_number TEXT,
     p_shift_id TEXT,
@@ -325,7 +363,6 @@ DECLARE
     v_sku TEXT;
     v_existing_count INTEGER;
 BEGIN
-    -- A. Cek duplikasi nota / transaksi (Idempotency Check)
     SELECT COUNT(*) INTO v_existing_count FROM pos_transactions WHERE receipt_number = p_receipt_number;
     IF v_existing_count > 0 THEN
         RETURN jsonb_build_object(
@@ -336,7 +373,6 @@ BEGIN
         );
     END IF;
 
-    -- B. Proses iterasi item untuk potong stok (products.stock) & catat stock_movements
     FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
     LOOP
         v_product_id := COALESCE(v_item->>'productId', v_item->>'product_id');
@@ -346,18 +382,15 @@ BEGIN
         v_product_name := COALESCE(v_item->>'productName', v_item->>'product_name', 'Item POS');
         v_sku := COALESCE(v_item->>'sku', v_product_id);
 
-        -- Potong stok produk di tabel products (Atomic decrement)
-        UPDATE products
-        SET stock = GREATEST(0, stock - v_base_qty),
-            updated_at = NOW()
-        WHERE id = v_product_id;
+        PERFORM adjust_product_stock(v_product_id, -v_base_qty);
 
-        -- Catat mutasi stok di tabel stock_movements
         INSERT INTO stock_movements (
             id,
+            terminal_id,
             product_id,
             sku,
             product_name,
+            qty_delta,
             delta_qty,
             movement_type,
             reference_id,
@@ -365,10 +398,12 @@ BEGIN
             created_by,
             created_at
         ) VALUES (
-            'SM-' || extract(epoch from clock_timestamp())::text || '-' || floor(random() * 1000)::text,
+            gen_random_uuid()::text,
+            p_terminal_id,
             v_product_id,
             v_sku,
             v_product_name,
+            -v_base_qty,
             -v_base_qty,
             'SALE',
             p_receipt_number,
@@ -378,8 +413,8 @@ BEGIN
         );
     END LOOP;
 
-    -- C. Simpan transaksi ke tabel pos_transactions
     INSERT INTO pos_transactions (
+        id,
         receipt_number,
         shift_id,
         terminal_id,
@@ -396,6 +431,7 @@ BEGIN
         synced_at,
         created_at
     ) VALUES (
+        gen_random_uuid()::text,
         p_receipt_number,
         p_shift_id,
         p_terminal_id,

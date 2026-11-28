@@ -179,12 +179,17 @@ import {
 } from '../services/cloudSyncService';
 import { syncWithCloverPos, CloverSyncResult } from '../services/cloverSyncService';
 import {
-  pushTransactionAtomicRpc,
-  pushStockMovementToSupabase,
+  OFFLINE_TX_QUEUE_KEY,
+  generateTransactionUUID,
+  resolveActiveTenantId,
+  pushPosTransactionAppendOnly,
+  recordAtomicStockMovement,
   syncSnapshotToSupabase,
   pullLatestSnapshotFromSupabase,
+  syncOfflineTxQueueToSupabase,
   syncOfflineQueueToSupabase,
-  getOfflineQueue as getSupabaseOfflineQueue,
+  subscribeToErpRealtime,
+  getTotalSupabaseOfflineQueueCount,
   clearOfflineQueue as clearSupabaseOfflineQueue,
 } from '../services/supabaseSyncService';
 import {
@@ -4952,6 +4957,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const nowIso = new Date().toISOString();
         const txUuid = generateTxUuid();
 
+        const resolvedSb = resolveSupabaseCredentials({
+          supabaseUrl: config.supabaseUrl,
+          supabaseAnonKey: config.supabaseAnonKey,
+        });
+        const hasSupabaseCreds = Boolean(resolvedSb.configured && resolvedSb.supabaseAnonKey);
+
+        // Arsitektur Transaksional Multi-Kasir:
+        // Untuk event POS_TRANSACTION / STOCK_CHANGE saat Supabase aktif, JANGAN menimpa snapshot JSON tunggal
+        // agar transaksi bersamaan dari 2+ kasir tidak saling menimpa. Cukup flush antrean transaksional.
+        if ((reason === 'POS_TRANSACTION' || reason === 'STOCK_CHANGE') && hasSupabaseCreds) {
+          const txFlush = await syncOfflineTxQueueToSupabase({
+            supabaseUrl: resolvedSb.supabaseUrl,
+            supabaseAnonKey: resolvedSb.supabaseAnonKey,
+          });
+          await syncOfflineQueueToSupabase(
+            {
+              supabaseUrl: resolvedSb.supabaseUrl,
+              supabaseAnonKey: resolvedSb.supabaseAnonKey,
+            },
+            { skipTxQueue: true }
+          );
+          if (txFlush.syncedCount > 0) {
+            const syncedIdSet = new Set(txFlush.syncedTxIds);
+            const syncedReceiptSet = new Set(txFlush.syncedReceiptNumbers);
+            setSales((prev) =>
+              prev.map((s) =>
+                syncedIdSet.has(s.transaction_id) ||
+                (s.receipt_number && syncedReceiptSet.has(s.receipt_number))
+                  ? { ...s, syncStatus: 'SYNCED' }
+                  : s
+              )
+            );
+          }
+          setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
+          (dualBackendSync as any).lastSyncTime = nowIso;
+          (dualBackendSync as any).notify?.();
+          return;
+        }
+
         const snapshot: CloudSyncSnapshot = {
           products: productsRef.current || [],
           transactions: salesRef.current || [],
@@ -5069,13 +5113,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [gasOfflineQueueCount, setGasOfflineQueueCount] = useState(() => getGasOfflineQueue().length);
   const [supabaseOfflineQueueCount, setSupabaseOfflineQueueCount] = useState(
-    () => getSupabaseOfflineQueue().length
+    () => getTotalSupabaseOfflineQueueCount()
   );
 
   useEffect(() => {
     const refreshQueueCounts = () => {
       setGasOfflineQueueCount(getGasOfflineQueue().length);
-      setSupabaseOfflineQueueCount(getSupabaseOfflineQueue().length);
+      setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
     };
     window.addEventListener('jacs_offline_queue_updated', refreshQueueCounts);
     window.addEventListener('storage', refreshQueueCounts);
@@ -5103,10 +5147,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     let sbQueueSynced = 0;
     if (safeSbUrl && resolvedSb.supabaseAnonKey) {
-      sbQueueSynced = await syncOfflineQueueToSupabase({
+      const sbCreds = {
         supabaseUrl: safeSbUrl,
         supabaseAnonKey: resolvedSb.supabaseAnonKey,
-      });
+      };
+      const txFlush = await syncOfflineTxQueueToSupabase(sbCreds);
+      if (txFlush.syncedCount > 0) {
+        const syncedIdSet = new Set(txFlush.syncedTxIds);
+        const syncedReceiptSet = new Set(txFlush.syncedReceiptNumbers);
+        setSales((prev) =>
+          prev.map((s) =>
+            syncedIdSet.has(s.transaction_id) ||
+            (s.receipt_number && syncedReceiptSet.has(s.receipt_number))
+              ? { ...s, syncStatus: 'SYNCED' }
+              : s
+          )
+        );
+      }
+      const restSbSynced = await syncOfflineQueueToSupabase(sbCreds, { skipTxQueue: true });
+      sbQueueSynced = txFlush.syncedCount + restSbSynced;
     }
 
     let gasSynced = 0;
@@ -5118,7 +5177,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const nextGasCount = getGasOfflineQueue().length;
-    const nextSbCount = getSupabaseOfflineQueue().length;
+    const nextSbCount = getTotalSupabaseOfflineQueueCount();
     setGasOfflineQueueCount(nextGasCount);
     setSupabaseOfflineQueueCount(nextSbCount);
 
@@ -5152,6 +5211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.removeItem('jacs_dual_backend_queue');
       localStorage.removeItem('jacs_dual_backend_failed_queue_v1');
       localStorage.removeItem('jacs_supabase_offline_queue_v1');
+      localStorage.removeItem(OFFLINE_TX_QUEUE_KEY);
       localStorage.removeItem('jacs_supabase_failed_queue_v1');
       localStorage.removeItem('jacs_gas_offline_queue_v1');
       localStorage.removeItem('jacs_gas_failed_queue_v1');
@@ -7178,23 +7238,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       addSale(newSale);
       showReceipt(newSale);
 
-      const txUuid = generateTxUuid();
+      const txUuid = generateTransactionUUID();
       const currentStorageMode = dualBackendSync.getStorageMode();
+      const activeTenantId = resolveActiveTenantId(businessProfileRef.current);
+      const resolvedTerminalId = payload.terminalId || activeTerminal?.stationCode || activeTerminalId || 'POS-01';
 
-      if (currentStorageMode !== 'LOCAL_ONLY') {
-        // 1. Enqueue to dual-backend sync engine (Supabase & GAS REST)
+      if (currentStorageMode !== 'LOCAL_ONLY' && !IS_DEMO_SANDBOX) {
+        // 1. Enqueue to dual-backend sync engine
         dualBackendSync.enqueue('POS_TRANSACTION', 'INSERT', {
           ...newSale,
+          id: txUuid,
           tx_uuid: txUuid,
+          tenant_id: activeTenantId,
+          terminal_id: resolvedTerminalId,
         });
+
+        // 2. Append-Only UUID POS Transaction + Atomic Stock Delta RPC (anti-konflik multi-kasir)
+        const storedCfg = dualBackendSync.getConfig();
+        const resolvedSb = resolveSupabaseCredentials({
+          supabaseUrl: storedCfg.supabaseUrl,
+          supabaseAnonKey: storedCfg.supabaseAnonKey,
+        });
+        const sbRuntimeConfig = resolvedSb.configured
+          ? {
+              supabaseUrl: resolvedSb.supabaseUrl,
+              supabaseAnonKey: resolvedSb.supabaseAnonKey,
+            }
+          : undefined;
+
+        pushPosTransactionAppendOnly(
+          {
+            id: txUuid,
+            tenantId: activeTenantId,
+            receiptNumber: newSale.receipt_number || newSale.transaction_id,
+            shiftId: payload.shiftId,
+            terminalId: resolvedTerminalId,
+            stationCode: resolvedStationCode,
+            cashierName: newSale.cashier_name,
+            customerId: payload.customerId,
+            customerName: payload.customerName,
+            items: payload.items,
+            total: payload.total,
+            paymentMethod: newSale.payment_method,
+            cashTendered: payload.cashTendered,
+            changeDue: payload.changeDue,
+            createdAt: newSale.created_at,
+          },
+          sbRuntimeConfig
+        )
+          .then((res) => {
+            setSales((prev) =>
+              prev.map((s) =>
+                s.transaction_id === newSale.transaction_id ||
+                (newSale.receipt_number && s.receipt_number === newSale.receipt_number)
+                  ? { ...s, syncStatus: res.success ? 'SYNCED' : 'PENDING_SYNC' }
+                  : s
+              )
+            );
+            setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
+          })
+          .catch(() => {
+            setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
+          });
       }
 
-      if (currentStorageMode === 'ONLINE_CLOUD') {
-        // 2. Enqueue to GAS offline queue & webhook
+      if (currentStorageMode === 'ONLINE_CLOUD' && !IS_DEMO_SANDBOX && getGasWebhookUrl()) {
+        // 3. Optional GAS webhook sync if configured
         pushTransactionToGAS({
-          receiptNumber: newSale.receipt_number,
+          receiptNumber: newSale.receipt_number || newSale.transaction_id,
           shiftId: payload.shiftId,
-          terminalId: payload.terminalId || activeTerminalId,
+          terminalId: resolvedTerminalId,
           stationCode: resolvedStationCode,
           cashierName: newSale.cashier_name,
           customerId: payload.customerId,
@@ -7209,20 +7322,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         for (const item of payload.items) {
           const delta = -((item.quantity || 0) * (item.conversionFactor || 1));
-          const movementId = `SM-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-
-          pushStockMovementToSupabase({
-            id: movementId,
-            productId: item.product.id,
-            sku: item.product.sku || item.product.id,
-            productName: item.product.name,
-            deltaQty: delta,
-            movementType: 'SALE',
-            referenceId: newSale.receipt_number,
-            notes: `POS Sale Atomic RPC (${resolvedStationCode})`,
-            createdBy: newSale.cashier_name,
-          }).catch(() => {});
-
+          const movementId = generateTransactionUUID();
           pushStockMovementToGAS({
             id: movementId,
             productId: item.product.id,
@@ -7235,25 +7335,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             createdBy: newSale.cashier_name,
           }).catch(() => {});
         }
-
-        // Trigger Atomic Supabase RPC transaction processing (non-blocking)
-        pushTransactionAtomicRpc({
-          receiptNumber: newSale.receipt_number,
-          shiftId: payload.shiftId,
-          terminalId: payload.terminalId || activeTerminalId,
-          stationCode: resolvedStationCode,
-          cashierName: newSale.cashier_name,
-          customerId: payload.customerId,
-          customerName: payload.customerName,
-          items: payload.items,
-          total: payload.total,
-          paymentMethod: newSale.payment_method,
-          cashTendered: payload.cashTendered,
-          changeDue: payload.changeDue,
-        }).catch(() => {});
       }
 
       setGasOfflineQueueCount(getGasOfflineQueue().length);
+      setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
 
       return newSale;
     },
@@ -8626,7 +8711,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...newMutation,
       tx_uuid: generateTxUuid()
     });
-  }, []);
+
+    if (delta !== 0 && !IS_DEMO_SANDBOX && dualBackendSync.getStorageMode() !== 'LOCAL_ONLY' && targetProdId) {
+      const storedCfg = dualBackendSync.getConfig();
+      const resolvedSb = resolveSupabaseCredentials({
+        supabaseUrl: storedCfg.supabaseUrl,
+        supabaseAnonKey: storedCfg.supabaseAnonKey,
+      });
+      if (resolvedSb.configured) {
+        recordAtomicStockMovement(
+          {
+            id: generateTransactionUUID(),
+            tenantId: resolveActiveTenantId(businessProfileRef.current),
+            terminalId: activeTerminalId || 'POS-01',
+            productId: targetProdId,
+            sku: existingProd?.sku || existingProd?.barcode || targetProdId,
+            productName: existingProd?.name || mutation.product_name,
+            qtyDelta: delta,
+            movementType: delta > 0 ? 'RESTOCK' : 'ADJUSTMENT',
+            referenceId: mutation.reference_no,
+            notes: mutation.notes,
+            createdBy: mutation.operator || 'Gudang',
+          },
+          {
+            supabaseUrl: resolvedSb.supabaseUrl,
+            supabaseAnonKey: resolvedSb.supabaseAnonKey,
+          }
+        ).catch(() => {});
+      }
+    }
+  }, [activeTerminalId]);
 
   const adjustStock = useCallback(
     (productId: string, newStock: number, reason: string = 'Adjustment Stok Fisik') => {
@@ -8661,6 +8775,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setStockMutations((m) => [mutation, ...m]);
         dualBackendSync.enqueue('PRODUCT_UPSERT', 'UPSERT', { ...updated, tx_uuid: generateTxUuid() });
 
+        if (delta !== 0 && !IS_DEMO_SANDBOX && dualBackendSync.getStorageMode() !== 'LOCAL_ONLY') {
+          const storedCfg = dualBackendSync.getConfig();
+          const resolvedSb = resolveSupabaseCredentials({
+            supabaseUrl: storedCfg.supabaseUrl,
+            supabaseAnonKey: storedCfg.supabaseAnonKey,
+          });
+          if (resolvedSb.configured) {
+            recordAtomicStockMovement(
+              {
+                id: generateTransactionUUID(),
+                tenantId: resolveActiveTenantId(businessProfileRef.current),
+                terminalId: activeTerminalId || 'POS-01',
+                productId: existingProd.id,
+                sku: existingProd.sku || existingProd.barcode || existingProd.id,
+                productName: existingProd.name,
+                qtyDelta: delta,
+                movementType: 'ADJUSTMENT',
+                referenceId: mutation.reference_no,
+                notes: reason,
+                createdBy: currentUser?.name || 'Petugas Gudang',
+              },
+              {
+                supabaseUrl: resolvedSb.supabaseUrl,
+                supabaseAnonKey: resolvedSb.supabaseAnonKey,
+              }
+            ).catch(() => {});
+          }
+        }
+
         const unitCost = Number(existingProd.cost_price || existingProd.costPrice || existingProd.price || 0);
         const adjNominal = Math.abs(delta) * unitCost;
         appendAudit(
@@ -8676,7 +8819,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         );
       }
     },
-    [currentUser, appendAudit]
+    [currentUser, activeTerminalId, appendAudit]
   );
 
   const processStockOpnameAdjustment = useCallback(
@@ -11260,7 +11403,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             clearGasOfflineQueue();
           }
           setGasOfflineQueueCount(getGasOfflineQueue().length);
-          setSupabaseOfflineQueueCount(getSupabaseOfflineQueue().length);
+          setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
           dualBackendSync.markSyncSuccess(nowIso);
           showToast(result.message, 'success');
           appendAudit('CLOUD_SYNC_SUCCESS', 'INTEGRATION', result.message, {
@@ -11589,7 +11732,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const syncOfflineTransactions = useCallback(async () => {
     try {
+      if (IS_DEMO_SANDBOX) {
+        return { success: true, syncedCount: 0, message: 'Mode Demo Sandbox aktif.' };
+      }
+
       const pendingCount = (sales || []).filter((s) => s.syncStatus === 'PENDING_SYNC').length;
+      const storedCfg = dualBackendSync.getConfig();
+      const resolvedSb = resolveSupabaseCredentials({
+        supabaseUrl: storedCfg.supabaseUrl,
+        supabaseAnonKey: storedCfg.supabaseAnonKey,
+      });
+
+      if (resolvedSb.configured && resolvedSb.supabaseAnonKey) {
+        const sbCreds = {
+          supabaseUrl: resolvedSb.supabaseUrl,
+          supabaseAnonKey: resolvedSb.supabaseAnonKey,
+        };
+        const txFlush = await syncOfflineTxQueueToSupabase(sbCreds);
+        const extraQueueSynced = await syncOfflineQueueToSupabase(sbCreds, { skipTxQueue: true });
+        const totalSbSynced = txFlush.syncedCount + extraQueueSynced;
+
+        if (txFlush.syncedCount > 0) {
+          const syncedIdSet = new Set(txFlush.syncedTxIds);
+          const syncedReceiptSet = new Set(txFlush.syncedReceiptNumbers);
+          setSales((prev) =>
+            prev.map((s) =>
+              syncedIdSet.has(s.transaction_id) ||
+              (s.receipt_number && syncedReceiptSet.has(s.receipt_number))
+                ? { ...s, syncStatus: 'SYNCED' }
+                : s
+            )
+          );
+        }
+
+        if (getGasWebhookUrl()) {
+          await syncOfflineQueueToGAS();
+        }
+        await dualBackendSync.processQueue();
+        setGasOfflineQueueCount(getGasOfflineQueue().length);
+        setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
+
+        if (totalSbSynced > 0) {
+          dualBackendSync.markSyncSuccess();
+          const msg = `Berhasil menyinkronkan ${totalSbSynced} transaksi/mutasi offline (jacs_offline_tx_queue) ke Supabase.`;
+          showToast(msg, 'success');
+          return { success: true, syncedCount: totalSbSynced, message: msg };
+        }
+        return {
+          success: true,
+          syncedCount: 0,
+          message: 'Tidak ada antrean transaksi offline yang tertunda.',
+        };
+      }
+
       const cloudRes = await executeCloudSync();
       if (!cloudRes.success) {
         return {
@@ -12098,7 +12293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleOnline = () => {
-      showToast('Koneksi internet pulih! Melakukan auto-flush antrean offline (PENDING_SYNC)...', 'info');
+      showToast('Koneksi internet pulih! Melakukan auto-flush antrean offline (jacs_offline_tx_queue)...', 'info');
       syncOfflineTransactions();
     };
     const handleOffline = () => {
@@ -12111,6 +12306,107 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener('offline', handleOffline);
     };
   }, [syncOfflineTransactions, showToast]);
+
+  // =========================================================================
+  // SUPABASE REALTIME MULTI-KASIR LISTENER (channel: 'erp-realtime')
+  // =========================================================================
+  useEffect(() => {
+    if (typeof window === 'undefined' || IS_DEMO_SANDBOX) return;
+    if (storageOperationalMode === 'LOCAL_ONLY') return;
+
+    const storedCfg = dualBackendSync.getConfig();
+    const resolvedSb = resolveSupabaseCredentials({
+      supabaseUrl: storedCfg.supabaseUrl,
+      supabaseAnonKey: storedCfg.supabaseAnonKey,
+    });
+    if (!resolvedSb.configured || !resolvedSb.supabaseAnonKey) return;
+
+    const sbCreds = {
+      supabaseUrl: resolvedSb.supabaseUrl,
+      supabaseAnonKey: resolvedSb.supabaseAnonKey,
+    };
+    const activeTenantId = resolveActiveTenantId(businessProfile);
+
+    // Flush jacs_offline_tx_queue secara otomatis jika online saat terminal aktif
+    if (navigator.onLine && getTotalSupabaseOfflineQueueCount() > 0) {
+      syncOfflineTxQueueToSupabase(sbCreds)
+        .then((res) => {
+          if (res.syncedCount > 0) {
+            const syncedIdSet = new Set(res.syncedTxIds);
+            const syncedReceiptSet = new Set(res.syncedReceiptNumbers);
+            setSales((prev) =>
+              prev.map((s) =>
+                syncedIdSet.has(s.transaction_id) ||
+                (s.receipt_number && syncedReceiptSet.has(s.receipt_number))
+                  ? { ...s, syncStatus: 'SYNCED' }
+                  : s
+              )
+            );
+          }
+          setSupabaseOfflineQueueCount(getTotalSupabaseOfflineQueueCount());
+        })
+        .catch(() => {});
+    }
+
+    const unsubscribe = subscribeToErpRealtime(
+      {
+        tenantId: activeTenantId,
+        terminalId: activeTerminalId,
+        onProductChange: ({ product }) => {
+          if (!product?.id) return;
+          setProducts((prev) => {
+            const exists = prev.some((p) => p.id === product.id);
+            const nextList = exists
+              ? prev.map((p) =>
+                  p.id === product.id
+                    ? {
+                        ...p,
+                        stock: typeof product.stock === 'number' ? product.stock : p.stock,
+                        name: product.name || p.name,
+                        sell_price:
+                          typeof product.sell_price === 'number' && product.sell_price > 0
+                            ? product.sell_price
+                            : p.sell_price,
+                        sellingPrice:
+                          typeof product.sellingPrice === 'number' && product.sellingPrice > 0
+                            ? product.sellingPrice
+                            : p.sellingPrice,
+                        status: product.status || p.status,
+                      }
+                    : p
+                )
+              : [product as Product, ...prev];
+            prevStockFingerprintRef.current = nextList.map((p) => `${p.id}:${p.stock}`).join(';');
+            return nextList;
+          });
+        },
+        onTransactionChange: ({ sale }) => {
+          if (!sale?.transaction_id && !sale?.receipt_number) return;
+          setSales((prev) => {
+            const existingIndex = prev.findIndex(
+              (s) =>
+                s.transaction_id === sale.transaction_id ||
+                (sale.receipt_number && s.receipt_number === sale.receipt_number)
+            );
+            if (existingIndex >= 0) {
+              const updated = [...prev];
+              updated[existingIndex] = {
+                ...updated[existingIndex],
+                syncStatus: 'SYNCED',
+              };
+              return updated;
+            }
+            return [sale, ...prev];
+          });
+        },
+      },
+      sbCreds
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [businessProfile, activeTerminalId, storageOperationalMode, activeBackendProvider]);
   const setActiveNeonCard = useCallback((moduleKey: string, cardId?: string) => {
     setActiveNeonCardsState((prev) => ({ ...prev, [moduleKey]: cardId || moduleKey }));
   }, []);
